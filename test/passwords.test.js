@@ -13,7 +13,13 @@ const { launch } = require('./drive');
 const TOOLS = require('../src/shared/tools');
 
 let b;
-test.before(async () => { b = await launch({ LOUI_TEST_SAFESTORAGE: 'fake' }); });
+test.before(async () => {
+  b = await launch({ LOUI_TEST_SAFESTORAGE: 'fake' });
+  // Guardrails would (rightly) stop a session's evaluate on a page with a
+  // password field and wait for the user; these tests check the password
+  // manager's own isolation, so they turn guardrails off.
+  await b.ui('guard:set', { on: false });
+});
 test.after(async () => { await b?.close(); });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
