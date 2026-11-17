@@ -107,7 +107,7 @@ class Tabs extends EventEmitter {
     wc.on('did-start-loading', () => { tab.loading = true; changed(); });
     wc.on('did-stop-loading', () => {
       tab.loading = false;
-      setTimeout(() => this.tuck(tab), 150);
+      this.tuckWhenDrawn(tab);
       changed();
     });
     wc.on('did-start-navigation', (e) => {
@@ -196,6 +196,18 @@ class Tabs extends EventEmitter {
     this.place(tab);
     clearTimeout(tab.tuckTimer);
     tab.tuckTimer = setTimeout(() => this.tuck(tab), 8000); // a page that never finishes loading
+  }
+
+  // Tucks a peeking tab away once its page has drawn a frame while in sight
+  // (two animation frames have passed), or after 3 s if it never does. A
+  // fixed delay was not enough on slow machines: the tab went under before
+  // drawing anything, and then clicks sent to it went nowhere.
+  tuckWhenDrawn(tab) {
+    if (!tab.peeking || tab.wc.isDestroyed()) return;
+    const drawn = tab.wc.executeJavaScript(
+      'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))', true,
+    ).catch(() => false);
+    Promise.race([drawn, new Promise((r) => setTimeout(r, 3000))]).then(() => this.tuck(tab));
   }
 
   tuck(tab) {

@@ -35,8 +35,17 @@ async function launch(env = {}, { home: reuse } = {}) {
     server.close();
     throw new Error('Loui did not start (no control socket). Run with LOUI_DEBUG=1 to see why.');
   }
-  const conn = net.connect(sock);
-  await new Promise((ok, no) => conn.once('connect', ok).once('error', no));
+  // The socket file appears a moment before the app accepts connections on
+  // it, so a refused connection is retried for a while.
+  let conn;
+  for (let tries = 0; ; tries++) {
+    conn = net.connect(sock);
+    const error = await new Promise((ok) => conn.once('connect', () => ok(null)).once('error', ok));
+    if (!error) break;
+    conn.destroy();
+    if (tries >= 50 || error.code !== 'ECONNREFUSED') throw error;
+    await new Promise((r) => setTimeout(r, 100));
+  }
   conn.setEncoding('utf8');
   const waiting = new Map();
   let buffer = '', seq = 0;
@@ -82,7 +91,10 @@ async function launch(env = {}, { home: reuse } = {}) {
       await exited;
       clearTimeout(timer);
     }
-    if (!reuse) fs.rmSync(home, { recursive: true, force: true });
+    // Chromium's helper processes can still be closing files for a moment.
+    if (!reuse) {
+      try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+    }
   };
   return { call, text, as, ui, state, close, base, home };
 }
