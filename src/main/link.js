@@ -64,7 +64,11 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
     fs.writeFileSync(idFile, JSON.stringify(device));
   }
   const wsl = process.platform === 'linux' && /microsoft/i.test(os.release());
-  device = { id: device.id, name: os.hostname() + (wsl ? ' (WSL)' : ''), platform: process.platform, version };
+  // The name Claude sessions ask for this browser by: the computer's, unless
+  // the user gave it another (Settings › Claude), kept beside the id.
+  const hostName = os.hostname() + (wsl ? ' (WSL)' : '');
+  const tidy = (name) => String(name ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '').trim().slice(0, 64);
+  device = { id: device.id, name: tidy(device.name) || hostName, platform: process.platform, version };
 
   const mine = new Set(); // sessions that came through the relay
   let ws = null;
@@ -160,9 +164,19 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
     connect();
   }
 
+  // An empty name goes back to the computer's. The relay follows at the next hello.
+  function rename(name) {
+    const next = tidy(name) || hostName;
+    if (next === device.name) return;
+    device.name = next;
+    fs.writeFileSync(idFile, JSON.stringify(next === hostName ? { id: device.id } : { id: device.id, name: next }));
+    if (ws) connect();
+    else changed();
+  }
+
   return {
-    connect, configure,
-    state: () => ({ url: config.url || '', hasKey: !!config.key, on: config.on !== false, status, detail, device: device.name }),
+    connect, configure, rename,
+    state: () => ({ url: config.url || '', hasKey: !!config.key, on: config.on !== false, status, detail, device: device.name, hostName }),
   };
 }
 

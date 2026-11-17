@@ -670,10 +670,11 @@ const SECTIONS = [
             help: 'How the relay and this browser stand.',
             value: (s) => relayWords(s.claude.relay),
           }),
-          info({
-            id: 'relay-device', label: 'This device',
-            help: 'The name Claude sessions see for this browser, taken from this computer\'s name.',
-            value: (s) => s.claude.relay.device,
+          entry({
+            id: 'relay-device', label: 'This browser\'s name on the relay',
+            help: 'What to call this browser when you tell Claude where to work ("on FPMoss"). Empty goes back to this computer\'s name.',
+            get: (s) => s.claude.relay.device, set: (v) => ['relay:name', v],
+            kept: (v) => v.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '').trim().slice(0, 64) || state.claude.relay.hostName, // as link.js keeps it
           }),
           list({
             id: 'connectors', label: 'Let in without asking',
