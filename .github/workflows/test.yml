@@ -18,5 +18,5 @@ jobs:
           cache: npm
       - run: npm ci
       # Fetch Electron now, so the first test file doesn't pay for the download.
-      - run: xvfb-run -a npx electron --version
+      - run: node -e "console.log(require('electron'))"
       - run: npm test
