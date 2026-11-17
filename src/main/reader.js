@@ -310,13 +310,15 @@ function createReader({ tabs, ses, settings, save, changed }) {
   function setPref(query) {
     const p = prefs();
     const [key, value] = query.split('=');
-    if (key === 'size') p.size = Math.max(0, Math.min(SIZES.length - 1, p.size + (value === 'up' ? 1 : -1)));
+    // size=up and size=down from the page; size=<n> from the Settings window.
+    if (key === 'size') p.size = Math.max(0, Math.min(SIZES.length - 1, /^\d+$/.test(value) ? Number(value) : p.size + (value === 'up' ? 1 : -1)));
     else if (key === 'width' && WIDTHS[value]) p.width = value;
     else if (key === 'face' && FACES[value]) p.face = value;
     else return;
     settings.reader = p;
     save();
     restyle();
+    changed();
   }
 
   // Open reader pages take the new settings at once.
@@ -383,7 +385,8 @@ function createReader({ tabs, ses, settings, save, changed }) {
   }
 
   return {
-    state, toggle, open, leave, prefs, attach,
+    state, toggle, open, leave, prefs, attach, setPref,
+    choices: { sizes: SIZES, widths: Object.keys(WIDTHS), faces: Object.keys(FACES) },
     probes: {
       'reader:toggle': () => toggle(),
       'reader:set': (q) => { setPref(q); return prefs(); },

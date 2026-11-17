@@ -95,7 +95,8 @@ const WHY = {
   test: 'Encryption is turned off for this test run.',
 };
 
-function createPasswords({ tabs, home, send, changed }) {
+// settings, saveSettings: settings.json; "offerPasswords": false stops the offers to save.
+function createPasswords({ tabs, home, send, changed, settings = {}, saveSettings = () => {} }) {
   const file = path.join(home, 'passwords.json');
   const cipher = createCipher();
   let logins = []; // { id, origin, username, password (both encrypted), created, updated, used }
@@ -203,6 +204,7 @@ function createPasswords({ tabs, home, send, changed }) {
     const n = watched.get(tab.id);
     const a = n?.attempt;
     if (n) n.attempt = null;
+    if (settings.offerPasswords === false) return; // filling still works
     if (!a || Date.now() - a.at > FRESH_MS || !yours(tab) || never.includes(a.origin)) return;
     const saved = forOrigin(a.origin).map((l) => ({ id: l.id, username: open(l.username), password: open(l.password) }));
     let same = saved.find((l) => l.username === a.username);
@@ -416,9 +418,10 @@ function createPasswords({ tabs, home, send, changed }) {
     return { added, skipped };
   }
 
-  async function chooseImport() {
+  // parent: the window that asked, if not the main one (the Settings window).
+  async function chooseImport(parent = tabs.win) {
     if (!cipher.available) return;
-    const { canceled, filePaths } = await dialog.showOpenDialog(tabs.win, {
+    const { canceled, filePaths } = await dialog.showOpenDialog(parent, {
       title: 'Import passwords',
       buttonLabel: 'Import',
       filters: [{ name: 'Passwords file', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }],
@@ -435,10 +438,10 @@ function createPasswords({ tabs, home, send, changed }) {
     } catch (e) {
       message = `Couldn't import that file: ${e.message}`;
     }
-    const { response } = await dialog.showMessageBox(tabs.win, { type: done ? 'warning' : 'info', message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 });
+    const { response } = await dialog.showMessageBox(parent, { type: done ? 'warning' : 'info', message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 });
     if (done && response === 0) {
       try { fs.rmSync(filePaths[0]); } catch (e) {
-        dialog.showMessageBox(tabs.win, { type: 'error', message: `Couldn't delete it: ${e.message}`, buttons: ['OK'] });
+        dialog.showMessageBox(parent, { type: 'error', message: `Couldn't delete it: ${e.message}`, buttons: ['OK'] });
       }
     }
   }
@@ -472,6 +475,19 @@ function createPasswords({ tabs, home, send, changed }) {
     };
   }
 
+  // The Settings window: whether saving is offered, and what it lists (no
+  // usernames or passwords go there).
+  function setOffer(on) {
+    settings.offerPasswords = !!on;
+    saveSettings();
+    if (!on) offers.length = 0; // a strip on show goes
+    changed();
+  }
+  const prefs = () => ({
+    offer: settings.offerPasswords !== false, available: cipher.available, why: WHY[cipher.why] || '',
+    saved: logins.length, never: never.map((origin) => ({ origin, site: siteOf(origin) })),
+  });
+
   // For the File menu in main.js.
   const fileMenu = () => [{ label: 'Passwords', click: showPanel }];
 
@@ -486,7 +502,7 @@ function createPasswords({ tabs, home, send, changed }) {
     'passwords:reveal-now': (id) => open(byId(id)?.password || ''),
   };
 
-  return { state, handle, probes, fileMenu };
+  return { state, handle, probes, fileMenu, setOffer, prefs, showPanel, unnever, chooseImport };
 }
 
 // RFC 4180 CSV: quoted fields may hold commas, quotes ("") and line breaks.

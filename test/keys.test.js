@@ -83,13 +83,13 @@ test('Ctrl+J puts the keyboard in Downloads, whose × and Esc close it', async (
   await pageHasKeys();
 });
 
-test('Settings, the relay form and site permissions are panels like History: × at the top, Esc closes, one at a time', async () => {
-  await menuKey('CmdOrCtrl+,');
-  await until(async () => !(await hidden('settings')), 'Ctrl+, to open Settings');
-  assert.equal(await focused(), 'search-engine');
+test('the relay form and site permissions are panels like History: × at the top, Esc closes, one at a time', async () => {
+  await chrome("document.getElementById('link').click()");
+  await until(async () => !(await hidden('relay')), 'the relay form');
+  assert.equal(await focused(), 'relay-url');
   const layout = await chrome(`(() => {
     const box = (n) => n.getBoundingClientRect();
-    const panel = document.getElementById('settings'), close = document.getElementById('settings-close');
+    const panel = document.getElementById('relay'), close = document.getElementById('relay-close');
     return {
       claude: getComputedStyle(document.getElementById('panel')).display,
       tall: box(panel).height > innerHeight - 4,
@@ -100,7 +100,7 @@ test('Settings, the relay form and site permissions are panels like History: × 
   })()`);
   assert.deepEqual(layout, { claude: 'none', tall: true, closeAtTop: true, closeIsIcon: true, words: false });
   await press('Escape');
-  await until(() => hidden('settings'), 'Esc to close Settings');
+  await until(() => hidden('relay'), 'Esc to close the relay form');
   await pageHasKeys();
   assert.notEqual(await chrome("getComputedStyle(document.getElementById('panel')).display"), 'none', 'the Claude panel is back');
 
@@ -110,10 +110,8 @@ test('Settings, the relay form and site permissions are panels like History: × 
   assert.equal(await focused(), 'relay-url');
   await chrome('showPermissions(true)');
   assert.deepEqual([await hidden('relay'), await hidden('perms')], [true, false]);
-  await chrome('showSettings(true)');
-  assert.deepEqual([await hidden('perms'), await hidden('settings')], [true, false]);
   await chrome("document.getElementById('history-toggle').click()");
-  await until(() => hidden('settings'), 'History to take its place');
+  await until(() => hidden('perms'), 'History to take its place');
   assert.equal(await hidden('history'), false);
   await chrome("document.getElementById('link').click()");
   await until(() => hidden('history'), 'the relay form to take History\'s place');
@@ -235,8 +233,8 @@ test('the application menu is grouped, and its toggles are checkboxes that follo
   await menuKey('Alt+Shift+P');
   await until(async () => !(await b.ui('menu:item', 'pin-tab')).checked, 'and unticked');
   await menuKey('F11');
-  await until(async () => !(await hidden('settings')), 'Ctrl+, to have opened Settings');
-  await chrome('showSettings(false)');
+  await until(async () => (await b.ui('settings:state')).open, 'Ctrl+, to have opened Settings, in its own window');
+  await b.ui('settings:close');
 
   const item = (id) => b.ui('menu:item', id);
   assert.equal((await item('claude-panel')).checked, true);

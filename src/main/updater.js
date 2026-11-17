@@ -28,7 +28,8 @@ function createUpdater({ changed }) {
   }
 
   // status: idle | checking | downloading | ready | latest | failed
-  let state = { status: 'idle', version: null, percent: 0, error: '' };
+  // checked: when the last check ended (the Settings window says how it went).
+  let state = { status: 'idle', version: null, percent: 0, error: '', checked: 0 };
   const set = (next) => {
     state = { ...state, ...next };
     changed();
@@ -37,12 +38,12 @@ function createUpdater({ changed }) {
   autoUpdater.on('checking-for-update', () => {
     if (state.status !== 'ready') set({ status: 'checking' });
   });
-  autoUpdater.on('update-not-available', () => set({ status: 'latest' }));
+  autoUpdater.on('update-not-available', () => set({ status: 'latest', checked: Date.now() }));
   autoUpdater.on('update-available', (info) => set({ status: 'downloading', version: info.version, percent: 0 }));
   autoUpdater.on('download-progress', (p) => set({ percent: Math.round(p.percent) }));
   autoUpdater.on('update-downloaded', (info) => set({ status: 'ready', version: info.version }));
   autoUpdater.on('error', (e) => {
-    if (state.status !== 'ready') set({ status: 'failed', error: e?.message || String(e) });
+    if (state.status !== 'ready') set({ status: 'failed', error: e?.message || String(e), checked: Date.now() });
   });
 
   // Errors arrive through the 'error' event; the promise only repeats them.

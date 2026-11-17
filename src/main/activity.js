@@ -494,6 +494,14 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
     tell();
   }
 
+  // The most the whole log may take on disk, in MB.
+  function setMax(mb) {
+    if (!Number.isFinite(mb) || mb < 1) return;
+    settings.activityMaxMB = Math.round(mb);
+    save();
+    prune();
+  }
+
   // Unwritten changes, at quit. Logs of sessions still running stay
   // unfinished and are marked as cut short at the next start.
   function flush() {
@@ -506,7 +514,8 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
   }
 
   return {
-    open, end, step, consent, guard, list, get, remove: (id) => ready.then(() => remove(id)), clear, keep, flush, prune,
+    open, end, step, consent, guard, list, get, remove: (id) => ready.then(() => remove(id)), clear, keep, flush, prune, setMax,
+    prefs: () => ({ days: keepDays(), maxMB: maxBytes() / 1048576 }),
     probes: {
       'activity:list': () => list(),
       'activity:get': (arg) => (arg?.id ? get(arg.id, arg.have) : get(arg)),

@@ -24,7 +24,6 @@ const SEND = new Set([
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
   'show-permissions', 'suggestions', 'suggest', 'suggest:pick', 'history', 'history:changed', 'show-history',
-  'show-settings',
   'bookmarks', 'passwords',
   'activity', 'show-activity',
   'group:end',

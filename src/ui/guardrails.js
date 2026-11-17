@@ -1,6 +1,6 @@
 // Guardrails in the window chrome (see src/main/guardrails.js): the strip that
-// asks before Claude pays, sends or deletes, and its part of the Settings
-// sheet. Uses $ and el from ui.js. The session's and site's names are set as
+// asks before Claude pays, sends or deletes (its settings are in the Settings
+// window). Uses $ and el from ui.js. The session's and site's names are set as
 // text; the control's name in "what" comes from the page and is quoted as such.
 let guardId = null;
 let guardKey = null;
@@ -45,45 +45,4 @@ $('guard-always').onclick = () => answerGuard('always');
 $('guard-block').onclick = () => answerGuard('block');
 $('guard-show').onclick = () => guardId != null && loui.send('guard:show', guardId);
 
-// A list in the Settings sheet: one row per item, with a button that undoes it.
-function guardRows(list, empty, row) {
-  return list.length ? list.map((item) => {
-    const [label, button, aria, send] = row(item);
-    const li = el('li');
-    const undo = el('button', 'quiet', button);
-    undo.type = 'button';
-    undo.setAttribute('aria-label', aria);
-    undo.onclick = send;
-    li.append(...label, undo);
-    return li;
-  }) : [el('li', 'none', empty)];
-}
-
-function drawGuardSettings(s) {
-  $('guard-on').checked = s.on;
-  $('guard-sites').replaceChildren(...guardRows(s.sites, 'None.', (site) => [
-    [el('span', 'site', site)], 'Remove', `Stop asking before opening ${site}`,
-    () => loui.send('guard:site-remove', site),
-  ]));
-  $('guard-remembered').replaceChildren(...guardRows(s.always, 'Nothing yet. Choose Always on this site when Loui asks.', (a) => [
-    [el('span', 'site', a.site), el('span', 'kind', a.name)], 'Forget', `Ask again about ${a.name.toLowerCase()} on ${a.site}`,
-    () => loui.send('guard:forget', { origin: a.origin, kind: a.kind }),
-  ]));
-  $('guard-trusted-title').hidden = $('guard-trusted').hidden = !s.trusted.length;
-  $('guard-trusted').replaceChildren(...guardRows(s.trusted, '', (t) => [
-    [el('span', 'site', t.label)], 'Stop trusting', `Ask again before ${t.label} acts`,
-    () => loui.send('guard:untrust', t.id),
-  ]));
-}
-
-$('guard-on').onchange = () => loui.send('guard:set', { on: $('guard-on').checked });
-$('guard-site-add').onsubmit = (e) => {
-  e.preventDefault();
-  loui.send('guard:site-add', $('guard-site').value);
-  $('guard-site').value = '';
-};
-
-loui.on('state', (next) => {
-  drawGuard(next.guard);
-  if (next.guardrails) drawGuardSettings(next.guardrails);
-});
+loui.on('state', (next) => drawGuard(next.guard));

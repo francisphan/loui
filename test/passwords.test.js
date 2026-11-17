@@ -138,6 +138,27 @@ test('Never for this site stops the offers, until it is removed from the list', 
   assert.deepEqual((await list()).never, []);
 });
 
+test('with "Offer to save passwords" off in Settings nothing is offered, and saved passwords still fill', async () => {
+  await b.ui('settings:act', { what: 'passwords:offer', arg: false });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(b.home, 'settings.json'), 'utf8')).offerPasswords, false);
+  const other = b.base.replace('127.0.0.1', 'localhost');
+  await visit(`${other}/login.html`, 'Sign in');
+  secrets.add('dee@example.com').add('unoffered-Secret-9');
+  await signIn('dee@example.com', 'unoffered-Secret-9');
+  await until(async () => (await onScreen()).title === 'Welcome', 'the welcome page');
+  await noOffer();
+  // A changed password for a saved login is not offered either.
+  await visit(`${b.base}/login.html`, 'Sign in');
+  secrets.add('unoffered-Secret-10');
+  await signIn('ana@example.com', 'unoffered-Secret-10');
+  await until(async () => (await onScreen()).title === 'Welcome', 'the welcome page');
+  await noOffer();
+  await visit(`${b.base}/login.html`, 'Sign in');
+  assert.equal((await pw()).key, 1, 'the key is still there to fill with');
+  await b.ui('settings:act', { what: 'passwords:offer', arg: true });
+  assert.equal((await b.ui('settings:state')).state.passwords.offer, true);
+});
+
 test('the key shows where there are saved logins, and fills only when an account is chosen', async () => {
   await visit(`${b.base.replace('127.0.0.1', 'localhost')}/login.html`, 'Sign in');
   assert.equal((await pw()).key, 0, 'no key on a site with nothing saved');

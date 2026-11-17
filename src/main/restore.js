@@ -21,7 +21,8 @@ const MAX_CLOSED = 25;
 
 // openWindow(): opens another normal window, with no tab of its own, for a
 // second saved window and beyond (see main.js).
-function createRestore({ tabs, file, openWindow }) {
+// settings: settings.json; "startup": "new" starts with a new tab instead of last time's.
+function createRestore({ tabs, file, openWindow, settings = {} }) {
   const closed = []; // most recent last
   const pending = new WeakMap(); // tab -> history it was opened with, until the page commits
   let timer = null, last = '', writing = Promise.resolve(), stopped = false;
@@ -124,6 +125,7 @@ function createRestore({ tabs, file, openWindow }) {
     // Opens the windows saved last time: the first one's tabs into first
     // (already open), each other one in a new window. False if there were none.
     reopenSaved(first) {
+      if (settings.startup === 'new') return false;
       let saved;
       try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return false; }
       // Version 1 kept a single window: { active, tabs }.

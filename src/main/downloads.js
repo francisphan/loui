@@ -8,7 +8,7 @@
 // Claude visits cannot get a downloaded file run.
 const fs = require('fs');
 const path = require('path');
-const { app, shell } = require('electron');
+const { app, shell, dialog } = require('electron');
 const { YOU } = require('./tabs');
 
 const KEEP = 50; // finished downloads remembered across restarts
@@ -41,6 +41,7 @@ function createDownloads({ ses, tabs, home, changed }) {
   const listFile = path.join(home, 'downloads.json');
   const saved = (() => { try { return JSON.parse(fs.readFileSync(listFile, 'utf8')); } catch { return {}; } })();
   let ask = !!saved.ask;
+  let chosen = typeof saved.folder === 'string' ? saved.folder : ''; // the folder the user picked, if any
   // Newest first. A download that was running when Loui quit cannot be resumed.
   let items = (Array.isArray(saved.items) ? saved.items : []).map((d) =>
     (d.state === 'progressing' || d.state === 'paused' ? { ...d, state: 'interrupted' } : d));
@@ -59,12 +60,12 @@ function createDownloads({ ses, tabs, home, changed }) {
   }
   const origin = new Map(); // id -> the session a private window's download came from, to try it again there
 
-  const folder = () => process.env.LOUI_DOWNLOADS || app.getPath('downloads');
+  const folder = () => chosen || process.env.LOUI_DOWNLOADS || app.getPath('downloads');
   // A private window's downloads are listed while it is open, never written
   // down; nor are blocked ones, which belong to a tab as it is now.
   const save = () => {
     try {
-      fs.writeFileSync(listFile, JSON.stringify({ ask, items: items.filter((d) => !d.private && d.state !== 'blocked').slice(0, KEEP) }, null, 2));
+      fs.writeFileSync(listFile, JSON.stringify({ ask, folder: chosen || undefined, items: items.filter((d) => !d.private && d.state !== 'blocked').slice(0, KEEP) }, null, 2));
     } catch {}
   };
 
@@ -173,6 +174,22 @@ function createDownloads({ ses, tabs, home, changed }) {
     changed();
   }
 
+  // Where files are saved from now on (the Settings window). Downloads in
+  // progress finish where they started.
+  function setFolder(dir) {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir)) return;
+    chosen = dir;
+    save();
+    changed();
+  }
+  async function chooseFolder(parent) {
+    const { canceled, filePaths } = await dialog.showOpenDialog(parent, {
+      title: 'Save downloads in', defaultPath: folder(), buttonLabel: 'Use this folder',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (!canceled && filePaths[0]) setFolder(filePaths[0]);
+  }
+
   // Forget everything that has finished; downloads in progress stay.
   function clear() {
     items = items.filter((d) => running.has(d.id));
@@ -197,7 +214,7 @@ function createDownloads({ ses, tabs, home, changed }) {
     changed();
   }
 
-  return { state, act, setAsk, clear, attach, forgetPrivate };
+  return { state, act, setAsk, clear, attach, forgetPrivate, setFolder, chooseFolder, prefs: () => ({ ask, folder: folder() }) };
 }
 
 module.exports = { createDownloads };
