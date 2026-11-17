@@ -209,3 +209,63 @@ test('logs older than the setting, and the oldest past the size cap, are pruned'
   assert.equal((await list()).length, 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8')).activityDays, 0);
 });
+
+test('where the system can encrypt, logs and pictures are encrypted on disk', async () => {
+  const home2 = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-activity-enc-'));
+  const dir2 = path.join(home2, 'activity');
+  const env = { LOUI_TEST_SAFESTORAGE: 'fake' };
+  const sealed = (f) => fs.readFileSync(f).subarray(0, 6).toString() === 'LOUIA1';
+  // A log as an earlier version left it: plain, with a picture.
+  const start = Date.now() - 3600e3;
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('old-picture-bytes')]);
+  fs.mkdirSync(path.join(dir2, 'old'), { recursive: true });
+  fs.writeFileSync(path.join(dir2, 'old', '0.jpg'), jpeg);
+  fs.writeFileSync(path.join(dir2, 'old.json'), JSON.stringify({
+    id: 'old', session: 'old', label: 'Earlier session', source: 'code', start, end: start + 1000, ended: 'ended',
+    steps: [{ kind: 'tool', at: start, ms: 10, label: 'opening old.example', url: 'http://old.example/', thumb: '0.jpg' }],
+  }));
+  let e = await launch(env, { home: home2 });
+  const items = async () => (await e.ui('activity:list')).items;
+  try {
+    const old = await until(async () => (await items()).find((x) => x.label === 'Earlier session'), 'the earlier log');
+    assert.ok(sealed(path.join(dir2, 'old.json')) && sealed(path.join(dir2, 'old', '0.jpg')), 'encrypted where it lay');
+    const got = await e.ui('activity:get', old.id);
+    assert.equal(got.steps[0].url, 'http://old.example/');
+    assert.equal(got.steps[0].thumb, `data:image/jpeg;base64,${jpeg.toString('base64')}`);
+
+    const s = e.as('enc', 'Encrypted session');
+    await s.text('navigate', { url: e.base + '/second.html?kept-from-disk' });
+    const log = await until(async () => {
+      const it = (await items()).find((x) => x.label === 'Encrypted session');
+      const l = it && await e.ui('activity:get', it.id);
+      return l?.steps[0]?.thumb && l;
+    }, 'a picture of the step');
+    s.end();
+    await until(async () => (await items()).find((x) => x.label === 'Encrypted session')?.ended, 'the session to end');
+    await e.ui('activity:flush');
+    await sleep(700); // the last write
+    const raw = fs.readFileSync(path.join(dir2, `${log.id}.json`));
+    assert.ok(sealed(path.join(dir2, `${log.id}.json`)));
+    assert.ok(!raw.includes('kept-from-disk') && !raw.includes('Encrypted session'), 'nothing readable in the file');
+    for (const f of fs.readdirSync(path.join(dir2, log.id))) assert.ok(sealed(path.join(dir2, log.id, f)), `${f} is encrypted`);
+    assert.ok(fs.readFileSync(`${dir2}.key`, 'utf8').startsWith('t1:'), 'the key is itself encrypted');
+
+    // Read back after a restart.
+    await e.close();
+    e = await launch(env, { home: home2 });
+    const again = await e.ui('activity:get', log.id);
+    assert.match(again.steps[0].url, /kept-from-disk/);
+    assert.match(again.steps[0].thumb, /^data:image\/jpeg;base64,\/9j\//);
+
+    // A key that will not open (a profile copied from elsewhere): the logs
+    // under it cannot be read again, and are removed.
+    await e.close();
+    fs.writeFileSync(`${dir2}.key`, 'not a key');
+    e = await launch(env, { home: home2 });
+    assert.deepEqual(await items(), []);
+    assert.deepEqual(fs.readdirSync(dir2), []);
+  } finally {
+    await e.close();
+    fs.rmSync(home2, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+});
