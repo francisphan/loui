@@ -205,6 +205,8 @@ test("Claude sessions' tabs get no offers, no key and no fills, and no tool reac
   assert.equal((await pw()).offer, null, 'the offer went with the tab');
   const logs = await s.text('console_logs');
   assert.ok(!logs.includes('handed-Secret-3') && !logs.includes('loui-pw'), logs);
+  // The channel the page script reports on is not the page's to use.
+  assert.match(await s.text('evaluate', { code: 'typeof __louiReport + " " + typeof __louiPw' }), /^"?undefined undefined"?$/);
   s.end();
   await until(async () => !(await b.state()).groups.some((g) => g.id === 'pw-session'), 'the session to end');
 });
@@ -278,6 +280,28 @@ test('no password or username is anywhere in the profile in plain text', async (
   };
   walk(b.home);
   assert.deepEqual(found, []);
+});
+
+test('the relay key is kept encrypted, and one saved as plain text is rewritten', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relaykey-'));
+  const file = path.join(home, 'relay.json');
+  const raw = () => fs.readFileSync(file, 'utf8');
+  // As an earlier version left it.
+  fs.writeFileSync(file, JSON.stringify({ url: 'ws://127.0.0.1:9', key: 'plain-relay-Key-1', on: false }));
+  let r = await launch({ LOUI_TEST_SAFESTORAGE: 'fake' }, { home });
+  try {
+    await until(() => !raw().includes('plain-relay-Key-1') && /"keyEnc"/.test(raw()), 'the key to be rewritten');
+    assert.equal((await r.state()).link.hasKey, true);
+    await r.close();
+    r = await launch({ LOUI_TEST_SAFESTORAGE: 'fake' }, { home });
+    assert.equal((await r.state()).link.hasKey, true, 'read back after a restart');
+    await r.ui('relay:set', { url: 'ws://127.0.0.1:9', key: 'second-relay-Key-2', on: false });
+    assert.ok(!raw().includes('second-relay-Key-2'));
+    assert.equal(JSON.parse(raw()).url, 'ws://127.0.0.1:9');
+  } finally {
+    await r.close();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
 });
 
 test('without encryption, passwords stay off and nothing is written', async () => {

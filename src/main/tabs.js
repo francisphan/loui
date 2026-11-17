@@ -44,6 +44,7 @@
 // request, or whose state is being drawn (see as()), else the focused one.
 const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
 const { EventEmitter } = require('events');
+const path = require('path');
 const { requestRules } = require('./requests');
 const { searchFor } = require('./search');
 
@@ -320,7 +321,8 @@ class Tabs extends EventEmitter {
   build(tab) {
     const view = new WebContentsView({
       // Throttled in the background unless a Claude session works in it (see rest()).
-      webPreferences: { session: tab.ses, sandbox: true, contextIsolation: true },
+      // The preload gives the page itself nothing (see tab-preload.js).
+      webPreferences: { session: tab.ses, sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'tab-preload.js') },
     });
     view.setBackgroundColor('#ffffff');
     const wc = view.webContents;
@@ -369,7 +371,6 @@ class Tabs extends EventEmitter {
       // Electron passes one details object; older builds passed positional args.
       const d = e.message !== undefined ? e
         : { level: ['debug', 'info', 'warning', 'error'][old[0]], message: old[1], lineNumber: old[2], sourceId: old[3] };
-      if (String(d.message).startsWith('\u0001loui-pw ')) return; // passwords.js's page script reporting, never kept
       keep(tab.console, {
         level: d.level, text: d.message, source: d.sourceId, line: d.lineNumber, at: Date.now(),
       });

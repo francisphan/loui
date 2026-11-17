@@ -25,12 +25,11 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { safeStorage, Menu, clipboard, dialog, systemPreferences } = require('electron');
+const { safeStorage, Menu, clipboard, dialog, systemPreferences, ipcMain } = require('electron');
 const { YOU } = require('./tabs');
 
 const SCRIPT = fs.readFileSync(path.join(__dirname, '../page/passwords.js'), 'utf8');
-const WORLD = 4831; // src/page/lib.js has 4812
-const MARK = '\u0001loui-pw '; // see tabs.js: such console lines are never kept
+const WORLD = 4831; // src/page/lib.js has 4812; tab-preload.js names it too
 const MAX = 512;
 const FRESH_MS = 30000; // an attempt counts if the page moves on within this
 const USER_MS = 5 * 60000; // a username typed on a first step, kept for the password step
@@ -99,7 +98,6 @@ const WHY = {
 function createPasswords({ tabs, home, send, changed }) {
   const file = path.join(home, 'passwords.json');
   const cipher = createCipher();
-  const secret = crypto.randomBytes(24).toString('hex'); // proves a report came from the page script
   let logins = []; // { id, origin, username, password (both encrypted), created, updated, used }
   let never = []; // origins
   let next = 1;
@@ -160,17 +158,18 @@ function createPasswords({ tabs, home, send, changed }) {
     if (!cipher.available || !yours(tab)) return;
     const origin = originOf(tab.wc.getURL());
     if (!origin || never.includes(origin)) return;
-    tab.wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code: `${SCRIPT}\n;__louiPw.install(${JSON.stringify(secret)})` }])
+    tab.wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code: `${SCRIPT}\n;__louiPw.install()` }])
       .catch(() => {});
   }
 
+  // A report from the page script, over its own channel (tab-preload.js).
   function heard(tab, message, frame) {
-    if (!message.startsWith(MARK + secret + ' ')) return;
     if (frame?.parent || !yours(tab)) return; // only the top frame has the script; only the user's tabs count
     const origin = originOf(tab.wc.getURL());
     if (!origin || never.includes(origin)) return;
     let report;
-    try { report = JSON.parse(message.slice(MARK.length + secret.length + 1)); } catch { return; }
+    try { report = JSON.parse(message); } catch { return; }
+    if (!report || typeof report !== 'object') return;
     const ok = (s) => typeof s === 'string' && s.length <= MAX;
     const n = notes(tab);
     if (report.kind === 'user' && ok(report.username) && report.username) {
@@ -238,10 +237,6 @@ function createPasswords({ tabs, home, send, changed }) {
   tabs.on('created', (tab) => {
     const wc = tab.wc;
     wc.on('dom-ready', () => install(tab));
-    wc.on('console-message', (e, ...old) => {
-      const message = e.message !== undefined ? e.message : old[1];
-      if (typeof message === 'string' && message.startsWith(MARK)) heard(tab, message, e.frame);
-    });
     wc.on('did-navigate', () => {
       const n = watched.get(tab.id);
       if (n?.attempt) n.checking = true;
@@ -251,6 +246,10 @@ function createPasswords({ tabs, home, send, changed }) {
       const n = watched.get(tab.id);
       if (isMainFrame && code !== -3 && n) { n.attempt = null; n.checking = false; }
     });
+  });
+  ipcMain.on('passwords:report', (e, message) => {
+    const tab = tabs.list.find((t) => t.wc === e.sender);
+    if (tab && typeof message === 'string') heard(tab, message, e.senderFrame);
   });
   tabs.on('closing', (tab) => {
     watched.delete(tab.id);
@@ -509,4 +508,4 @@ function parseCsv(text) {
   return rows;
 }
 
-module.exports = { createPasswords, parseCsv, WORLD };
+module.exports = { createPasswords, createCipher, parseCsv, WORLD };

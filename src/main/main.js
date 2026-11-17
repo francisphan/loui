@@ -37,7 +37,7 @@ const { createPrint } = require('./print');
 const { createBookmarks } = require('./bookmarks');
 const { createErrorPage } = require('./errorpage');
 const { createGuardrails } = require('./guardrails');
-const { createPasswords } = require('./passwords');
+const { createPasswords, createCipher } = require('./passwords');
 const { createTaskManager } = require('./taskmanager');
 const { createActivity } = require('./activity');
 const { createPip } = require('./pip');
@@ -322,6 +322,7 @@ function start() {
   link = createLink({
     home: paths.home, version: app.getVersion(), handle, sessions, changed: pushState,
     guard: (origins) => { tabs.relayOrigins = new Set(origins); },
+    cipher: createCipher(),
   });
   let shown = '';
   updater = createUpdater({
