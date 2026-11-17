@@ -336,7 +336,8 @@ test('a session at work or paused shows on its group from any tab, and its menu 
   await until(() => mark('s2'), (m) => m === null); // gone a moment after its last step
 
   // Right-click on the group's name: Take over, then Let Claude continue.
-  assert.equal((await b.ui('group:menu-items', { group: 's3' }))[0], 'Take over');
+  assert.deepEqual(await b.ui('group:menu-items', { group: 's3' }),
+    ['Take over', '-', 'Watch in a small window', 'Move group to window', '-', 'End session'], 'the whole menu');
   await b.ui('group:menu-items', { group: 's3', click: 'Take over' });
   await until(() => mark('s3'), (m) => m === 'group-mark paused');
   assert.match(await s3.text('navigate', { url: b.base }).catch((e) => e.message), /paused/);
@@ -473,6 +474,49 @@ test('a strip with more tabs than it shows says so: faded edges, buttons that pa
   await until(() => boxes('#tabs .tab.active'), ([a]) => a && a[1] >= box[1] - 1 && a[2] <= box[2] + 1);
   for (const t of await mine()) if (!before.includes(t.id)) await b.ui('tab:close', t.id);
   await until(strip, (s) => s.over <= 0 && !s.on && !s.back && s.strays.length === 0 && s.cls === '');
+});
+
+test('the tab on screen keeps room for a start of its title while the others give way', async () => {
+  await size(1100, 600);
+  const own = (await mine()).find((t) => !t.pinned);
+  await b.ui('tab:select', own.id);
+  const widths = await until(() => chrome(`[...document.querySelectorAll('#tabs .tab:not(.pinned)')].map((n) => [n.classList.contains('active'), Math.round(n.getBoundingClientRect().width)])`),
+    (list) => list.some(([active]) => active));
+  const active = widths.find(([on]) => on)[1];
+  const others = widths.filter(([on]) => !on).map(([, w]) => w);
+  assert.ok(Math.min(...others) < 100, `the strip is short of room: ${others}`);
+  assert.ok(active >= 120, `the tab on screen is ${active}px wide`);
+  const shown = await chrome(`(() => { const t = document.querySelector('#tabs .tab.active .title'); return [t.getBoundingClientRect().width > 40, !!document.querySelector('#tabs .tab.active .close').getBoundingClientRect().width]; })()`);
+  assert.deepEqual(shown, [true, true], 'with its title and its close button');
+});
+
+test('resting on a tab shows a card with its whole title, its site, and whose it is; the address bar has the title too', async () => {
+  const hint = () => b.ui('hint');
+  const rest = (id) => chrome(`document.querySelector('#tabs .tab[data-id="${id}"]').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`);
+  const leave = () => chrome(`document.getElementById('tabs').dispatchEvent(new MouseEvent('mouseleave'))`);
+  const own = (await mine()).find((t) => !t.pinned && /^http/.test(t.url));
+  await b.ui('tab:select', own.id);
+  await until(() => chrome(`document.querySelector('#tabs .tab.active')?.dataset.id`), (id) => id === String(own.id));
+  assert.equal(await chrome(`document.querySelector('#tabs .tab[data-id="${own.id}"]').title`), '', 'no tooltip of the system\'s as well');
+  assert.equal(await chrome(`document.getElementById('address').title`), own.title);
+  await rest(own.id);
+  assert.equal((await hint()).shown, null, 'not at once');
+  const card = await until(hint, (h) => h.shown === 'card');
+  assert.ok(card.inFront, 'in front of the page');
+  assert.deepEqual(card.text.split('\n'), [own.title, new URL(own.url).host]);
+  const under = await chrome(`(() => { const r = document.querySelector('#tabs .tab[data-id="${own.id}"]').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.bottom)]; })()`);
+  assert.ok(Math.abs(card.bounds.x + 8 - under[0]) <= 1 && card.bounds.y >= under[1], `under its tab: ${JSON.stringify(card.bounds)} for a tab at ${under}`);
+  await leave();
+  await until(hint, (h) => h.shown === null);
+  // A session's tab says whose it is.
+  const theirs = (await b.state()).tabs.find((t) => t.group === 's1');
+  await rest(theirs.id);
+  const theirCard = await until(hint, (h) => h.shown === 'card');
+  assert.equal(theirCard.text.split('\n').at(-1), "Claude Code · release notes for the autumn update's tab");
+  // A press takes it away.
+  await chrome(`document.querySelector('#tabs .tab[data-id="${theirs.id}"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
+  await until(hint, (h) => h.shown === null);
+  await leave();
 });
 
 test('at the smallest window, with the Claude panel open, the toolbar holds and the address field stays usable', async () => {

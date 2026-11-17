@@ -73,6 +73,27 @@ test('History, Bookmarks, Passwords and Sessions close on Esc from anywhere in t
   await pageHasKeys();
 });
 
+test('Esc closes a side panel from anywhere in the window chrome, once nothing nearer has a use for it', async () => {
+  // The keyboard has left the panel for the tab strip.
+  await menuKey('CmdOrCtrl+Shift+O');
+  await until(async () => !(await hidden('bookmarks')), 'bookmarks to open');
+  await chrome("document.querySelector('#tabs .tab.active').focus()");
+  assert.equal(await chrome("document.activeElement.classList.contains('tab')"), true);
+  await press('Escape');
+  await until(() => hidden('bookmarks'), 'bookmarks to close');
+  await pageHasKeys();
+  // In the address bar, Esc is first the address bar's own.
+  await menuKey('CmdOrCtrl+H');
+  await until(async () => !(await hidden('history')), 'history to open');
+  await b.ui('address:type', 'zzqq');
+  await press('Escape');
+  await until(async () => (await chrome("document.getElementById('address').value")) === b.base + '/', 'the address to be put back');
+  assert.equal(await hidden('history'), false, 'the panel stays');
+  await press('Escape');
+  await until(() => hidden('history'), 'history to close on the next');
+  await pageHasKeys();
+});
+
 test('Ctrl+J puts the keyboard in Downloads, whose × and Esc close it', async () => {
   await menuKey('CmdOrCtrl+J');
   await until(async () => (await focused()) === 'downloads', 'the strip to take the keyboard');
@@ -301,16 +322,22 @@ test("a page's menu covers images, links, selections and text fields, and a sess
   const items = (id, p, click) => b.ui('page:menu-items', { id, p, click });
   const link = { linkURL: b.base + '/second.html' };
   const image = { mediaType: 'image', srcURL: b.base + '/icon.png' };
-  const page = ['Back', 'Forward', 'Reload', '-', 'Print…', 'View page source', '-', 'Point Claude at this', 'Inspect'];
+  // In a text field "Select all" is with cut, copy and paste.
+  const field = ['Back', 'Forward', 'Reload', '-', 'Save page as…', 'Print…', 'View page source', '-', 'Point Claude at this', 'Inspect'];
+  const page = [...field.slice(0, 7), 'Select all', ...field.slice(7)];
 
   assert.deepEqual(await items(y.id, { ...link, ...image }), [
-    'Open link in new tab', 'Open link in new window', 'Open link in private window', 'Copy link address', '-',
+    'Open link in new tab', 'Open link in new window', 'Open link in private window', 'Copy link address', 'Save link as…', '-',
     'Open image in new tab', 'Save image as…', 'Copy image', 'Copy image address', '-', ...page]);
   await b.ui('search:set', { engine: 'custom', url: b.base + '/plain.html?q=%s' });
   const words = { selectionText: ' hello world ' };
   assert.deepEqual(await items(y.id, words), ['copy', 'Search 127.0.0.1 for “hello world”', '-', ...page]);
   assert.deepEqual(await items(y.id, { isEditable: true, misspelledWord: 'teh', dictionarySuggestions: ['the', 'ten'], editFlags: { canCut: true } }),
-    ['the', 'ten', 'Add to dictionary', '-', 'cut', 'copy', 'paste', 'Paste as plain text', 'selectAll', '-', ...page]);
+    ['the', 'ten', 'Add to dictionary', '-', 'cut', 'copy', 'paste', 'Paste as plain text', 'selectAll', '-', ...field]);
+  // A link that is not a web address is not saved from here.
+  assert.ok(!(await items(y.id, { linkURL: 'javascript:void(0)' })).includes('Save link as…'));
+  await items(y.id, {}, 'Select all');
+  await until(async () => (await b.ui('tab:js', { id: y.id, code: 'String(getSelection()).length' })) > 0, 'the page to be selected');
 
   await items(y.id, words, 'Search 127.0.0.1 for “hello world”');
   const found = await until(async () => { const t = await onScreen(); return t.id !== y.id && t.url && t; }, 'the search to open in a new tab');
@@ -329,6 +356,8 @@ test("a page's menu covers images, links, selections and text fields, and a sess
   const theirMenu = await items(theirs.id, { ...link, ...image, ...words });
   assert.ok(!theirMenu.some((l) => /window/.test(l)), String(theirMenu));
   assert.ok(theirMenu.includes('Save image') && !theirMenu.includes('Save image as…'));
+  // Nor does a session's tab ask where to save.
+  assert.ok(theirMenu.includes('Save link') && theirMenu.includes('Save page') && !theirMenu.some((l) => / as…$/.test(l)), String(theirMenu));
   await items(theirs.id, link, 'Open link in new tab');
   await until(async () => (await tabs()).some((t) => t.group === 's' && t.url === link.linkURL && t.id !== theirs.id), 'the link in the session\'s group');
   assert.equal((await mine()).length, 1);

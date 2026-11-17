@@ -153,9 +153,12 @@ function createDownloads({ ses, tabs, home, changed }) {
     }
     // A download that was cancelled or did not finish is started again from
     // its address, in the session it came from; the new one takes its place in the list.
-    else if (action === 'retry' && !item && d.state !== 'completed' && /^https?:/i.test(d.url || '')) {
+    // One that is running but has stalled is stopped first.
+    else if (action === 'retry' && d.state !== 'completed' && /^https?:/i.test(d.url || '')) {
+      const from = origin.get(id) || ses;
+      item?.cancel();
       items = items.filter((x) => x !== d);
-      (origin.get(id) || ses).downloadURL(d.url);
+      from.downloadURL(d.url);
     }
     else if ((action === 'open' || action === 'show') && d.state === 'completed') {
       if (!fs.existsSync(d.file)) d.gone = true;

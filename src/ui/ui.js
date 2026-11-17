@@ -189,8 +189,7 @@ function drawTab(t) {
   tab.setAttribute('aria-label', t.title); // pinned tabs, and all of them in a collapsed sidebar, show no title
   tab.tabIndex = t.active ? 0 : -1; // one Tab stop for the strip; the arrow keys move within it
   tab.draggable = true;
-  tab.dataset.id = t.id;
-  tab.title = t.asleep ? `${t.title} (asleep, loads when you open it)` : t.title;
+  tab.dataset.id = t.id; // its whole title shows in a card under it (see "a tab's card" below)
 
   let mark;
   if (t.favicon && !t.loading) {
@@ -211,7 +210,6 @@ function drawTab(t) {
     mask.setAttribute('role', 'img');
     mask.title = `A private tab you lent to ${groupOf(t.group)?.label || 'this session'}. It goes back to your private window when the session ends, and closes if you close your last private window first.`;
     mask.setAttribute('aria-label', 'Private tab, lent to this session');
-    tab.title = `${t.title} (private tab, lent to this session)`;
     tab.append(mask);
   }
   // A pinned tab is its icon alone: it is closed from its menu, and Ctrl+W leaves it be.
@@ -248,7 +246,7 @@ function placeTabs() {
   if (!vertical && box.parentElement !== $('tabrow')) $('tabs-back').after(box);
   // The top row of the window is the tab strip; with the tabs in the sidebar it
   // is the toolbar, which then holds what else the tab row had.
-  if (vertical && $('helm').parentElement !== $('navrow')) {
+  if (vertical && $('brand').parentElement !== $('navrow')) {
     $('navrow').prepend($('brand'), $('sidebar-toggle'));
     $('reload').after($('private-label'));
     $('address-form').after($('helm'));
@@ -590,6 +588,41 @@ tabsBox.addEventListener('dragend', (e) => {
   else loui.send('tab:detach', { id: was.id, x: e.screenX, y: e.screenY });
 });
 
+// ── a tab's card ────────────────────────────────────────────────────────────
+// The window has no title bar, and a tab shows only a start of its title: the
+// pointer resting on a tab brings up a small card with the whole title, the
+// site, and whose tab it is. The main process draws it in a view in front of
+// the page (hints.js), since the page cannot be drawn over from here.
+let hovered = null; // the tab the pointer is on
+let cardTimer = 0;
+let carded = false; // a card is on show
+function dropCard() {
+  clearTimeout(cardTimer);
+  if (carded) loui.send('tab:card');
+  carded = false;
+}
+tabsBox.addEventListener('mouseover', (e) => {
+  const node = e.target.closest?.('.tab');
+  const id = node ? +node.dataset.id : null;
+  if (id === hovered) return;
+  hovered = id;
+  dropCard();
+  if (id == null) return;
+  cardTimer = setTimeout(() => {
+    const now = tabsBox.querySelector(`.tab[data-id="${id}"]`);
+    if (!now || dragging) return;
+    const r = now.getBoundingClientRect();
+    carded = true;
+    // Under a tab along the top; beside one in the sidebar.
+    loui.send('tab:card', state.tabStrip?.vertical ? { id, x: r.right - 4, y: r.top - 2 } : { id, x: r.left - 8, y: r.bottom + 3 });
+  }, 600);
+});
+tabsBox.addEventListener('mouseleave', () => { hovered = null; dropCard(); });
+// A press is the start of something else (a click, a drag, the tab's menu):
+// the card goes, and stays away until the pointer comes to another tab.
+tabsBox.addEventListener('mousedown', dropCard);
+window.addEventListener('blur', dropCard);
+
 // A collapsed sidebar opens while the pointer rests on it, as Brave's does.
 // The page is a native view that nothing can be drawn over, so it makes room
 // rather than being covered; the short wait keeps a passing pointer from
@@ -695,7 +728,8 @@ function drawHelm() {
   helm.classList.toggle('asking', !!asked);
   $('helm-state').textContent = what;
   $('helm-text').textContent = text;
-  $('helm-text').title = named.slice(0, named.length - shortName(named).length) + text;
+  // Also on the helm itself: with the tabs in the sidebar the text can give way altogether.
+  helm.title = $('helm-text').title = named.slice(0, named.length - shortName(named).length) + text;
   // The text keeps room for a start of itself before the tabs give way, and never more room than it fills.
   $('helm-text').style.setProperty('--full', `${Math.ceil(widthOf(text, $('helm-text'))) + 1}px`);
   $('helm-btn').hidden = !act;
@@ -740,7 +774,30 @@ function drawHelm() {
   $('helm-pip').title = `Watch ${g.label} in a small window`;
   $('helm-pip').onclick = () => loui.send('pip:open', g.id);
   document.body.classList.toggle('driving', driving);
+  placeHelm();
 }
+
+// With the tabs in the sidebar the helm sits in the toolbar, which is then
+// the top row and ends at the window buttons. It gives way there down to its
+// state and its buttons (a question, or text with no state before it, stays
+// whole). In a window too narrow for that as well, it takes a row of its own
+// under the toolbar: nothing of the toolbar may end up under the window
+// buttons. Measured, since what the toolbar holds varies.
+function placeHelm() {
+  const helm = $('helm');
+  if (!document.body.classList.contains('vertical') || helm.hidden) return;
+  const wide = (node) => node.getBoundingClientRect().width;
+  const row = $('navrow');
+  const inRow = helm.parentElement === row;
+  const whole = helm.classList.contains('asking') || !$('helm-state').textContent;
+  const need = wide(helm) - (whole ? 0 : wide($('helm-text'))) + 6;
+  const spare = wide($('address-form')) - 130 + (inRow ? wide(helm) + 6 : 0);
+  const end = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight);
+  const fits = need <= spare && !(inRow && $('menu').getBoundingClientRect().right > end + 0.5);
+  if (fits && !inRow) $('address-form').after(helm);
+  if (!fits && inRow) $('helmrow').append(helm);
+}
+new ResizeObserver(placeHelm).observe($('navrow'));
 
 function drawChips() {
   $('chips').replaceChildren(...state.picks.map((p) => {
@@ -798,6 +855,20 @@ function sidePanel(name, node, opened) {
   return show;
 }
 
+// Esc closes the side panel that is open from anywhere in the window chrome,
+// not only from inside it (the keyboard may have moved on, to the tab strip
+// say), and the page gets the keyboard back. Unless something nearer has a
+// use for Esc: the panel itself (it closes its question first), the address
+// bar, a strip under the toolbar, a question, or a button that is asking.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = SIDE_PANELS.find((name) => document.body.classList.contains(`${name}-open`));
+  if (!open || $(open).contains(e.target)) return;
+  if (e.target.closest?.('#address-form, #find, #downloads, #bookmark-edit, [role="alertdialog"], .sure')) return;
+  document.activeElement?.blur?.(); // so that closing hands the keyboard to the page (focusPage)
+  $(`${open}-close`).click();
+});
+
 // ── connection to other Claude sessions ─────────────────────────────────────
 const LINK_WORDS = { connected: 'Connected', connecting: 'Connecting', offline: 'Offline, retrying', refused: 'Refused', off: 'Not connected' };
 let linkWas = ''; // the status last drawn
@@ -806,6 +877,8 @@ function drawLink() {
   const link = state.link;
   $('link').className = `quiet link-${link.status}`;
   $('link-text').textContent = LINK_WORDS[link.status] || '';
+  // In a narrow panel the lamp stands alone: the tooltip says what it means.
+  $('link').title = `Connection to other Claude sessions: ${(LINK_WORDS[link.status] || 'not known').toLowerCase()}`;
   const others = state.groups.length - 1;
   $('relay-status').textContent =
     link.status === 'connected' ? `Connected as ${link.device}. ${others === 1 ? '1 session is' : `${others} sessions are`} using this browser.`
@@ -868,6 +941,7 @@ loui.on('state', (next) => {
     address.select();
   }
   addressTab = tab?.id;
+  address.title = tab?.title || ''; // the page's whole title: the window has no title bar to show it
   $('back').disabled = !tab?.canGoBack;
   $('forward').disabled = !tab?.canGoForward;
   setIcon($('reload'), tab?.loading ? 'stop' : 'reload');

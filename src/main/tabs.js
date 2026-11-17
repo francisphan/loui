@@ -59,6 +59,7 @@ const ICON_BYTES = 150 * 1024; // the most a page's icon may weigh
 const ICON_MS = 5000; // and the longest fetching it may take
 const OPEN_WITHIN = 5000; // a page may open a tab this long after an action in it
 const OPEN_MAX = 10; // and this many in a minute
+const FULL_WITHIN = 1000; // a page may take the whole screen this long after the user's own input in it
 const clipped = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 ' +
@@ -414,10 +415,19 @@ class Tabs extends EventEmitter {
     // A page's new window becomes a new tab in the same group (and window).
     // Only soon after someone acted in the tab (the user's keys and mouse, or
     // a session's), and only so many: Electron has no popup blocker of its own.
-    const acted = () => { tab.actedAt = Date.now(); };
+    // tab.userAt: when the user's own keys or mouse last reached the page. What
+    // Loui sends it (a session's tools, in actions.js) arrives here the same
+    // way, inside the call that sends it, and is not the user's.
+    const sendInput = wc.sendInputEvent.bind(wc);
+    wc.sendInputEvent = (...args) => { tab.sending = true; try { return sendInput(...args); } finally { tab.sending = false; } };
+    const acted = () => { tab.actedAt = Date.now(); if (!tab.sending) tab.userAt = tab.actedAt; };
     wc.on('before-input-event', acted);
     // Presses only: the pointer entering or crossing the page is not an action.
-    wc.on('before-mouse-event', (_e, mouse) => { if (mouse.type === 'mouseDown' || mouse.type === 'mouseUp') acted(); });
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown' || mouse.type === 'mouseUp') acted();
+      // The pointer at the top edge of a page that has the whole window (fullscreen.js says how to leave).
+      else if (mouse.type === 'mouseMove' && mouse.y <= 2 && this.isFull(tab)) this.emit('pointer-top', tab);
+    });
     // An address Loui itself loads into the tab (the address bar, a bookmark,
     // a session's navigate, a new tab's first page), as opposed to one the
     // page went to: see recent().
@@ -439,9 +449,11 @@ class Tabs extends EventEmitter {
     // A page asking for the whole screen (a video's full-screen button) gets
     // the whole window: its view covers the tabs, the toolbar and the panel
     // until it lets go (Esc). Only the tab on screen: one in the background,
-    // a session's at work say, is told no.
+    // a session's at work say, is told no. And only when the user's own click
+    // or key reached the page just before: a Claude session's click cannot
+    // take the window away, nor a page on its own.
     wc.on('enter-html-full-screen', () => {
-      if (!this.onScreen(tab)) {
+      if (!this.onScreen(tab) || Date.now() - (tab.userAt || 0) > FULL_WITHIN) {
         wc.executeJavaScript('document.exitFullscreen()', true).catch(() => {});
         // The window must not be left full screen on its account either.
         const w = tab.window;
@@ -592,6 +604,19 @@ class Tabs extends EventEmitter {
       if (on) w.win.contentView.addChildView(tab.view);
     }
     this.emit('change');
+  }
+
+  // Whether a tab's page has the whole window, by either road.
+  isFull(tab) {
+    const w = tab?.window;
+    return !!w && (w.full === tab.id || (!!w.wide && w.activeId === tab.id));
+  }
+
+  // Out of full screen of both kinds: Loui has something to show in the window.
+  leaveFull(w) {
+    if (!w || w.win.isDestroyed()) return;
+    if (w.wide) this.fullScreen(w);
+    else if (w.full) this.unfull(w, { leave: true });
   }
 
   // The window's page gives the whole window back: on its own (Esc), or
@@ -1021,6 +1046,8 @@ class Tabs extends EventEmitter {
       if (mine) items.push({ label: 'Open link in new window', click: () => this.emit('open-window', { url: p.linkURL, private: tab.private }) });
       if (mine && !tab.private) items.push({ label: 'Open link in private window', click: () => this.emit('open-window', { url: p.linkURL, private: true }) });
       items.push({ label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) });
+      // Asks where to save, as for an image below.
+      if (/^https?:/i.test(p.linkURL)) items.push({ label: mine ? 'Save link as…' : 'Save link', click: () => { tab.saveAs = mine; wc.downloadURL(p.linkURL); } });
       rule();
     }
     if (p.mediaType === 'image' && p.srcURL) {
@@ -1057,8 +1084,11 @@ class Tabs extends EventEmitter {
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
       { label: 'Reload', click: () => wc.reload() },
       { type: 'separator' },
+      // The page as its address serves it, through the downloads list like any other file.
+      ...(/^https?:/i.test(tab.url) ? [{ label: mine ? 'Save page as…' : 'Save page', click: () => { tab.saveAs = mine; wc.downloadURL(tab.url); } }] : []),
       { label: 'Print…', click: () => this.emit('print', tab) },
       ...(/^https?:/i.test(tab.url) ? [{ label: 'View page source', click: () => openTab(`view-source:${tab.url}`, true) }] : []),
+      ...(p.isEditable ? [] : [{ label: 'Select all', click: () => wc.selectAll() }]),
       { type: 'separator' },
       // The Claude panel stays out of private windows.
       ...(tab.private && tab.group === YOU ? [] : [{ label: 'Point Claude at this', click: () => this.emit('point', tab, { x: p.x, y: p.y }) }]),
@@ -1168,18 +1198,26 @@ class Tabs extends EventEmitter {
     }];
   }
 
-  // Right-click on a session's name in the tab strip.
-  groupMenu(groupId) {
+  // The items of a session's menu in the tab strip (right-click on its name).
+  groupMenuItems(groupId) {
     const g = this.group(groupId);
-    if (!g || g.id === YOU || !g.window) return;
+    if (!g || g.id === YOU) return [];
     const items = [
       ...this.groupMoveItems(groupId),
       // ── End session (main.js passes it to the window, which asks first as the × does) ──
       { type: 'separator' },
       { label: 'End session', click: () => this.emit('end-session', g.id) },
     ];
-    this.emit('group-menu', g, items); // main.js adds "Take over" / "Let Claude continue"
-    Menu.buildFromTemplate(items).popup({ window: g.window.win });
+    // Ahead of those: pip.js adds "Watch in a small window", main.js "Take over" / "Let Claude continue".
+    this.emit('group-menu', g, items);
+    return items;
+  }
+
+  // Right-click on a session's name in the tab strip.
+  groupMenu(groupId) {
+    const g = this.group(groupId);
+    if (!g || g.id === YOU || !g.window) return;
+    Menu.buildFromTemplate(this.groupMenuItems(groupId)).popup({ window: g.window.win });
   }
 
   // What the window chrome needs to draw the tab strip and toolbar: the tabs

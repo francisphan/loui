@@ -20,6 +20,7 @@ const SEND = new Set([
   'page:focus', 'panel:shown',
   'guard:answer', 'guard:show', 'guard:set', 'guard:site-add', 'guard:site-remove', 'guard:forget', 'guard:untrust',
   'tab:reveal', 'window:close-answer', 'device:reset',
+  'tab:card',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
@@ -28,6 +29,7 @@ const LISTEN = new Set([
   'activity', 'show-activity',
   'group:end',
   'tab:ask-close', 'update:ask', 'show-menu',
+  'hint',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {

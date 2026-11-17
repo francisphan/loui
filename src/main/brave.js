@@ -226,7 +226,8 @@ function createBrave({ tabs, settings, save, changed }) {
   tabs.on('created', watch);
 
   tabs.on('tab-menu', (tab, items) => {
-    if (webUrl(tab.url)) items.push({ label: `Open in ${name()}`, click: () => open(tab.url) });
+    // The other browser keeps its own history: a private tab's page is not private there.
+    if (webUrl(tab.url)) items.push({ label: `Open in ${name()}${tab.private ? ' (not private)' : ''}`, click: () => open(tab.url) });
   });
 
   return {
