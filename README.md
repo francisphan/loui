@@ -171,6 +171,16 @@ choice is kept in `settings.json` in the profile. Pages see it as
 `prefers-color-scheme`. Under WSL, *Match system* follows Linux's setting, not
 Windows'.
 
+## History
+
+Pages you visit in your own tabs are kept in `history.json` in the profile
+(title, address, number of visits, last visit). Pages that Claude sessions open
+in their tab groups are not, nor are tabs while you have handed them to a
+session. Typing in the address bar suggests pages from it, ranked by how often
+and how recently you visited them; the arrow keys move through them, Enter
+opens one, Esc closes the list. *History* (`Ctrl+H`, or the clock in the
+toolbar) lists everything, with search, removal of single pages, and *Clear all*.
+
 ## Layout
 
 ```
@@ -186,6 +196,8 @@ src/main/chat.js      the Claude panel (Agent SDK)
 src/main/updater.js   updates for installed copies (GitHub Releases)
 src/main/downloads.js downloads: where they are saved, the list, pause and resume
 src/main/permissions.js  camera, microphone, location, notifications, screen: asking and remembering
+src/main/history.js   history: what the user visits in their own tabs (history.json)
+src/main/suggest.js   address bar suggestions: their sources, and the list in front of the page
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
@@ -226,6 +238,6 @@ break:
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
 - Dragging tabs between groups; a prompt when a new session first connects.
-- Find in page, bookmarks, history view, password manager,
+- Bookmarks, password manager,
   extensions. Sites that block embedded browsers at sign-in (Google does) may
   refuse to log in.

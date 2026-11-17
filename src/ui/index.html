@@ -7,6 +7,7 @@
   <title>Loui</title>
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="history.css">
 </head>
 <body>
   <header id="bar">
@@ -37,6 +38,7 @@
       <button id="downloads-toggle" class="tool" type="button" title="Downloads (Ctrl+J)" aria-label="Downloads" aria-expanded="false">
         <span class="glyph"></span><span id="downloads-progress"></span>
       </button>
+      <button id="history-toggle" class="icon" type="button" title="History (Ctrl+H)" aria-label="History"></button>
       <button id="devtools" class="icon" type="button" title="Developer tools (F12)" aria-label="Developer tools"></button>
       <button id="panel-toggle" class="icon" type="button" title="Claude panel (Ctrl+Shift+L)" aria-label="Claude panel"></button>
     </div>
@@ -118,9 +120,30 @@
     </form>
   </aside>
 
+  <aside id="history" aria-label="History" hidden>
+    <div id="history-head">
+      <h1>History</h1>
+      <div>
+        <button id="history-clear" class="quiet" type="button">Clear all</button>
+        <button id="history-close" class="quiet" type="button" aria-label="Close history"></button>
+      </div>
+    </div>
+    <input id="history-search" type="search" spellcheck="false" autocomplete="off"
+           placeholder="Search history" aria-label="Search history">
+    <div id="history-confirm" role="alertdialog" aria-label="Clear all history" hidden>
+      <p>Clear every page from your history? This can't be undone.</p>
+      <div class="row">
+        <button id="history-confirm-no" class="quiet" type="button">Cancel</button>
+        <button id="history-confirm-yes" class="quiet" type="button">Clear all</button>
+      </div>
+    </div>
+    <div id="history-list"></div>
+  </aside>
+
   <script src="ui.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
   <script src="permissions.js"></script>
+  <script src="history.js"></script>
 </body>
 </html>

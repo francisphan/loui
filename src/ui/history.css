@@ -1,0 +1,93 @@
+/* History: the suggestions list under the address bar (its own page,
+   suggestions.html, which also loads ui.css for the tokens) and the history
+   panel in the window. */
+
+/* ── suggestions ─────────────────────────────────────────────────────────── */
+/* The view is transparent; the list is a card with room around it for its
+   shadow. Row height and padding are mirrored in src/main/suggest.js. */
+.suggestions-page body { display: block; background: transparent; }
+#suggestions {
+  margin: 0 10px 10px;
+  padding: 5px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 6px 10px rgb(8 24 32 / .18);
+  box-sizing: border-box;
+}
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 11px;
+  border-radius: 6px;
+  line-height: 1.3;
+}
+.suggestion:hover { background: color-mix(in srgb, var(--shoal) 55%, transparent); }
+.suggestion.chosen { background: var(--shoal); }
+.suggestion .title, .history-row .title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink); }
+.suggestion .url, .history-row .url { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); font-size: 12.5px; }
+
+/* ── history panel ───────────────────────────────────────────────────────── */
+/* Takes the Claude panel's place while it is open. */
+#history {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-w);
+  border-left: 1px solid var(--rule);
+  background: var(--paper);
+}
+#history[hidden], body.history-open #panel { display: none; }
+#history-head { display: flex; align-items: baseline; justify-content: space-between; padding: 13px 12px 9px 16px; }
+#history-head h1 { margin: 0; font-size: 15px; font-weight: 650; }
+#history-head div { display: flex; gap: 2px; }
+#history-search {
+  margin: 0 12px 8px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 11px;
+  border: 1px solid var(--rule);
+  border-radius: 15px;
+  background: var(--water);
+  color: var(--ink);
+  font: inherit;
+  user-select: text;
+}
+#history-search::placeholder { color: var(--ink-2); }
+#history-search:focus { outline: none; border-color: var(--focus); background: var(--paper); }
+#history-confirm {
+  display: grid;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-size: 13.5px;
+}
+#history-confirm[hidden] { display: none; }
+#history-confirm p { margin: 0; }
+#history-confirm .row { display: flex; justify-content: flex-end; gap: 6px; }
+#history-confirm-yes { color: var(--danger); font-weight: 650; }
+
+#history-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 14px; }
+#history-list h2 { margin: 12px 8px 4px; color: var(--ink-2); font-size: 12.5px; font-weight: 650; }
+#history-list .none { margin: 18px 8px; color: var(--ink-2); }
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 8px;
+  border-radius: 6px;
+}
+.history-row:hover { background: var(--shoal); }
+.history-row .open { display: grid; min-width: 0; padding: 0; border: 0; background: none; text-align: left; font-size: 13.5px; line-height: 1.3; }
+.history-row .when { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.history-row .remove { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--ink-2); opacity: 0; }
+.history-row:hover .remove, .history-row .remove:focus-visible { opacity: 1; }
+.history-row .remove:hover { background: var(--water); color: var(--ink); }
+#history-toggle.on { background: var(--shoal); color: var(--ink); }
