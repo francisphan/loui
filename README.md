@@ -205,6 +205,25 @@ The lists are not downloaded at start: the finished engine is kept in
 `shields/engine.bin` in the profile (about 7 MB on disk, about 15 MB in memory),
 and rebuilt in a background process of its own when it is more than four days
 old. Until the first download is done, nothing is blocked.
+## Search, printing, and Brave
+
+*File › Settings* picks the search engine for words typed in the address bar:
+Brave Search (the default), DuckDuckGo, Google, Kagi, or an address of your own
+with `%s` where the words go. It is kept in `settings.json` in the profile.
+
+*File › Print…* (`Ctrl+P`) opens the system print dialog for the tab on screen;
+*File › Save as PDF…* saves it as a PDF.
+
+Google refuses to sign in from browsers it considers embedded, Loui included,
+and Loui does not pretend to be another browser to get past that. Instead:
+
+- *Open in Brave* (right-click a tab, or the File menu) hands the page's
+  address to Brave (or, without Brave, the system's default browser).
+- Sites on a list in *File › Settings* (`accounts.google.com` to begin with)
+  are sent to Brave when one of your tabs opens them, and the tab says so, with
+  a link that takes the site off the list. Claude's tabs don't open them at all,
+  and a session is told to ask you; Claude never makes Loui open another
+  program.
 
 ## Layout
 
@@ -226,6 +245,9 @@ src/main/suggest.js   address bar suggestions: their sources, and the list in fr
 src/main/requests.js  the one onBeforeRequest listener: the relay guard first, then Shields
 src/main/shields.js   Shields: blocking, hiding ad boxes, the per-site switch, list updates
 src/main/shields-update.js  downloads the lists and builds the engine, in a process of its own
+src/main/search.js    the search engine for the address bar
+src/main/brave.js     Open in Brave, and the sites that open there instead of in Loui
+src/main/print.js     printing and Save as PDF
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
@@ -267,5 +289,4 @@ break:
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
 - Dragging tabs between groups; a prompt when a new session first connects.
 - Bookmarks, password manager,
-  extensions. Sites that block embedded browsers at sign-in (Google does) may
-  refuse to log in.
+  extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).

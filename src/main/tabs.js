@@ -24,6 +24,7 @@
 const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
 const { EventEmitter } = require('events');
 const { requestRules } = require('./requests');
+const { searchFor } = require('./search');
 
 const YOU = 'you';
 const LOG_LIMIT = 500;
@@ -50,7 +51,7 @@ function toUrl(input) {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|data|file|view-source):/i.test(text)) return text;
   if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(text)) return 'http://' + text;
   if (!/\s/.test(text) && /^[^/]+\.[^/]+/.test(text)) return 'https://' + text;
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent(text);
+  return searchFor(text);
 }
 
 class Tabs extends EventEmitter {
@@ -244,6 +245,9 @@ class Tabs extends EventEmitter {
     });
     wc.on('context-menu', (_e, p) => this.contextMenu(tab, p));
     wc.on('audio-state-changed', (e) => { tab.audible = !!e.audible; this.rest(tab); });
+    // Before its first load, so other modules can watch its navigations. Also
+    // when a sleeping tab wakes, since it then has a new page.
+    this.emit('created', tab);
   }
 
   // A user's tab out of sight is hidden and throttled; it stays in sight and
@@ -518,7 +522,7 @@ class Tabs extends EventEmitter {
     } else {
       items.push({ label: 'Take back', click: () => this.move(id, YOU) });
     }
-    this.emit('tab-menu', tab, items); // other modules add their items (sleep.js)
+    this.emit('tab-menu', tab, items); // other modules add their items (sleep.js, brave.js)
     if (items.length) items.push({ type: 'separator' });
     items.push({ label: 'Close tab', click: () => this.close(id) });
     Menu.buildFromTemplate(items).popup({ window: this.win });

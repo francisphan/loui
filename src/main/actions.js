@@ -36,7 +36,8 @@ function parseKey(chord) {
 const shorten = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const host = (u) => { try { return new URL(u).host || u; } catch { return u; } };
 
-function createActions({ tabs, sessions, changed }) {
+// refuse(url): why sessions may not open an address (see brave.js), or null.
+function createActions({ tabs, sessions, changed, refuse = () => null }) {
   // The tab a session works in: its group's current tab. A session's first
   // tab is opened in the background the first time it needs one. A sleeping
   // or resting tab is woken (see tabs.use()).
@@ -215,6 +216,8 @@ function createActions({ tabs, sessions, changed }) {
         if (!/^(https?:|about:blank$)/i.test(to)) {
           throw new Error('Only http and https pages can be opened this way.');
         }
+        const refused = refuse(to);
+        if (refused) throw new Error(refused);
         const tab = new_tab ? tabs.create('', { group: c.session.group }) : c.need();
         if (new_tab) tabs.setCurrent(c.session.group, tab.id);
         const failed = await Promise.race([
