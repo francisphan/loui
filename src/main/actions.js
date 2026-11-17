@@ -37,7 +37,8 @@ const shorten = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const host = (u) => { try { return new URL(u).host || u; } catch { return u; } };
 
 // refuse(url): why sessions may not open an address (see brave.js), or null.
-function createActions({ tabs, sessions, prompts, changed, refuse = () => null }) {
+// guard: guardrails.js, which asks the user before consequential actions.
+function createActions({ tabs, sessions, prompts, changed, refuse = () => null, guard }) {
   // The tab a session works in: its group's current tab. A session's first
   // tab is opened in the background the first time it needs one. A sleeping
   // or resting tab is woken (see tabs.use()).
@@ -196,6 +197,24 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
     }
   }
 
+  // Guardrails: a consequential action waits here for the user, with a
+  // picture of its target, before any input reaches the page. Throws the
+  // session's tool error if the user declines (see guardrails.js).
+  async function guarded(c, tab, found, rect) {
+    if (!found) return;
+    c.say(`waiting for you to allow it to ${found.what}`);
+    let image = null;
+    if (rect) {
+      const img = await crop(tab, rect, 16).catch(() => null);
+      if (img) {
+        const { width, height } = img.getSize();
+        const k = Math.min(1, 360 / width, 140 / height);
+        image = img.resize({ width: Math.round(width * k), height: Math.round(height * k) }).toDataURL();
+      }
+    }
+    await guard.confirm(c.session, tab, found, image);
+  }
+
   // session: the reader. A pick in one of the user's own tabs can be looked at
   // but not acted on until the tab is handed over.
   function describePick(p, session) {
@@ -230,6 +249,10 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
         if (refused) throw new Error(refused);
         const tab = new_tab ? tabs.create('', { group: c.session.group }) : c.need();
         if (new_tab) tabs.setCurrent(c.session.group, tab.id);
+        await guarded(c, tab, guard.judgeUrl(c.session, tab, to)).catch((e) => {
+          if (new_tab) tabs.close(tab.id);
+          throw e;
+        });
         const failed = await Promise.race([
           tab.wc.loadURL(to).then(() => null, (e) => e),
           sleep(20000).then(() => 'slow'),
@@ -270,8 +293,11 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
           if (target.covered) note = ` Note: <${target.covered}> sits on top of it at the click point, so the click may have landed there instead.`;
         } else if (x != null && y != null) {
           target = { x: x / tab.shotScale, y: y / tab.shotScale };
+          target.guard = await page(tab, 'guardAt', target).catch(() => null);
+          target.rect = { x: target.x - 60, y: target.y - 24, w: 120, h: 48 };
           what = `the point ${Math.round(x)},${Math.round(y)}`;
         } else throw new Error('click needs a ref, or x and y.');
+        await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
         c.say(`clicking ${what}`);
         await aim(tab, target, double ? 'double-click' : 'click', true);
         mouse(tab, target, { button, double });
@@ -283,7 +309,8 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
       label: () => 'typing',
       async run({ ref, text: value, clear, submit }, c) {
         const tab = c.need();
-        const target = check(await page(tab, 'locate', { ref }), ref);
+        const target = check(await page(tab, 'locate', { ref, how: 'enter' }), ref);
+        if (submit) await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
         c.say(`typing into "${shorten(target.name || target.role)}"`);
         await aim(tab, target, 'type', true);
         mouse(tab, target);
@@ -300,6 +327,12 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
       label: (a) => `pressing ${a.key}`,
       async run({ key: chord }, c) {
         const tab = c.need();
+        // Enter or Space on a focused control acts like submitting or clicking it.
+        const { keyCode } = parseKey(chord);
+        if (keyCode === 'Enter' || keyCode === 'Space') {
+          const info = await page(tab, 'guardFocus', { how: keyCode === 'Enter' ? 'enter' : 'click' }).catch(() => null);
+          await guarded(c, tab, guard.judge(c.session, tab, info));
+        }
         await tabs.settled(tab);
         key(tab, chord);
         return after(c, tab, `Pressed ${chord}.`);
@@ -429,6 +462,14 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
       label: () => 'running a script',
       async run({ code }, c) {
         const tab = c.need();
+        // A script can do anything a click can (form.submit(), fetch), and
+        // read what is typed in the page. On a page with card or password
+        // fields it is asked about first; elsewhere what it sends is checked
+        // like any other action's (see guardrails.js).
+        if (guard.applies(c.session)) {
+          const fields = await page(tab, 'guardPage').catch(() => null);
+          await guarded(c, tab, guard.judgeScript(c.session, tab, fields));
+        }
         // Errors thrown by the code come back as values, so a rejection here can
         // only mean the code did not parse as an expression: run it as a body.
         const wrap = (body) =>
@@ -528,7 +569,21 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null }
     return sessions.during(session, handler.label(args), acts, async (say) => {
       const current = tabs.current(session.group);
       if (current?.asleep) await settle(tabs.use(current)); // its page is back before the tool reads it
-      return handler.run(args, { say, session, need: () => need(session) });
+      // While the tool runs, requests its tab makes are checked (guardrails.js);
+      // what was stopped is told to the session with the tool's result.
+      guard.begin(session);
+      const stopped = async () => { await guard.drain(session); return guard.takeNotes(session).join('\n'); };
+      try {
+        const out = await handler.run(args, { say, session, need: () => need(session) });
+        const note = await stopped();
+        return note ? [...text(note), ...out] : out;
+      } catch (e) {
+        const note = await stopped();
+        if (note) e.message += `\n${note}`;
+        throw e;
+      } finally {
+        guard.end(session);
+      }
     });
   }
 

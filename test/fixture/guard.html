@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Guard</title></head>
+<body>
+  <h1>Things Claude should ask about</h1>
+  <p id="out">nothing yet</p>
+  <button onclick="out.textContent = 'sent'">Send</button>
+  <button onclick="out.textContent = 'deleted'">Delete</button>
+  <button onclick="out.textContent = 'eliminado'">Eliminar cuenta</button>
+  <button onclick="out.textContent = 'next'">Next</button>
+  <a href="/second.html">Second page</a>
+  <form method="get" action="/second.html" id="search">
+    <label>Search <input name="q"></label>
+    <button>Search</button>
+  </form>
+  <form method="post" action="/done.html" id="signin">
+    <label>Email <input name="email" type="email"></label>
+    <label>Password <input name="password" type="password"></label>
+    <button>Sign in</button>
+  </form>
+</body></html>

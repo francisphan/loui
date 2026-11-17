@@ -150,6 +150,36 @@ works in your tabs. It runs on your Claude Code login through the Agent SDK
 **Point** (`Ctrl+Shift+C`, or right-click an element) hands an element to
 Claude with its selector, text, HTML and a cropped screenshot.
 
+## Guardrails
+
+Loui itself asks you before Claude pays, sends or deletes, whatever Claude was
+told and whatever a page says to it. The tool call waits, nothing reaches the
+page, and a strip above the page names the session, the site and the action,
+with a picture of the button: *Allow once*, *Always on this site* (for that
+kind of action), or *Block*. No answer in two minutes counts as Block; the
+session is told the user declined. Ticking *Trust this session until it ends*
+stops the questions for that session.
+
+- **What is asked about:** clicking a control named like Pay, Buy, Place
+  order, Purchase, Checkout, Transfer, Send, Delete, Remove account (and
+  Pagar, Comprar, Enviar, Eliminar, Borrar, Transferir, Confirmar compra);
+  submitting a form that holds card, password or one-time-code fields (by a
+  click, or Enter); opening a site on your list; and `evaluate` on a page with
+  card or password fields.
+- **What the page does by itself:** while a session acts in a tab, and for ten
+  seconds after, any POST, PUT or PATCH from that tab carrying a card number,
+  password or one-time code is held until you answer, however it started (a
+  "Next" button whose script submits a payment form, `form.submit()`, `fetch`).
+- **Not caught:** a payment or deletion whose request carries none of those
+  (an order placed with a saved card through an API call, a delete over
+  `fetch`) unless the control that started it is named like one; keys pressed
+  in a chat box (Enter to send); a page acting more than ten seconds after the
+  session's last action; WebSockets.
+- It covers every Claude session and the Claude panel (in your tabs, only while
+  the panel is acting). Your own clicks are never interrupted.
+- *File › Settings* turns it off, edits the list of sites, and forgets
+  remembered answers. They are kept in `guardrails.json` in the profile.
+
 ## Tools
 
 `navigate`, `history`, `tabs`, `snapshot`, `click`, `type`, `press_key`,
