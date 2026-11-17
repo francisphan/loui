@@ -42,7 +42,12 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
     try { config.key = cipher.decrypt(config.keyEnc); } catch { config.key = ''; }
     delete config.keyEnc;
   } else if (config.key && cipher.available) {
-    try { store(); } catch {} // a key saved as plain text by an earlier version
+    // A key saved as plain text by an earlier version. The system's own key
+    // for this profile is made on first use and reaches the disk some seconds
+    // later (six, measured on Windows), so the plain copy is only replaced
+    // after that: a crash in between must not lose the relay key.
+    try { cipher.encrypt(''); } catch {}
+    setTimeout(() => { try { store(); } catch {} }, process.env.LOUI_TEST ? 200 : 30000).unref();
   }
   if (process.env.LOUI_RELAY_URL) config = { url: process.env.LOUI_RELAY_URL, key: process.env.LOUI_RELAY_KEY, on: true };
 

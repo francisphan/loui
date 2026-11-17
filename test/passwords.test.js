@@ -290,8 +290,7 @@ test('the relay key is kept encrypted, and one saved as plain text is rewritten'
   fs.writeFileSync(file, JSON.stringify({ url: 'ws://127.0.0.1:9', key: 'plain-relay-Key-1', on: false }));
   let r = await launch({ LOUI_TEST_SAFESTORAGE: 'fake' }, { home });
   try {
-    assert.ok(!raw().includes('plain-relay-Key-1'), 'rewritten at start');
-    assert.match(raw(), /"keyEnc"/);
+    await until(() => !raw().includes('plain-relay-Key-1') && /"keyEnc"/.test(raw()), 'the key to be rewritten');
     assert.equal((await r.state()).link.hasKey, true);
     await r.close();
     r = await launch({ LOUI_TEST_SAFESTORAGE: 'fake' }, { home });
