@@ -230,3 +230,129 @@ test('the tab layout and the pinned tabs are remembered after a restart', async 
   })()`);
   assert.deepEqual(gap, [0, 0]);
 });
+
+// ── a full strip, a narrow window ───────────────────────────────────────────
+// What is drawn in a row of the window chrome: [name, left, right] of each
+// thing that takes room, in the order drawn.
+const boxes = (selector) => chrome(`[...document.querySelectorAll(${JSON.stringify(selector)})]
+  .map((n) => [n.id || n.className, n.getBoundingClientRect()])
+  .filter(([, r]) => r.width > 0).map(([name, r]) => [name, Math.round(r.left), Math.round(r.right)])`);
+const size = async (width, height) => {
+  await chrome(`window.resizeTo(${width}, ${height})`);
+  await until(() => chrome('window.innerWidth'), (w) => Math.abs(w - width) < 4);
+};
+// Nothing in the row lies over its neighbour or runs out of the row.
+function inOrder(list, row) {
+  for (let i = 0; i < list.length; i++) {
+    const [name, left, right] = list[i];
+    assert.ok(left >= row[1] - 1 && right <= row[2] + 1, `${name} (${left}–${right}) is inside the row (${row[1]}–${row[2]})`);
+    if (i) assert.ok(left >= list[i - 1][2] - 3, `${name} starts at ${left}, after ${list[i - 1][0]} ends at ${list[i - 1][2]}`);
+  }
+}
+const helmSays = () => chrome(`[...document.getElementById('helm').children]
+  .filter((n) => !n.hidden && n.getBoundingClientRect().width > 0).map((n) => n.textContent)`);
+
+let s1, s2, s3;
+test('several sessions in a strip short of room: names and tabs give way, and nothing overprints', async () => {
+  s1 = b.as('s1', 'Claude Code · release notes for the autumn update');
+  s2 = b.as('s2', 'Claude Desktop · quarterly research');
+  s3 = b.as('s3', 'Claude Code · agent-b migration');
+  await s1.text('navigate', { url: b.base + '/second.html?1' });
+  await s1.text('tabs', { action: 'new', url: b.base + '/index.html?1b' });
+  await s2.text('navigate', { url: b.base + '/second.html?2' });
+  await s3.text('navigate', { url: b.base + '/second.html?3' });
+  await size(1240, 800); // with the Claude panel open, about 850px for the tab row
+  const theirs = (await b.state()).tabs.find((t) => t.group === 's1');
+  await b.ui('tab:select', theirs.id); // a session's tab on screen: the helm shows too
+  await until(helmSays, (h) => h.length > 0);
+
+  const [row] = await boxes('#tabrow');
+  const [strip] = await boxes('#tabs');
+  inOrder(await boxes('#tabs, #newtab, #helm'), row);
+  // Within the strip, in the part of it in sight.
+  const inside = (await boxes('#tabs .group-tag, #tabs .tab')).filter(([, left, right]) => right > strip[1] && left < strip[2]);
+  inOrder(inside, ['', -Infinity, Infinity]);
+  const names = await boxes('#tabs .group-name');
+  assert.equal(names.length, 3, 'every session has its name in the strip');
+  for (const [, left, right] of names) assert.ok(right - left >= 40, `a name keeps ${right - left}px`);
+  // The helm keeps its state and its button whole, inside the pill.
+  inOrder(await boxes('#helm > *'), (await boxes('#helm'))[0]);
+});
+
+test('the helm says the state first, then who, then the button', async () => {
+  await until(helmSays, (h) => h[0] === 'Claude\'s tab'); // once its last step has had its moment
+  await b.ui('pause', { group: 's1', on: true });
+  const paused = await until(helmSays, (h) => h[0] === 'Paused');
+  assert.match(paused[1], /^Claude Code · release notes/);
+  assert.equal(paused[paused.length - 1], 'Let Claude continue');
+  // The state is shown whole however long the session's name is.
+  assert.equal(await chrome(`(() => { const n = document.getElementById('helm-state'); return n.scrollWidth <= n.clientWidth; })()`), true);
+  await b.ui('pause', { group: 's1', on: false });
+  const working = s1.text('wait_for', { text: 'never there', timeout: 1500 }).catch(() => {});
+  await until(helmSays, (h) => h[0] === 'Working');
+  await working;
+});
+
+test('a session at work or paused shows on its group from any tab, and its menu pauses it', async () => {
+  const [own] = await mine();
+  await b.ui('tab:select', own.id);
+  const mark = (id) => chrome(`document.querySelector('#tabs .group[data-group="${id}"] .group-mark')?.className ?? null`);
+  await until(() => mark('s2'), (m) => m === null);
+  const working = s2.text('wait_for', { text: 'never there', timeout: 2500 }).catch(() => {});
+  await until(() => mark('s2'), (m) => m === 'group-mark working');
+  assert.ok((await boxes('#tabs .group[data-group="s2"] .group-mark'))[0], 'the dot is drawn');
+  await working;
+  await until(() => mark('s2'), (m) => m === null); // gone a moment after its last step
+
+  // Right-click on the group's name: Take over, then Let Claude continue.
+  assert.equal((await b.ui('group:menu-items', { group: 's3' }))[0], 'Take over');
+  await b.ui('group:menu-items', { group: 's3', click: 'Take over' });
+  await until(() => mark('s3'), (m) => m === 'group-mark paused');
+  assert.match(await s3.text('navigate', { url: b.base }).catch((e) => e.message), /paused/);
+  assert.equal(await chrome(`getComputedStyle(document.querySelector('.group.paused .group-name')).textDecorationLine`), 'none', 'not struck through');
+  assert.equal((await b.ui('group:menu-items', { group: 's3' }))[0], 'Let Claude continue');
+
+  // In the sidebar "Paused" is spelled out whole beside the name, and collapsed the mark is still there.
+  await b.ui('tabs:layout', { vertical: true, collapsed: false });
+  await until(() => chrome(`document.getElementById('tabs').parentElement.id`), (p) => p === 'sidebar');
+  const status = await chrome(`(() => {
+    const n = document.querySelector('#sidebar .group.paused .group-status');
+    return [n.textContent, n.scrollWidth <= n.clientWidth, n.getBoundingClientRect().width > 20];
+  })()`);
+  assert.deepEqual(status, ['Paused', true, true]);
+  await b.ui('tabs:layout', { collapsed: true });
+  await until(() => chrome(`getComputedStyle(document.querySelector('#sidebar .group-name')).display`), (d) => d === 'none');
+  assert.ok((await boxes('#sidebar .group.paused .group-mark'))[0], 'the pause sign shows in the collapsed sidebar');
+  await b.ui('tabs:layout', { vertical: false, collapsed: false });
+  await until(() => chrome(`document.getElementById('tabs').parentElement.id`), (p) => p === 'tabrow');
+  await b.ui('group:menu-items', { group: 's3', click: 'Let Claude continue' });
+  await until(() => mark('s3'), (m) => m === null);
+});
+
+test('a tab without an icon shows its site\'s first letter', async () => {
+  await b.ui('tab:new', b.base + '/second.html?letter');
+  const t = await until(() => b.state().then((s) => s.tabs.find((x) => x.active)), (x) => x && !x.loading && x.url.includes('letter'));
+  assert.equal(await chrome(`document.querySelector('.tab[data-id="${t.id}"] .letter')?.textContent ?? null`), '1'); // 127.0.0.1
+});
+
+test('at the smallest window, with the Claude panel open, the toolbar holds and the address field stays usable', async () => {
+  await size(720, 600);
+  assert.equal(await chrome(`document.body.classList.contains('panel-closed')`), false);
+  const [nav] = await boxes('#navrow');
+  const items = await boxes('#navrow > *');
+  inOrder(items, nav);
+  const address = items.find(([name]) => name === 'address-form');
+  assert.ok(address && address[2] - address[1] >= 150, `the address field is ${address?.[2] - address?.[1]}px wide`);
+  // The tab row holds too, with a session's tab on screen and the helm showing.
+  const theirs = (await b.state()).tabs.find((t) => t.group === 's1');
+  await b.ui('tab:select', theirs.id);
+  await until(helmSays, (h) => h.length > 0);
+  const [row] = await boxes('#tabrow');
+  inOrder(await boxes('#tabs, #newtab, #helm'), row);
+  inOrder(await boxes('#helm > *'), (await boxes('#helm'))[0]);
+  // The tab on screen is in sight in the strip, which scrolls when it is too full.
+  const [strip] = await boxes('#tabs');
+  const [active] = await until(() => boxes('#tabs .tab.active'), ([a]) => a && a[1] >= strip[1] - 1 && a[2] <= strip[2] + 1);
+  assert.ok(active, 'the tab on screen is in sight');
+  for (const s of [s1, s2, s3]) s.end();
+});

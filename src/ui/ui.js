@@ -89,6 +89,13 @@ const sendLayout = () => {
 sendLayout();
 new ResizeObserver(sendLayout).observe($('stage'));
 
+// A page without an icon is marked by its site's first letter (its title's, for a page with no address).
+function letterOf(t) {
+  let name = t.title;
+  try { name = new URL(t.url).hostname.replace(/^www\./, '') || name; } catch {}
+  return el('span', 'letter', [...(name || '').trim()][0]?.toUpperCase() || '');
+}
+
 function drawTab(t) {
   const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : '') + (t.pinned ? ' pinned' : ''));
   tab.setAttribute('role', 'tab');
@@ -105,9 +112,9 @@ function drawTab(t) {
     mark.src = t.favicon;
     mark.alt = '';
     mark.draggable = false; // the tab is what gets dragged, not its icon
-    mark.onerror = () => mark.replaceWith(el('span', 'dot'));
+    mark.onerror = () => mark.replaceWith(letterOf(t));
   } else {
-    mark = el('span', 'dot');
+    mark = t.loading ? el('span', 'dot') : letterOf(t);
   }
   tab.append(mark);
   // A pinned tab is its icon alone: it is closed from its menu, and Ctrl+W leaves it be.
@@ -148,6 +155,7 @@ function placeTabs() {
 // The user's pinned tabs first, then their other tabs, then one cluster per
 // Claude session with its name on it. Each run of tabs that a tab can be
 // dropped into carries its group's id (see the dragging below).
+let markTimer = 0;
 function drawTabs() {
   if (dragging) return; // redrawing would lose the tab being dragged; dragend draws
   placeTabs();
@@ -173,7 +181,8 @@ function drawTabs() {
       nodes.push(pins, yours);
       continue;
     }
-    const cluster = el('div', 'group' + (g.busy ? ' busy' : '') + (g.paused ? ' paused' : ''));
+    const busy = g.busy || lingerUntil.get(g.id) > Date.now(); // as the helm: no flicker between one step and the next
+    const cluster = el('div', 'group' + (busy ? ' busy' : '') + (g.paused ? ' paused' : ''));
     cluster.dataset.group = g.id;
     cluster.setAttribute('aria-label', `${g.label}'s tabs`);
     const name = el('button', 'group-name', g.label);
@@ -202,12 +211,29 @@ function drawTabs() {
     tag.draggable = true;
     // The sidebar has room for what the session is doing; along the top the helm says it.
     const status = el('span', 'group-status', g.paused ? 'Paused' : g.busy ? g.status : '');
+    // Seen from any tab, and in a collapsed sidebar: a dot while it works, a pause sign while paused.
+    if (g.paused || busy) {
+      const mark = el('span', 'group-mark ' + (g.paused ? 'paused' : 'working'));
+      mark.setAttribute('role', 'img');
+      mark.setAttribute('aria-label', g.paused ? 'Paused' : 'Working');
+      tag.append(mark);
+    }
     tag.append(name, status, close);
     cluster.append(tag, ...tabs.map(drawTab));
     nodes.push(cluster);
   }
   $('tabs').replaceChildren(...nodes);
+  // A dot that only lingers is taken away once its time is up.
+  clearTimeout(markTimer);
+  if (state.groups.some((g) => !g.busy && lingerUntil.get(g.id) > Date.now())) markTimer = setTimeout(drawTabs, 1450);
+  showActive();
 }
+// A strip along the top that is too full to show every tab scrolls: the tab
+// on screen stays in sight, also when the window or the helm leaves it less room.
+function showActive() {
+  if (!state.tabStrip?.vertical) $('tabs').querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+new ResizeObserver(showActive).observe($('tabs'));
 
 // Ending a session closes all its tabs and cannot be undone, so for one that
 // is working or has more than one tab the × on its tag (and "End session" in
@@ -269,6 +295,10 @@ function dropSpot(e) {
 }
 
 const tabsBox = $('tabs');
+// The wheel moves a strip along the top that is too full to show every tab.
+tabsBox.addEventListener('wheel', (e) => {
+  if (!state.tabStrip?.vertical && !e.deltaX) tabsBox.scrollLeft += e.deltaY;
+}, { passive: true });
 tabsBox.addEventListener('dragstart', (e) => {
   const tag = e.target.closest?.('.group-tag');
   if (tag) {
@@ -359,7 +389,8 @@ function drawHelm() {
   }
   const driving = !g.paused && (g.busy || lingering);
   const answer = (value) => () => loui.send('prompt:answer', { id: prompt.id, value });
-  let text = '', label = '', act = null, decline = null, no = 'Not now', always = null;
+  // what: the state in a word or two, shown whole ahead of the text, which is what gets cut short.
+  let what = '', text = '', label = '', act = null, decline = null, no = 'Not now', always = null;
   const asked = prompt && !(picking.active && prompt.kind !== 'pick'); // the user's own pointing comes first
   if (picking.active && !asked) {
     text = picking.message || 'Click the thing you mean. Esc cancels.';
@@ -375,7 +406,8 @@ function drawHelm() {
   } else if (asked && prompt.kind === 'handoff') {
     // Only the user's own tabs can be handed over: the one on screen when they answer.
     const theirs = activeTab()?.group === YOU;
-    text = theirs ? `${prompt.who} asks to work in this tab` : `${prompt.who} asks for one of your tabs. Open it to hand it over.`;
+    what = theirs ? 'Asks for this tab' : 'Asks for a tab';
+    text = theirs ? prompt.who : `${prompt.who}. Open one of your tabs to hand it over.`;
     if (theirs) {
       label = 'Hand it over';
       act = answer(true);
@@ -386,15 +418,18 @@ function drawHelm() {
     label = 'Cancel';
     act = () => loui.send('pick:cancel');
   } else if (g.paused) {
-    text = `${who} is paused. You're driving.`;
+    what = 'Paused';
+    text = `${who}. You're driving.`;
     label = 'Let Claude continue';
     act = () => loui.send('pause', { group: g.id, on: false });
   } else if (driving) {
-    text = `${who} is ${g.status}`;
+    what = 'Working';
+    text = `${who}: ${g.status}`;
     label = 'Take over';
     act = () => loui.send('pause', { group: g.id, on: true });
   } else if (g.id !== YOU) {
-    text = `${who} works in this tab`;
+    what = 'Claude\'s tab';
+    text = who;
     label = 'Take over';
     act = () => loui.send('pause', { group: g.id, on: true });
   }
@@ -402,6 +437,7 @@ function drawHelm() {
   helm.hidden = !act && !decline;
   helm.classList.toggle('moving', driving && !picking.active && !prompt);
   helm.classList.toggle('asking', !!asked);
+  $('helm-state').textContent = what;
   $('helm-text').textContent = text;
   $('helm-text').title = text;
   $('helm-btn').hidden = !act;
