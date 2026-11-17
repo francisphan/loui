@@ -674,6 +674,12 @@ async function testHook({ ui, arg }) {
     const item = Menu.getApplicationMenu().getMenuItemById(arg);
     return item && { label: item.label, checked: item.checked, enabled: item.enabled };
   }
+  // Where a tab's page is drawn, the size of its window's inside, and whether the page has the whole of it.
+  if (ui === 'tab:place') {
+    const tab = tabs.get(arg);
+    const [width, height] = tab.window.win.getContentSize();
+    return { view: tab.view.getBounds(), window: { width, height }, full: tab.window.full === tab.id, wide: !!tab.window.wide };
+  }
   if (ui === 'tab:crash') { tabs.get(arg)?.wc?.forcefullyCrashRenderer(); return 'ok'; } // as a page's process dying
   // A real press of the mouse in a tab's page, at a point in it, as the user's own.
   if (ui === 'tab:press') {
@@ -840,7 +846,7 @@ function appMenu() {
         { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
         { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
         { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
-        { label: 'Full screen', accelerator: 'F11', click: () => tabs.win.setFullScreen(!tabs.win.isFullScreen()) },
+        { label: 'Full screen', accelerator: 'F11', click: () => tabs.fullScreen(tabs.window()) },
         { label: 'Reader view', accelerator: 'F9', click: handlers['reader:toggle'] },
         { type: 'separator' },
         {

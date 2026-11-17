@@ -128,7 +128,9 @@ test('a guardrail question shows in the window the user is in, and Show tab brin
   assert.match(here.elsewhere, /^Window with “/, 'it says which window the tab is in');
   assert.equal(here.who, 'Claude Code · flow');
   assert.equal(here.onScreen, false);
-  assert.match(await chrome("document.getElementById('guard-text').textContent", two), /Claude Code · flow wants to click "Send" on .*Its tab is in another window/);
+  // The window draws it a moment after the state says so.
+  await wait('the question to be drawn there', async () => /Claude Code · flow wants to click "Send" on .*Its tab is in another window/
+    .test(await chrome("document.getElementById('guard-text').textContent", two)));
   assert.equal((await stateOf(priv)).guard, null);
 
   // Never in a private window, for a tab that is not in it.
