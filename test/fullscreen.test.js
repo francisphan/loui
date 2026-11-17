@@ -22,6 +22,8 @@ const onScreen = async () => (await b.state()).tabs.find((t) => t.active);
 const place = (id) => b.ui('tab:place', id);
 const covers = (p) => p.view.x === 0 && p.view.y === 0 && p.view.width === p.window.width && p.view.height === p.window.height;
 const press = (id) => b.ui('tab:press', { id, x: 200, y: 200 }); // a real press: full screen needs one
+// The page itself is out of full screen (it follows the window by a moment): only then does its button ask again.
+const settled = (id) => until(() => b.ui('tab:js', { id, code: '!document.fullscreenElement' }), 'the page to be out of full screen');
 
 let tab;
 test('a page that asks for the whole screen covers the tabs and the toolbar, and gives them back', async () => {
@@ -36,6 +38,7 @@ test('a page that asks for the whole screen covers the tabs and the toolbar, and
   await press(tab.id); // the page lets go
   const after = await until(async () => { const p = await place(tab.id); return !p.full && !covers(p) && p; }, 'the toolbar back');
   assert.equal(after.view.y, before.view.y);
+  await settled(tab.id);
 });
 
 test('showing another tab ends it', async () => {
@@ -44,7 +47,7 @@ test('showing another tab ends it', async () => {
   await b.ui('tab:new', b.base + '/second.html');
   const other = await until(async () => { const t = await onScreen(); return t.id !== tab.id && !t.loading && t; }, 'the new tab');
   assert.ok(!covers(await place(other.id)), 'the new tab sits under the toolbar');
-  await until(async () => (await b.ui('tab:js', { id: tab.id, code: '!document.fullscreenElement' })), 'the first page to be told');
+  await settled(tab.id);
   assert.equal((await place(tab.id)).full, false);
 });
 
