@@ -1,0 +1,32 @@
+/* Reader view's book in the address bar, to the left of the key and the star
+   (bookmarks.css and passwords.css place those at the right end). Ink when
+   offered, the focus colour while reader view is showing. */
+#reader {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--ink-2);
+}
+#reader[hidden] { display: none; }
+#reader:hover { background: var(--shoal); color: var(--ink); }
+#reader.on { color: var(--focus); }
+#reader:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* One step left for each of the star and the key that is showing. */
+#address-form:has(#star:not([hidden])) #reader,
+#address-form:has(#key:not([hidden])) #reader { right: 29px; }
+#address-form:has(#star:not([hidden])):has(#key:not([hidden])) #reader { right: 55px; }
+
+/* Room in the field for the buttons that are showing. */
+#address-form:has(#reader:not([hidden])) #address { padding-right: 34px; }
+#address-form:has(#reader:not([hidden])):has(#star:not([hidden])) #address,
+#address-form:has(#reader:not([hidden])):has(#key:not([hidden])) #address { padding-right: 60px; }
+#address-form:has(#reader:not([hidden])):has(#star:not([hidden])):has(#key:not([hidden])) #address { padding-right: 86px; }

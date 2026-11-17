@@ -194,12 +194,16 @@ stops the questions for that session.
 
 ## Tools
 
-`navigate`, `history`, `tabs`, `snapshot`, `click`, `type`, `press_key`,
+`navigate`, `history`, `tabs`, `snapshot`, `read_article`, `click`, `type`, `press_key`,
 `hover`, `select_option`, `scroll`, `wait_for`, `screenshot`, `evaluate`,
 `console_logs`, `network_requests`, `set_viewport`, `request_tab`, `picks`,
 `ask_user_to_pick`, and `devices` (list your browsers, or move to another).
 `snapshot` returns the page as an outline whose elements carry refs like
-`[e12]`; the acting tools take a ref. One list, in `src/shared/tools.js`.
+`[e12]`; the acting tools take a ref. `read_article` returns the page's
+article as reader view finds it (title, byline, text with markdown-style
+headings and lists, links as "text (url)"), cut off at 40,000 characters; it
+only reads, so it works while the user has paused the session. One list, in
+`src/shared/tools.js`.
 
 ## Windows
 
@@ -365,6 +369,26 @@ field that can't be seen.
   you* can ask the system to decrypt, as they can for Chrome's and Brave's
   passwords; Loui does not defend against malware on your account.
 
+## Reader view
+
+When a page in your own tabs reads as an article, a book appears in the
+address bar (or View › Reader view, F9). It shows the article alone, in
+Loui's type and colours, dark or light with the appearance, with controls
+at the top for text size, column width and serif or sans type; they are kept
+in `settings.json`. Reader view is a page in the tab's history: Back (or the
+book, or *Original page*) returns to the page, Forward to the article. The
+address bar keeps the article's address, with the book lit.
+
+The article is found by Mozilla's Readability (`@mozilla/readability`, the
+library behind Firefox's reader view), run with `src/page/reader.js` in an
+isolated world on a copy of the page, and copied through an allow-list: text
+and structure, links and images over http(s), nothing else (no scripts,
+handlers, styles, frames or forms). It is served from Loui's own
+`loui-reader:` scheme, which has an opaque origin (no storage, no cookies),
+no bridge, and a policy that runs no scripts and cannot be framed. Articles
+are kept in memory only; after a restart a reader entry in a tab's history
+links to the page instead.
+
 ## When a page can't be opened
 
 The tab explains what went wrong in a sentence or two, with *Try again*. The
@@ -411,8 +435,10 @@ src/main/errorpage.js the page shown when a page can't be opened (and Louis's wa
 src/main/passwords.js passwords: the encrypted store, offers to save, filling, import
 src/main/taskmanager.js  the task manager window: memory and CPU per tab and process
 src/main/default-browser.js  links from other apps (command line, second launch), Default apps
+src/main/reader.js    reader view: the check, the loui-reader: page and its settings, read_article's text
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/page/passwords.js runs in your own pages only: notices sign-ins, fills on request
+src/page/reader.js    with Readability, in an isolated world: finds the article, cleans it, as text
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
 test/                 end-to-end tests

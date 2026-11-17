@@ -7,6 +7,7 @@ const { nativeImage } = require('electron');
 const TOOLS = require('../shared/tools');
 const { toUrl, PRESETS, YOU } = require('./tabs');
 const { createPicker } = require('./picker');
+const { articleText } = require('./reader');
 
 const LIB = fs.readFileSync(path.join(__dirname, '../page/lib.js'), 'utf8');
 const WORLD = 4812; // isolated world for LIB: same DOM as the page, separate JavaScript
@@ -280,6 +281,11 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     snapshot: {
       label: () => 'reading the page',
       run: async ({ ref }, c) => text(await outline(c.need(), ref)),
+    },
+
+    read_article: {
+      label: () => 'reading the article',
+      run: async (_args, c) => text(await articleText(c.need())),
     },
 
     click: {

@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="bookmarks.css">
   <link rel="stylesheet" href="guardrails.css">
   <link rel="stylesheet" href="passwords.css">
+  <link rel="stylesheet" href="reader.css">
 </head>
 <body>
   <header id="bar">
@@ -34,6 +35,7 @@
       <form id="address-form">
         <input id="address" type="text" spellcheck="false" autocomplete="off"
                placeholder="Search or enter an address" aria-label="Address">
+        <button id="reader" type="button" aria-label="Reader view" aria-pressed="false" hidden></button>
         <button id="key" type="button" title="Fill a saved password" aria-label="Fill a saved password" hidden></button>
         <button id="star" type="button" aria-label="Bookmark this page" hidden></button>
       </form>
@@ -274,5 +276,6 @@
   <script src="consent.js"></script>
   <script src="guardrails.js"></script>
   <script src="passwords.js"></script>
+  <script src="reader.js"></script>
 </body>
 </html>

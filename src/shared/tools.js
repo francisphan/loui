@@ -32,6 +32,15 @@ module.exports = [
     shape: { ref: ref.optional() },
   },
   {
+    name: 'read_article',
+    description:
+      'Read the active page as an article, as reader view shows it: title, byline and the main ' +
+      'text, with markdown-style headings and lists and links as "text (url)". Leaves out menus, ' +
+      'ads and comments, so it is shorter than snapshot for reading. It has no refs: use ' +
+      'snapshot to act on the page.',
+    shape: {},
+  },
+  {
     name: 'click',
     acts: true,
     description:
