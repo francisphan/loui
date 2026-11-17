@@ -243,6 +243,22 @@ Brave, Chrome, Edge or Firefox export (Brave: *Bookmarks â€º Bookmark manager â€
 (`javascript:` addresses) are left out. They are kept in `bookmarks.json` in
 the profile. Claude sessions have no tool that reads or changes them.
 
+## When a page can't be opened
+
+The tab explains what went wrong in a sentence or two, with *Try again*. The
+address bar keeps the address that failed, and *Try again*, Reload and Back
+all work on that address. When the network is down or the address doesn't
+exist, Louis (the husky in the icon) is there too: take him for a walk and
+pick up after him before the lawn fills up. The best score is kept in
+`game.json` in the profile. When the connection comes back the page reloads by
+itself, or, if you have started playing, offers to. The game stops whenever
+its tab is not on screen, and Louis sits still if the system asks for reduced
+motion.
+
+The page is drawn into Chromium's own error document (`src/ui/errorpage.*`,
+`src/ui/louis.js`), which has an opaque origin: no bridge, no storage, no
+cookies, and history does not record it.
+
 ## Layout
 
 ```
@@ -267,6 +283,7 @@ src/main/search.js    the search engine for the address bar
 src/main/brave.js     Open in Brave, and the sites that open there instead of in Loui
 src/main/print.js     printing and Save as PDF
 src/main/bookmarks.js bookmarks: the bar's folder menus, import, bookmarks.json
+src/main/errorpage.js the page shown when a page can't be opened (and Louis's walk)
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in

@@ -1,0 +1,280 @@
+/* Loui's error page and Louis's walk. Same chart palette as the window
+   chrome (ui.css), plus a lawn. */
+
+:root {
+  color-scheme: light dark;
+  --water: #E6EDEF;
+  --paper: #FBFCFC;
+  --ink: #14242C;
+  --ink-2: #55676F;
+  --rule: #C6D2D7;
+  --focus: #2B7A93;
+  --button: #2F6FA0;
+  --on-button: #FFFFFF;
+  --grass: #C9DDBA;
+  --grass-2: #BFD6AE;
+  --hedge: #8DB27A;
+  --warn: #B4472C;
+  --card: rgba(251, 252, 252, 0.92);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --water: #101B22;
+    --paper: #1A2832;
+    --ink: #E3EBEE;
+    --ink-2: #93A6AF;
+    --rule: #2B3E4A;
+    --focus: #7CC4DA;
+    --button: #7CC4DA;
+    --on-button: #0D1A20;
+    --grass: #1D3328;
+    --grass-2: #213A2D;
+    --hedge: #2C4A37;
+    --warn: #F2988F;
+    --card: rgba(26, 40, 50, 0.92);
+  }
+}
+
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--water);
+  color: var(--ink);
+  font: 16px/1.5 'Source Sans 3', system-ui, sans-serif;
+}
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.sheet {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: clamp(24px, 7vh, 72px) 24px 32px;
+}
+
+/* ── what went wrong ─────────────────────────────────────────────────────── */
+.explain { max-width: 600px; }
+.badge { width: 56px; height: 56px; display: block; margin-bottom: 16px; }
+h1 { font-size: 28px; line-height: 1.2; font-weight: 600; margin: 0 0 8px; }
+.why { margin: 0 0 4px; color: var(--ink); }
+.why b { font-weight: 600; overflow-wrap: anywhere; }
+.address {
+  margin: 0 0 20px;
+  color: var(--ink-2);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.detail { color: var(--ink-2); font-size: 13px; font-family: ui-monospace, monospace; }
+
+.primary {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 18px;
+  background: var(--button);
+  color: var(--on-button);
+  font-weight: 600;
+  cursor: pointer;
+}
+.primary:hover { filter: brightness(1.08); }
+.primary:active { transform: translateY(1px); }
+
+.back {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 0;
+  padding: 10px 12px 10px 16px;
+  border-radius: 10px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  width: fit-content;
+}
+.back[hidden] { display: none; }
+
+/* ── the game ────────────────────────────────────────────────────────────── */
+.game {
+  margin-top: 36px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.hud {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.hud p { margin: 0; }
+.tally b { color: var(--ink); font-size: 18px; display: inline-block; min-width: 1.2em; font-variant-numeric: tabular-nums; }
+.best { margin-left: auto !important; }
+.lawn-count { display: flex; align-items: center; gap: 8px; }
+.dots { display: inline-flex; gap: 4px; }
+.dots i {
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 1.5px solid var(--rule);
+  box-sizing: border-box;
+}
+.dots i.on { background: #8E5B34; border-color: #8E5B34; }
+.lawn-count.warn .dots i.on { background: var(--warn); border-color: var(--warn); }
+.lawn-count.warn #floor { color: var(--warn); font-weight: 600; }
+
+.yard {
+  position: relative;
+  height: clamp(260px, 48vh, 420px);
+  overflow: hidden;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  background:
+    repeating-linear-gradient(90deg, var(--grass) 0 64px, var(--grass-2) 64px 128px);
+  border-top: 1px solid var(--rule);
+}
+.hedge {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 22%;
+  background:
+    radial-gradient(circle at 20px 100%, var(--hedge) 22px, transparent 23px) 0 0 / 40px 100% repeat-x,
+    linear-gradient(var(--hedge), var(--hedge)) 0 0 / 100% 72% no-repeat;
+  opacity: 0.85;
+}
+
+.card {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  width: min(380px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 16px 20px 18px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  text-align: center;
+  z-index: 100000;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+.card.low { top: auto; bottom: 12px; }
+.card[hidden] { display: none; }
+.card h2 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+.card p { margin: 0 0 14px; color: var(--ink-2); }
+
+/* ── Louis ───────────────────────────────────────────────────────────────── */
+.louis {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 172px;
+  height: 120px;
+  transform-origin: 50% 100%;
+  will-change: transform;
+  pointer-events: none;
+}
+.louis.idle { pointer-events: auto; cursor: pointer; }
+.louis svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.louis .flip { transform-box: view-box; transform-origin: 72px 50px; }
+.louis.left .flip { transform: scaleX(-1); }
+.louis .shadow { fill: rgba(0, 0, 0, 0.16); }
+.louis .tongue, .louis .closed { display: none; }
+.louis.trot .tongue, .louis.zoom .tongue { display: inline; }
+
+.louis .leg, .louis .tail, .louis .head, .louis .body, .louis .rear {
+  transform-box: view-box;
+}
+/* Trot: diagonal pairs of legs swing together. */
+.louis.trot .leg, .louis.zoom .leg { animation: swing 0.36s ease-in-out infinite alternate; }
+.louis.trot .leg.b, .louis.zoom .leg.b { animation-delay: -0.36s; }
+.louis.zoom .leg { animation-duration: 0.18s; }
+.louis.zoom .leg.b { animation-delay: -0.18s; }
+.louis.trot .body, .louis.zoom .body { animation: bob 0.18s ease-in-out infinite alternate; }
+.louis.zoom .body { animation-duration: 0.09s; }
+.louis .tail { animation: wag 0.9s ease-in-out infinite alternate; }
+.louis.trot .tail, .louis.zoom .tail { animation-duration: 0.3s; }
+@keyframes swing { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+@keyframes bob { from { transform: translateY(0); } to { transform: translateY(-2.5px); } }
+@keyframes wag { from { transform: rotate(-10deg); } to { transform: rotate(12deg); } }
+
+/* Sniff: nose to the ground. */
+.louis .head { transition: transform 0.25s ease; }
+.louis.sniff .head { transform: rotate(28deg) translate(-2px, 6px); }
+.louis.sniff .nose { animation: sniff 0.22s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: center; }
+@keyframes sniff { from { transform: scale(1); } to { transform: scale(1.25, 0.85); } }
+
+/* Squat (and sit): rear down, tail up, a little concentration. */
+.louis .rear { transition: transform 0.2s ease; }
+.louis.squat .rear, .louis.sit .rear { transform: rotate(-14deg) translate(4px, 7px); }
+.louis.squat .leg.back, .louis.sit .leg.back { transform: scaleY(0.62); }
+.louis.squat .tail { animation: none; transform: rotate(-26deg); }
+.louis.squat .eye { display: none; }
+.louis.squat .closed { display: inline; }
+.louis.squat .body { animation: strain 0.12s linear infinite alternate; }
+@keyframes strain { from { transform: translateX(-0.6px); } to { transform: translateX(0.6px); } }
+.louis.sit .tail { animation: none; transform: rotate(18deg); }
+
+/* Kick: the proud scratch afterwards. */
+.louis.kick .leg.back { animation: kick 0.16s ease-in-out infinite alternate; }
+@keyframes kick { from { transform: rotate(0deg); } to { transform: rotate(-48deg); } }
+
+.bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  margin-bottom: 4px;
+  transform: translateX(-30%);
+  padding: 3px 10px;
+  white-space: nowrap;
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  font-size: 14px;
+  font-weight: 600;
+  animation: pop 0.25s ease-out;
+}
+.bubble[hidden] { display: none; }
+
+/* ── what Louis leaves, and picking it up ────────────────────────────────── */
+.poop {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 48px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.poop svg { width: 34px; height: 30px; display: block; margin: 8px auto 0; overflow: visible; animation: plop 0.35s cubic-bezier(0.3, 1.6, 0.6, 1); transform-origin: 50% 100%; }
+.poop:hover svg { transform: scale(1.12); }
+.poop .stink { animation: stink 1.6s ease-in-out infinite; opacity: 0.6; }
+.poop .stink + .stink { animation-delay: -0.8s; }
+.poop.left svg { filter: saturate(0.6); }
+@keyframes plop { from { transform: scale(0.2, 0.1); } 60% { transform: scale(1.15, 0.9); } to { transform: scale(1); } }
+@keyframes stink { 0% { transform: translateY(2px); opacity: 0; } 40% { opacity: 0.6; } 100% { transform: translateY(-6px); opacity: 0; } }
+@keyframes pop { from { transform: translateX(-30%) scale(0.6); opacity: 0; } to { transform: translateX(-30%) scale(1); opacity: 1; } }
+
+.bag, .spark, .plus { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 99999; }
+.bag { width: 34px; height: 38px; }
+.spark { width: 10px; height: 10px; }
+.plus { font-weight: 700; color: var(--ink); font-size: 16px; }
+.bump { animation: bump 0.28s ease-out; }
+@keyframes bump { 50% { transform: scale(1.4); } }
+
+/* Hidden, asleep or round over: nothing moves. */
+.still *, .still *::before, .still *::after { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .louis *, .poop *, .bubble { animation: none !important; transition: none !important; }
+}
+
+@media (max-width: 560px) {
+  .hud { flex-wrap: wrap; gap: 4px 16px; }
+  .lawn-count { order: 3; width: 100%; }
+  h1 { font-size: 24px; }
+}

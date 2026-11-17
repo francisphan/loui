@@ -91,8 +91,10 @@ function createActions({ tabs, sessions, changed, refuse = () => null }) {
       if (/no longer on the page/.test(e.message)) throw e;
       return `Page: ${tab.title}\nURL: ${tab.url}\n\n(This page can't be read as an outline. Try screenshot.)`;
     }
+    // An error page's own address is Chromium's; the address that failed is the one that matters.
+    const url = s.url.startsWith('chrome-error:') ? tab.url : s.url;
     return (
-      `Page: ${s.title}\nURL: ${s.url}\n` +
+      `Page: ${s.title}\nURL: ${url}\n` +
       `Viewport ${s.viewport.w}x${s.viewport.h}, scrolled ${s.scroll.y} of ${s.scroll.max}px\n\n` +
       (s.text || '(nothing readable on this page)') +
       (s.cut ? '\n… outline cut off here. Snapshot a region by ref, or scroll.' : '')
