@@ -12,7 +12,7 @@ const SEND = new Set([
   'suggest:query', 'suggest:show', 'suggest:hide', 'suggest:pick', 'history:list', 'history:remove', 'history:clear',
   'shields:menu', 'shields:set',
   'print', 'print:save-pdf', 'search:set', 'brave:open', 'brave:add', 'brave:remove',
-  'bookmarks', 'passwords',
+  'bookmarks', 'passwords', 'reader:toggle',
   'prompt:answer', 'consent:revoke',
 ]);
 const LISTEN = new Set([

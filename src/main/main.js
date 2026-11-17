@@ -33,6 +33,7 @@ const { createGuardrails } = require('./guardrails');
 const { createPasswords } = require('./passwords');
 const { createTaskManager } = require('./taskmanager');
 const { createDefaultBrowser, urlsFrom } = require('./default-browser');
+const { createReader } = require('./reader');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -76,6 +77,7 @@ let prompts, consent;
 let guardrails;
 let passwords;
 let taskManager, defaultBrowser;
+let reader;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
 
@@ -116,6 +118,7 @@ const currentState = () => ({
   tabStrip: tabStrip(),
   ...guardrails.state(),
   ...passwords.state(),
+  ...reader.state(),
 });
 
 // Where the tabs are: a strip along the top (the default) or a sidebar on the
@@ -166,6 +169,7 @@ function createWindow() {
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), win, tabs, ses, send, changed: pushState });
   suggest.add(bookmarks);
   passwords = createPasswords({ tabs, win, home: paths.home, send, changed: pushState });
+  reader = createReader({ tabs, ses, settings, save: saveSettings, changed: pushState });
   prompts = createPrompts({ changed: () => { pushState(); if (prompts.head() && !win.isFocused()) win.flashFrame(true); } });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id) });
@@ -302,6 +306,7 @@ const handlers = {
   'guard:forget': (which) => guardrails.forget(which),
   'guard:untrust': (id) => guardrails.untrust(id),
   passwords: (request) => passwords.handle(request),
+  'reader:toggle': () => reader.toggle(),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -325,6 +330,7 @@ async function testHook({ ui, arg }) {
   if (bookmarks.probes[ui]) return bookmarks.probes[ui](arg);
   if (passwords.probes[ui]) return passwords.probes[ui](arg);
   if (taskManager.probes[ui]) return taskManager.probes[ui](arg);
+  if (reader.probes[ui]) return reader.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
@@ -401,6 +407,7 @@ function appMenu() {
         // The keyboard's way to do what dragging a tab does.
         { label: 'Move tab left', accelerator: 'Ctrl+Shift+PageUp', click: () => handlers['tab:nudge'](-1) },
         { label: 'Move tab right', accelerator: 'Ctrl+Shift+PageDown', click: () => handlers['tab:nudge'](1) },
+        { label: 'Reader view', accelerator: 'F9', click: handlers['reader:toggle'] },
         { label: 'Pin or unpin tab', click: () => active() && tabs.pin(active().id, !active().pinned) },
         { type: 'separator' },
         {
