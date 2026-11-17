@@ -128,7 +128,14 @@ module.exports = [
     acts: true,
     description:
       'Run JavaScript in the active page and return the result. Takes an expression or a ' +
-      'function body using return and await.',
+      'function body using return and await. For reading and debugging: to press or submit ' +
+      'something use click, type or press_key, which let the user be asked first. A script ' +
+      'that clicks, submits or calls a handler (el.onclick()) is asked about before it runs ' +
+      'on a page with a control that pays, sends or deletes. From then until the page is ' +
+      'left, a click, press or submit that any script sends to such a control is held for ' +
+      'the user (while your call runs) or stopped (later, also when the page itself sent ' +
+      'it), and a DELETE request is asked about. Loui cannot see a handler called directly, ' +
+      'so do not use that to get around a question.',
     shape: { code: z.string() },
   },
   {

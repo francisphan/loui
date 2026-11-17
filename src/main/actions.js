@@ -226,7 +226,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
   // Guardrails: a consequential action waits here for the user, with a
   // picture of its target, before any input reaches the page. Throws the
   // session's tool error if the user declines (see guardrails.js).
-  async function guarded(c, tab, found, rect) {
+  async function guarded(c, tab, found, rect, follows = true) {
     if (!found) return;
     c.say(`waiting for you to allow it to ${found.what}`);
     let image = null;
@@ -244,6 +244,11 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     } finally {
       c.say(found.what);
     }
+    // What the page then does about the allowed action by itself (a handler
+    // that clicks a hidden submit button from a timer) is not the doing of a
+    // script that ran here earlier: the watch lets it by for a few seconds.
+    // Not for a script, or for what a script sent: those are each asked about.
+    if (follows && tab.watched && found.kind !== 'script' && tab.wc) await page(tab, 'pass', { ms: 4000 }).catch(() => {});
   }
 
   // A click (or the click that puts the caret in a field) goes to whatever is
@@ -270,24 +275,30 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     throw new Error('The page kept changing what is under the pointer, so Loui did not click. Take a new snapshot.');
   }
 
-  // What a script stopped from doing since the last look (lib.js: a click,
-  // submit or Enter it sent to a control that may pay, send or delete),
-  // judged like the same input from a tool. done: the script's own call is
-  // still running, so the user is asked, and what they allow is let through.
-  // Later, it stays stopped and the session is told.
-  async function held(c, tab, done = false) {
-    const r = await page(tab, 'caughtByScript', { done }).catch(() => null);
+  // What was stopped in the page since the last look (lib.js: a click, a
+  // press, a submit or an Enter that a script sent to a control that may pay,
+  // send or delete), judged like the same input from a tool. The watch is on
+  // from a script's first run until the page is left (a new page has none).
+  // during: the script's own call is still running, so the user is asked,
+  // and what they allow is let through. Later it stays stopped and the
+  // session is told: by then nobody can say whether a timer of the script's
+  // or the page itself sent it.
+  async function held(c, tab, during = false) {
+    const r = await page(tab, 'caughtByScript').catch(() => null);
     if (!r?.on) tab.watched = false;
-    const said = [];
+    const said = [], allowed = new Set();
     for (const h of r?.list || []) {
       const found = guard.judge(c.session, tab, h.info);
-      if (found && !done) {
-        said.push(`A script you ran earlier tried to ${found.what} after it returned. Loui stopped it: use click or press_key instead, so the user can be asked.`);
+      if (found && !during) {
+        const line = `After a script you ran in this page had returned, something (a timer it left, or the page itself) tried to ${found.what} without real input. Loui stopped it: use click or press_key instead, so the user can be asked.`;
+        if (!said.includes(line)) said.push(line);
         continue;
       }
-      if (found) {
-        await guarded(c, tab, found, h.rect);
+      // One press is several events (pointerdown, mousedown, click): asked once.
+      if (found && !allowed.has(found.what)) {
+        await guarded(c, tab, found, h.rect, false);
         c.own(tab);
+        allowed.add(found.what);
         said.push(`Loui held the script's attempt to ${found.what} until the user allowed it.`);
       }
       await page(tab, 'release', { i: h.i }).catch(() => {});
@@ -297,10 +308,12 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
 
   // Runs fn, which runs a script of Claude's in the page, under that watch.
   // Resolves { out: fn's result, note: what to tell the session }.
-  async function watched(c, tab, fn) {
+  // posts: whether a form the tab posts meanwhile is asked about (not for a
+  // select that is all its form holds).
+  async function watched(c, tab, fn, posts = true) {
     if (!guard.applies(c.session)) return { out: await fn(), note: '' };
     await page(tab, 'watchScript', guard.hints()).catch(() => {});
-    guard.scripting(c.session);
+    guard.scripting(c.session, posts);
     tab.watched = true;
     let out, failed = null;
     try { out = await fn(); } catch (e) { failed = e; }
@@ -473,7 +486,10 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         c.own(tab);
         // A select may act as soon as it changes (its script submits a form or
         // presses a button): that is watched like a script of Claude's own.
-        const { out: r, note } = await watched(c, tab, async () => check(await page(tab, 'choose', { ref, value }), ref));
+        // A form that holds nothing but the select (a sort or filter that
+        // posts back) sends nothing worth asking about.
+        const posts = await page(tab, 'filledBeside', { ref }).catch(() => true);
+        const { out: r, note } = await watched(c, tab, async () => check(await page(tab, 'choose', { ref, value }), ref), posts);
         if (r.error === 'not-select') throw new Error(`${ref} is not a <select>. Click it instead.`);
         if (r.error === 'no-option') throw new Error(`No option "${value}". Options: ${r.options.join(' | ')}`);
         return after(c, tab, `Chose "${r.chosen}".${note ? ` ${note}` : ''}`);
@@ -585,12 +601,16 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         c.note(String(code)); // the activity log keeps its first line only
         // A script can do anything a click can (form.submit(), fetch), and
         // read what is typed in the page. On a page with card or password
-        // fields it is asked about first; elsewhere what it clicks or submits
-        // is held and judged like a tool's own input (watched), and what it
-        // sends is checked like any other action's (see guardrails.js).
+        // fields it is asked about first, and so is one that reads like it
+        // clicks, submits or calls a handler on a page with a control that
+        // pays, sends or deletes (a handler called directly cannot be seen
+        // later). What it clicks or submits is held and judged like a tool's
+        // own input (watched), and what it sends is checked like any other
+        // action's (see guardrails.js).
         if (guard.applies(c.session)) {
           const fields = await page(tab, 'guardPage').catch(() => null);
-          await guarded(c, tab, guard.judgeScript(c.session, tab, fields));
+          const controls = guard.presses(code) ? await page(tab, 'guardControls', guard.hints()).catch(() => null) : null;
+          await guarded(c, tab, guard.judgeScript(c.session, tab, fields, controls));
           c.own(tab);
         }
         // Errors thrown by the code come back as values, so a rejection here can
@@ -714,17 +734,25 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         if (acts && tabs.group(session.group)?.paused) throw Object.assign(new Error(PAUSED), { stopped: 'paused' });
       };
       const c = { say, note: record, session, own, need: () => need(session) };
-      // What a script of an earlier call tried after it had returned (see held).
-      const late = current?.watched && current.wc ? await held(c, current).catch(() => '') : '';
+      // What was stopped in a page a script of an earlier call ran in (see
+      // held), before this call and while it ran.
+      const seen = (tab) => (tab?.watched && tab.wc && tabs.get(tab.id) === tab && tab.group === session.group
+        ? held(c, tab).catch(() => '') : '');
+      const late = await seen(current);
+      // The Claude panel works in the user's own tabs: when it last did, for
+      // what only the user may do there (certs.js).
+      const stamp = () => { const t = tabs.current(session.group); if (t && session.group === YOU) t.panelAt = Date.now(); };
+      stamp();
       try {
         const out = await handler.run(args, c);
-        const note = [late, await stopped()].filter(Boolean).join('\n');
+        const note = [late, await seen(tabs.current(session.group)), await stopped()].filter(Boolean).join('\n');
         return note ? [...text(note), ...out] : out;
       } catch (e) {
         const note = [late, await stopped()].filter(Boolean).join('\n');
         if (note) e.message += `\n${note}`;
         throw e;
       } finally {
+        stamp();
         guard.end(session);
       }
     });
