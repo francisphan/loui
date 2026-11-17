@@ -589,12 +589,12 @@ function drawChips() {
 // Settings, the relay form and site permissions each take the Claude panel's
 // place while open, as History, Bookmarks, Passwords and Sessions do: one at
 // a time, with a × at the top, and Esc closes. opened(): once it is on show.
-// Returns show(open).
+// Returns show(open, quiet): quiet opens it without taking the keyboard.
 const SIDE_PANELS = ['history', 'bookmarks', 'passwords', 'activity', 'settings', 'relay', 'perms'];
 function sidePanel(name, node, opened) {
   const cls = document.body.classList;
   const isOpen = () => cls.contains(`${name}-open`);
-  const show = (open) => {
+  const show = (open, quiet = false) => {
     if (!open && !isOpen()) return;
     if (open) {
       for (const other of SIDE_PANELS) if (other !== name && cls.contains(`${other}-open`)) $(`${other}-close`).click();
@@ -602,8 +602,8 @@ function sidePanel(name, node, opened) {
     cls.toggle(`${name}-open`, open);
     node.hidden = !open;
     $('panel-toggle').classList.toggle('on', !open && panelOpen());
-    if (open) opened?.();
-    else focusPage();
+    if (open && !quiet) opened?.();
+    else if (!open) focusPage();
   };
   setIcon($(`${name}-close`), 'close');
   $(`${name}-close`).onclick = () => show(false);
@@ -647,8 +647,7 @@ function drawLink() {
   // window, which has no panel; nor taking the keyboard from what the user is typing).
   $('relay-status').classList.toggle('refused', link.status === 'refused');
   if (link.status === 'refused' && linkWas !== 'refused' && !state.window?.private && relay.hidden) {
-    relay.hidden = false;
-    togglePanel(true);
+    showRelay(true, true);
   }
   linkWas = link.status;
 }

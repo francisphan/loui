@@ -78,8 +78,13 @@ $('address-form').addEventListener('keydown', (e) => {
     if (!chosen && row.fill) address.setSelectionRange(typed.length, row.fill.length);
     drawSuggestions();
   } else if (e.key === 'Escape') {
-    e.stopPropagation(); // the first Esc only closes the list
-    address.value = typed;
+    // With suggestions on show the first Esc only closes the list. The row
+    // that says what Enter does is not one: with it alone, Esc leaves the
+    // address bar at once (ui.js).
+    if (offered.length > 1 || chosen) {
+      e.stopPropagation();
+      address.value = typed;
+    }
     dismissSuggestions();
   } else if (e.key === 'Enter' && !e.isComposing) {
     // Rows for an earlier text (Enter came before the answer) are not what
