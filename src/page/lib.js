@@ -336,11 +336,65 @@
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-  function locate({ ref, scroll = true }) {
+  // ── what an action would set off (for guardrails, src/main/guardrails.js) ─
+  // Facts only; the main process decides what counts as consequential.
+  // Kinds of field that make submitting a form consequential.
+  function fieldKind(f) {
+    const ac = (f.getAttribute('autocomplete') || '').toLowerCase();
+    const type = (f.getAttribute('type') || '').toLowerCase();
+    const id = `${f.getAttribute('name') || ''} ${f.id || ''}`.toLowerCase();
+    if (type === 'password' || /\b(current|new)-password\b/.test(ac)) return 'password';
+    if (/\bcc-(number|csc|exp)/.test(ac) || /card.?(number|num|no)\b|cc.?num|\bcvv|\bcvc|\bcsc\b/.test(id)) return 'card';
+    if (/\bone-time-code\b/.test(ac)) return 'otp';
+    return null;
+  }
+  function fieldsIn(root) {
+    const has = {};
+    for (const f of root.querySelectorAll('input')) {
+      const k = fieldKind(f);
+      if (k) has[k] = true;
+    }
+    return has;
+  }
+  const TEXT_INPUT = /^(|text|email|password|search|tel|url|number|date|datetime-local|month|week|time)$/;
+  // how: 'click' (a click, or Space on a focused control) or 'enter' (Enter in it).
+  function guardOf(el, how = 'click') {
+    const t = el.closest('button,a[href],input,select,textarea,summary,[role=button],[role=link],[role=menuitem]') || el;
+    const role = roleOf(t) || t.tagName.toLowerCase();
+    const type = (t.getAttribute('type') || '').toLowerCase();
+    const form = t.form || t.closest('form');
+    let submits = false;
+    if (form) {
+      if (t.tagName === 'BUTTON') submits = type === '' || type === 'submit';
+      else if (t.tagName === 'INPUT') {
+        submits = type === 'submit' || type === 'image' || (how === 'enter' && TEXT_INPUT.test(type));
+      }
+    }
+    return {
+      role, name: nameOf(t), submits, form: form ? fieldsIn(form) : {},
+      href: t.closest('a[href]')?.href || null,
+    };
+  }
+  function guardAt({ x, y }) {
+    const el = deepElementFromPoint(x, y);
+    return el ? guardOf(el) : null;
+  }
+  function guardFocus({ how }) {
+    let a = document.activeElement;
+    while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+    while (a?.tagName === 'IFRAME') {
+      try { a = a.contentDocument?.activeElement; } catch { a = null; }
+    }
+    return a && a !== document.body ? guardOf(a, how) : null;
+  }
+  const guardPage = () => fieldsIn(document);
+
+  function locate({ ref, scroll = true, how = 'click' }) {
     let el = elOf(ref);
     if (!el) return { error: 'stale' };
     const role = roleOf(el) || el.tagName.toLowerCase();
     const name = nameOf(el);
+    const guard = guardOf(el, how);
     if (scroll) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     let r = rectOf(el);
     // Restyled checkboxes and radios hide the real input; aim at its label.
@@ -353,7 +407,7 @@
     const y = clamp(r.y + r.h / 2, 1, innerHeight - 2);
     const hit = deepElementFromPoint(x, y);
     const covered = hit && !holds(el, hit) && !holds(hit, el) ? brief(hit) : null;
-    return { x, y, rect: r, role, name, covered };
+    return { x, y, rect: r, role, name, covered, guard };
   }
 
   // ── Claude's pointer ────────────────────────────────────────────────────
@@ -648,6 +702,6 @@
 
   globalThis.__loui = {
     snapshot, locate, pointAt, overlay, pick, cancelPick, pickAt, focus, choose, scroll, calm,
-    hasText,
+    hasText, guardAt, guardFocus, guardPage,
   };
 })();

@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Checkout</title></head>
+<body>
+  <h1>Checkout</h1>
+  <p id="out">not paid</p>
+  <form method="post" action="/done.html" id="pay">
+    <label>Card number <input name="cardnumber" autocomplete="cc-number" value="4242 4242 4242 4242"></label>
+    <label>Security code <input name="cvc" autocomplete="cc-csc" value="123"></label>
+    <button>Place order</button>
+  </form>
+  <!-- A harmless-looking button whose script pays: form.submit() fires no submit event. -->
+  <button id="next" type="button" onclick="setTimeout(() => document.getElementById('pay').submit(), 50)">Next</button>
+  <!-- And one that pays through fetch, with the card number in JSON. -->
+  <button id="continue" type="button" onclick="pay()">Continue</button>
+  <script>
+    function pay() {
+      fetch('/done.html', { method: 'POST', body: JSON.stringify({ card: { number: '4242424242424242', cvc: '123' } }) })
+        .then(() => { out.textContent = 'paid by fetch'; }, () => { out.textContent = 'fetch stopped'; });
+    }
+  </script>
+</body></html>

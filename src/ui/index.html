@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="history.css">
   <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="bookmarks.css">
+  <link rel="stylesheet" href="guardrails.css">
 </head>
 <body>
   <header id="bar">
@@ -83,6 +84,17 @@
       <p id="downloads-empty">Files you download show up here.</p>
       <ul id="downloads-list"></ul>
     </section>
+    <div id="guard-ask" role="alertdialog" aria-labelledby="guard-text" hidden>
+      <img id="guard-shot" alt="What Claude is about to act on" hidden>
+      <div id="guard-body">
+        <span id="guard-text"></span>
+        <label id="guard-trust-label"><input id="guard-trust" type="checkbox"> Trust this session until it ends</label>
+      </div>
+      <button id="guard-show" class="quiet" type="button">Show tab</button>
+      <button id="guard-block" type="button">Block</button>
+      <button id="guard-always" type="button">Always on this site</button>
+      <button id="guard-once" type="button">Allow once</button>
+    </div>
     <div id="perm-ask" role="alertdialog" aria-labelledby="perm-text" hidden>
       <span id="perm-text"></span>
       <label id="perm-keep-label"><input id="perm-keep" type="checkbox"> Remember for this site</label>
@@ -152,6 +164,19 @@
       <h3>Claude sessions let in without asking</h3>
       <p>The first time a new Claude session uses Loui, Loui asks you. Sessions from these are let in straight away.</p>
       <ul id="consent-list"></ul>
+      <h3>Ask before Claude acts</h3>
+      <label class="check"><input id="guard-on" type="checkbox"> Ask me before Claude pays, buys, sends, deletes or signs in</label>
+      <p>Loui pauses Claude and asks you above the page first. This covers every Claude session and the Claude panel, never what you do yourself.</p>
+      <h3>Sites Claude asks before opening</h3>
+      <ul id="guard-sites" class="guard-list"></ul>
+      <form id="guard-site-add" class="row">
+        <input id="guard-site" type="text" spellcheck="false" autocomplete="off" placeholder="mybank.com" aria-label="Site Claude should ask before opening">
+        <button type="submit" class="quiet">Add</button>
+      </form>
+      <h3>Allowed without asking</h3>
+      <ul id="guard-remembered" class="guard-list"></ul>
+      <h3 id="guard-trusted-title" hidden>Sessions you trust until they end</h3>
+      <ul id="guard-trusted" class="guard-list" hidden></ul>
       <div class="row end"><button id="settings-close" class="quiet" type="button">Close</button></div>
     </section>
     <div id="feed">
@@ -224,5 +249,6 @@
   <script src="settings.js"></script>
   <script src="bookmarks.js"></script>
   <script src="consent.js"></script>
+  <script src="guardrails.js"></script>
 </body>
 </html>

@@ -29,6 +29,7 @@ const { createBrave } = require('./brave');
 const { createPrint } = require('./print');
 const { createBookmarks } = require('./bookmarks');
 const { createErrorPage } = require('./errorpage');
+const { createGuardrails } = require('./guardrails');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -69,6 +70,7 @@ let search, brave, print;
 let bookmarks;
 let errorPage;
 let prompts, consent;
+let guardrails;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -105,6 +107,7 @@ const currentState = () => ({
   ...brave.state(),
   ...bookmarks.state(),
   tabStrip: tabStrip(),
+  ...guardrails.state(),
 });
 
 // Where the tabs are: a strip along the top (the default) or a sidebar on the
@@ -157,7 +160,8 @@ function createWindow() {
   prompts = createPrompts({ changed: () => { pushState(); if (prompts.head() && !win.isFocused()) win.flashFrame(true); } });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id) });
-  actions = createActions({ tabs, sessions, prompts, changed: pushState, refuse: brave.refuse });
+  guardrails = createGuardrails({ ses, tabs, sessions, home: paths.home, changed: pushState });
+  actions = createActions({ tabs, sessions, prompts, changed: pushState, refuse: brave.refuse, guard: guardrails });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
   handle = rpc.createHandler({ run: actions.run, sessions, admit: consent.admit, extra: process.env.LOUI_TEST ? testHook : null });
   link = createLink({
@@ -272,6 +276,13 @@ const handlers = {
   'brave:add': (site) => brave.add(site),
   'brave:remove': (site) => brave.remove(site),
   bookmarks: (request) => bookmarks.handle(request),
+  'guard:answer': (answer) => guardrails.answer(answer),
+  'guard:show': (id) => guardrails.show(id),
+  'guard:set': (choice) => guardrails.set(choice),
+  'guard:site-add': (site) => guardrails.addSite(site),
+  'guard:site-remove': (site) => guardrails.removeSite(site),
+  'guard:forget': (which) => guardrails.forget(which),
+  'guard:untrust': (id) => guardrails.untrust(id),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -290,6 +301,8 @@ async function testHook({ ui, arg }) {
   if (brave.probes[ui]) return brave.probes[ui](arg);
   if (print.probes[ui]) return print.probes[ui](arg);
   if (ui === 'to-url') return toUrl(arg);
+  // A tool call from the Claude panel, which works in the user's own tabs.
+  if (ui === 'panel') return actions.run(arg.tool, arg.args || {}, sessions.panel);
   if (bookmarks.probes[ui]) return bookmarks.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
