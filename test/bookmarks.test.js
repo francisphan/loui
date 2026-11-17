@@ -238,6 +238,15 @@ test('a bookmarks file exported from Brave or Chrome imports onto the bar and in
   assert.equal(await chrome("document.getElementById('bookmarks-other').hidden"), false);
   assert.match(await chrome("document.querySelector('.bar-item[title^=\"Example\"] img').src"), /^data:image\/png/);
 
+  // The file's icon is not read in the main process: the window chrome draws
+  // it small, and only that copy is kept and shown in the native menus.
+  const raw = find(data.bar, 'Example & Co').icon;
+  const kept = await until(async () => { const n = find((await saved()).bar, 'Example & Co'); return n.drawn && n; }, "the chrome's small copy of the icon to be kept");
+  assert.match(kept.icon, /^data:image\/png;base64,/);
+  assert.notEqual(kept.icon, raw);
+  assert.equal(await chrome(`new Promise((ok) => { const i = new Image(); i.onload = () => ok(i.naturalWidth + 'x' + i.naturalHeight); i.src = ${JSON.stringify(kept.icon)}; })`), '32x32');
+  assert.deepEqual(await b.ui('bookmarks:menu-icons', 'bar'), ['Example && Co']);
+
   assert.deepEqual(await b.ui('bookmarks:import-file', file), { added: 0, skipped: 6 }, 'importing again adds nothing');
 });
 
@@ -282,6 +291,19 @@ test('Claude sessions cannot see or change bookmarks, and neither can pages', as
   await sleep(800);
   assert.equal(JSON.stringify(await saved()), before, 'nothing was added');
   a.end();
+});
+
+test("a bookmarked page's icon is kept as the small copy the window chrome drew", async () => {
+  await visit(b.base + '/icon-data.html');
+  await until(async () => (await b.state()).tabs.find((t) => t.active).favicon, "the page's icon to arrive");
+  assert.equal(await key('CmdOrCtrl+D'), 'ok');
+  await editorOpen();
+  await edit({});
+  const kept = await until(async () => { const n = find((await saved()).bar, 'Icon given'); return n?.drawn && n; }, 'the icon to be kept');
+  assert.match(kept.icon, /^data:image\/png;base64,/);
+  assert.deepEqual(await b.ui('bookmarks:menu-icons', 'bar'), ['Example && Co', 'Icon given']);
+  await ask({ do: 'remove', id: kept.id });
+  await barShows(['Fixture home', 'My reading spot', 'Example & Co', 'Recipes']);
 });
 
 test('bookmarks and the bar are still there after a restart', async () => {

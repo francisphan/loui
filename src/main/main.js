@@ -429,7 +429,7 @@ function start() {
   errorPage.attach(userSes);
   certs.attach(userSes);
   lockToApp(suggest.webContents);
-  bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), tabs, ses: userSes, send, broadcast, changed: pushState });
+  bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), tabs, send, broadcast, changed: pushState });
   suggest.add(bookmarks);
   startPage = createStartPage({
     tabs, ses: userSes, settings, save: saveSettings, changed: pushState, history, bookmarks,

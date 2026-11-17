@@ -229,9 +229,10 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
       };
       if (tickets.shift() === undefined || !request.url.startsWith(START)) return new Response('', { status: 403, headers });
       // Asked for only now that a start page is being shown, and only the parts switched on.
+      // A private window's page asks the web for nothing: it gets what is already kept.
       const [w, n] = await Promise.all([
-        on('startWeather') ? soon(feeds.weather()) : null,
-        on('startNews') ? soon(feeds.news()) : null,
+        on('startWeather') ? (priv ? feeds.weather(true) : soon(feeds.weather())) : null,
+        on('startNews') ? (priv ? feeds.news(true) : soon(feeds.news())) : null,
       ]);
       if (!priv) served++;
       return new Response(page(priv, w, n), { headers });

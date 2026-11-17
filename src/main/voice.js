@@ -50,6 +50,9 @@ const HOST = 'https://huggingface.co';
 // dictation. It is loading again by the time the next one has been spoken.
 const IDLE_MS = 30 * 1000;
 const MAX_SAMPLES = 16000 * 60 * 5; // five minutes of sound at most in one go
+// A download from which nothing has arrived for this long is given up, so a
+// stalled connection does not leave it "downloading" until Loui restarts.
+const STALL_MS = Number(process.env.LOUI_TEST && process.env.LOUI_VOICE_STALL_MS) || 30 * 1000;
 
 // What the hidden page may load, besides its own two files and the model.
 const LIB = {
@@ -99,26 +102,35 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
       for (const f of missing) {
         const to = path.join(dir, f.name);
         fs.mkdirSync(path.dirname(to), { recursive: true });
-        const res = await fetch(`${testHost || HOST}/${MODEL.id}/resolve/${MODEL.revision}/${f.name}`);
-        if (!res.ok) throw new Error(`the model host answered ${res.status}`);
-        const hash = crypto.createHash('sha256');
-        const out = fs.createWriteStream(`${to}.part`);
+        const stop = new AbortController();
+        let stalled = false, quiet = null;
+        const alive = () => { clearTimeout(quiet); quiet = setTimeout(() => { stalled = true; stop.abort(); }, STALL_MS); };
         try {
-          for await (const chunk of res.body) {
-            hash.update(chunk);
-            if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
-            got += chunk.length;
-            const percent = total ? Math.min(99, Math.floor((got / total) * 100)) : 0;
-            if (percent !== shown) { shown = percent; progress = { percent }; report(progress); }
+          alive();
+          const res = await fetch(`${testHost || HOST}/${MODEL.id}/resolve/${MODEL.revision}/${f.name}`, { signal: stop.signal });
+          if (!res.ok) throw new Error(`the model host answered ${res.status}`);
+          const hash = crypto.createHash('sha256');
+          const out = fs.createWriteStream(`${to}.part`);
+          try {
+            for await (const chunk of res.body) {
+              alive();
+              hash.update(chunk);
+              if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
+              got += chunk.length;
+              const percent = total ? Math.min(99, Math.floor((got / total) * 100)) : 0;
+              if (percent !== shown) { shown = percent; progress = { percent }; report(progress); }
+            }
+          } finally {
+            await new Promise((r) => out.end(r));
           }
+          if (f.sha256 && hash.digest('hex') !== f.sha256) throw new Error('a downloaded file was not the expected one');
+          fs.renameSync(`${to}.part`, to);
+        } catch (e) {
+          fs.rmSync(`${to}.part`, { force: true }); // the next attempt starts afresh
+          throw stalled ? new Error('the download stalled') : e;
         } finally {
-          await new Promise((r) => out.end(r));
+          clearTimeout(quiet);
         }
-        if (f.sha256 && hash.digest('hex') !== f.sha256) {
-          fs.rmSync(`${to}.part`, { force: true });
-          throw new Error('a downloaded file was not the expected one');
-        }
-        fs.renameSync(`${to}.part`, to);
       }
       disk = files.every(have);
     })().finally(() => { getting = null; progress = null; });
@@ -166,6 +178,9 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
       ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
       ses.setPermissionCheckHandler(() => false);
       ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('loui-voice://app/') }));
+      // WebRTC answers to neither of those. Its only way out is made a proxy
+      // that is not there (and plain UDP is switched off below).
+      ses.setProxy({ proxyRules: 'http://127.0.0.1:9' }).catch(() => {});
     }
     const win = new BrowserWindow({
       show: false,
@@ -175,6 +190,7 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
       },
     });
     lockToApp(win.webContents);
+    win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     const mine = { win, waiting: new Map() };
     mine.ready = new Promise((ok, no) => { mine.loaded = ok; mine.failed = no; });
     mine.ready.catch(() => {}); // each request reports it
@@ -283,6 +299,18 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
     'voice:open': () => open().ready.then(() => 'ok'),
     'voice:transcribe-wav': (file) => transcribe(wav(file)),
     'voice:close': () => { close(); return 'ok'; },
+    // The hidden page's ways out, and whether it still loads with them shut.
+    'voice:lockdown': async () => {
+      const p = open();
+      const wc = p.win.webContents;
+      const webrtc = wc.getWebRTCIPHandlingPolicy();
+      const loaded = await new Promise((r) => {
+        wc.once('did-finish-load', () => r('loaded'));
+        wc.once('did-fail-load', () => r('failed'));
+        p.ready.then(() => r('ran'), (e) => r(`ran: ${e.message}`)); // its script ran, with or without a model
+      });
+      return { webrtc, proxy: await ses.resolveProxy('https://example.com/'), loaded };
+    },
     // Asks for the microphone from each of Loui's pages that is not a normal window's chrome.
     'voice:mic-elsewhere': () => Promise.all(webContents.getAllWebContents()
       .filter((wc) => wc.session === session.defaultSession && !usable(tabs.windowOf(wc)))

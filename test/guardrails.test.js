@@ -582,6 +582,56 @@ test('the script watch holds for other events than a click, for a DELETE, and fo
   s.end();
 });
 
+// Real input opens the watch only for what the page does where that input
+// landed: a key pressed at nothing, or a click somewhere else, must not let
+// a timer the script left through.
+test('real input elsewhere on the page does not let a script\'s timer through', async () => {
+  const s = b.as('g-timer', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard4.html` });
+  assert.equal(await s.text('evaluate', { code: `(window.t = setInterval(() => ${press('del')}, 300), 1)` }), '1');
+  await pause(500);
+  assert.equal(await read('g-timer'), 'nothing yet');
+  for (const key of ['Shift', 'a']) {
+    await s.text('press_key', { key });
+    await pause(700);
+    assert.equal(await read('g-timer'), 'nothing yet', `after ${key}`);
+  }
+  await s.text('click', { ref: ref(page, 'button "Share"') });
+  await pause(700);
+  assert.equal(await read('g-timer'), 'share menu', 'after a click on another button');
+  await s.text('type', { ref: ref(page, 'textbox "Name"'), text: 'x' });
+  await pause(700);
+  assert.equal(await read('g-timer'), 'share menu', 'after typing in a form elsewhere');
+  await noPrompt();
+  s.end();
+});
+
+test('controls inside a web component are seen: the script is asked about, and its events are held', async () => {
+  const s = b.as('g-shadow', 'Claude Code');
+  await s.text('navigate', { url: `${b.base}/guard5.html` });
+  const del = "document.getElementById('zone').shadowRoot.getElementById('del')";
+  const reading = s.text('evaluate', { code: `${del}.click()` });
+  const g = await prompt();
+  assert.equal(g.kind, 'script');
+  assert.equal(g.what, 'run a script that clicks or submits, on a page with "Delete account"');
+  await answer(g, 'block');
+  await assert.rejects(reading, /declined/);
+  // An event that never leaves the shadow root (composed: false).
+  const quiet = `(${del}['dispatch' + 'Event'](new MouseEvent('click')), 'ran')`;
+  const running = s.text('evaluate', { code: quiet });
+  const q = await promptAfter(g);
+  assert.equal(q.what, 'click "Delete account"');
+  assert.equal(await read('g-shadow'), 'nothing yet', 'the click did not reach the component');
+  await answer(q, 'block');
+  await assert.rejects(running, /declined/);
+  assert.equal(await read('g-shadow'), 'nothing yet');
+  const again = s.text('evaluate', { code: quiet });
+  await answer(await promptAfter(q), 'once');
+  assert.match(await again, /Loui held the script's attempt to click "Delete account" until the user allowed it/);
+  assert.equal(await read('g-shadow'), 'deleted');
+  s.end();
+});
+
 test('a script that reads like one that clicks, submits or calls a handler is asked about first', async () => {
   const s = b.as('g-reads', 'Claude Code');
   await s.text('navigate', { url: `${b.base}/guard3.html` });

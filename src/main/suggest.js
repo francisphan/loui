@@ -85,7 +85,7 @@ function createSuggest({ win, tabs, send, sources = [], engine = () => '' }) {
   }
 
   const view = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true },
+    webPreferences: { preload: path.join(__dirname, 'suggest-preload.js'), sandbox: true, contextIsolation: true },
   });
   view.setBackgroundColor('#00000000');
   let open = false;

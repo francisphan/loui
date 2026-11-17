@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Guard 5</title></head>
+<body>
+  <p id="out">nothing yet</p>
+  <!-- A web component: its button is inside an open shadow root. -->
+  <danger-zone id="zone"></danger-zone>
+  <script>
+    customElements.define('danger-zone', class extends HTMLElement {
+      constructor() {
+        super();
+        const b = document.createElement('button');
+        b.id = 'del';
+        b.textContent = 'Delete account';
+        b.addEventListener('click', () => { document.getElementById('out').textContent = 'deleted'; });
+        this.attachShadow({ mode: 'open' }).appendChild(b);
+      }
+    });
+  </script>
+</body></html>
