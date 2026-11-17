@@ -185,9 +185,19 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     capturing.add(tab.id);
     try {
       // A tab out of sight may not be drawn (always so without a GPU), so it
-      // peeks, as for the screenshot tool.
+      // peeks, as for the screenshot tool, and is pictured once it has drawn
+      // a frame. Without a GPU the first capture can still fail; one retry.
       tabs.use(tab);
-      const img = await wc.capturePage();
+      const drawn = () => wc.executeJavaScript(
+        'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))', true);
+      await Promise.race([drawn(), new Promise((r) => setTimeout(r, 1000))]);
+      const img = await wc.capturePage().catch(async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        if (wc.isDestroyed()) throw new Error('the tab closed');
+        tabs.use(tab);
+        await Promise.race([drawn(), new Promise((r) => setTimeout(r, 1000))]);
+        return wc.capturePage();
+      });
       const { width } = img.getSize();
       if (!width && process.env.LOUI_TEST) console.error('activity: no picture: the capture was empty');
       if (!width || log.off) return;
