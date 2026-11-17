@@ -20,11 +20,13 @@ function serveFixture() {
 }
 
 // env: extra environment for the app (for example the relay to connect to).
-async function launch(env = {}, { home: reuse } = {}) {
+// args: more command-line arguments (links to open, as another app would pass),
+// or a function of the fixture server's address that returns them.
+async function launch(env = {}, { home: reuse, args = [] } = {}) {
   const home = reuse || fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
   const server = await serveFixture();
   const base = `http://127.0.0.1:${server.address().port}`;
-  const app = spawn(require('electron'), [root, '--no-sandbox'], {
+  const app = spawn(require('electron'), [root, '--no-sandbox', ...(typeof args === 'function' ? args(base) : args)], {
     env: { ...process.env, LOUI_HOME: home, LOUI_TEST: '1', LOUI_RELAY_URL: '', ...env },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
@@ -101,4 +103,15 @@ async function launch(env = {}, { home: reuse } = {}) {
   return { call, text, as, ui, state, close, base, home };
 }
 
-module.exports = { launch };
+// Starts Loui again on the same profile, as Windows does for a link opened in
+// another app while Loui runs; resolves with its exit code once it has quit.
+function again(home, args = []) {
+  const second = spawn(require('electron'), [root, '--no-sandbox', ...args], {
+    env: { ...process.env, LOUI_HOME: home, LOUI_TEST: '1', LOUI_RELAY_URL: '' },
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+  const timer = setTimeout(() => second.kill('SIGKILL'), 20000);
+  return new Promise((r) => second.once('exit', (code) => { clearTimeout(timer); r(code); }));
+}
+
+module.exports = { launch, again };

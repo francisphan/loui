@@ -93,6 +93,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
   let sessionId = null;
   let active = null; // the running query
   let sdk = null;
+  let running = null; // the Claude Code process while a message runs, for the task manager
 
   const toolNames = TOOLS.map((t) => `mcp__loui__${t.name}`);
 
@@ -146,6 +147,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
           cwd,
           env: subscriptionEnv(),
           ...claude,
+          ...watchProcess(claude),
           ...(sessionId ? { resume: sessionId } : {}),
         },
       });
@@ -165,6 +167,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
       if (!stopped) emit({ type: 'error', text: e.message || String(e) });
     } finally {
       active = null;
+      running = null;
       stopped = false;
       emit({ type: 'done' });
     }
@@ -183,7 +186,24 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
     emit({ type: 'reset' });
   }
 
-  return { send, stop, reset };
+  // Learns the process ID of the Claude Code the SDK starts. onProcessSpawned
+  // is an SDK option missing from its type definitions; should it go away,
+  // the task manager simply does not list the process. Started through
+  // wsl.exe, the process is wsl.exe and Claude Code runs inside WSL.
+  function watchProcess(launch) {
+    if (launch.spawnClaudeCodeProcess) {
+      return {
+        spawnClaudeCodeProcess: (options) => {
+          const child = launch.spawnClaudeCodeProcess(options);
+          running = { pid: child.pid, wsl: true };
+          return child;
+        },
+      };
+    }
+    return { onProcessSpawned: (pid) => { running = { pid, wsl: false }; } };
+  }
+
+  return { send, stop, reset, process: () => running };
 }
 
 module.exports = { createChat };

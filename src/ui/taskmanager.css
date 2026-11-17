@@ -1,0 +1,73 @@
+/* The task manager window (taskmanager.html). Colours come from ui.css. */
+.taskmanager-page body { display: block; background: var(--water); }
+#tm { display: flex; flex-direction: column; height: 100%; }
+#tm-scroll { flex: 1; min-height: 0; overflow: auto; }
+
+#tm-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+#tm-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  font-weight: 600;
+  text-align: left;
+}
+#tm-table th button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font-weight: 600;
+  text-align: inherit;
+}
+#tm-table th button:hover { background: var(--shoal); color: var(--ink); }
+#tm-table th[aria-sort='descending'] button::after { content: ' ↓'; }
+#tm-table th[aria-sort='ascending'] button::after { content: ' ↑'; }
+#tm-table th.tm-num { width: 1%; white-space: nowrap; text-align: right; }
+
+#tm-table tbody { border-bottom: 1px solid var(--rule); }
+#tm-table td { padding: 5px 10px; vertical-align: top; }
+#tm-table td.tm-num { white-space: nowrap; text-align: right; }
+#tm-table tbody.tm-shared td.tm-num { border-left: 2px solid var(--shoal); }
+#tm-table tr.tm-tab:hover td.tm-name { background: var(--shoal); }
+#tm-table tr.tm-selected td.tm-name { background: var(--shoal); box-shadow: inset 2px 0 0 var(--focus); }
+#tm-table tr.tm-sleeping { color: var(--ink-2); }
+
+td.tm-name .tm-cell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 7px; min-width: 0; }
+td.tm-name .tm-kind { color: var(--ink-2); }
+td.tm-name .tm-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 46ch; }
+td.tm-name .tm-group {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--claude-wash);
+  color: var(--claude);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+td.tm-name .tm-asleep { font-style: italic; color: var(--ink-2); }
+td.tm-name .tm-note { flex-basis: 100%; color: var(--ink-2); font-size: 12px; }
+
+#tm-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--rule);
+  background: var(--paper);
+}
+#tm-hint { flex: 1; margin: 0; color: var(--ink-2); font-size: 12.5px; }
+#tm-actions { display: flex; gap: 6px; }
+.tm-button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.tm-button:hover:not(:disabled) { background: var(--shoal); }
+.tm-button:disabled { color: var(--ink-2); opacity: .55; }

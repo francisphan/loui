@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" class="taskmanager-page">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'">
+  <title>Task manager</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="taskmanager.css">
+</head>
+<body>
+  <main id="tm">
+    <div id="tm-scroll">
+      <table id="tm-table">
+        <thead>
+          <tr>
+            <th class="tm-name"><button data-sort="task">Task</button></th>
+            <th class="tm-num"><button data-sort="private" title="Memory only this process uses">Private memory</button></th>
+            <th class="tm-num"><button data-sort="workingSet" title="Memory in RAM, including what is shared with other processes">Working set</button></th>
+            <th class="tm-num"><button data-sort="cpu" title="Share of one processor core">CPU</button></th>
+            <th class="tm-num"><button data-sort="pid">Process ID</button></th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+    <footer id="tm-foot">
+      <p id="tm-hint">Tabs that share a process are listed together; its memory and CPU are theirs to share.</p>
+      <div id="tm-actions">
+        <button id="tm-show" class="tm-button" disabled>Show tab</button>
+        <button id="tm-sleep" class="tm-button" disabled>Put to sleep</button>
+        <button id="tm-close" class="tm-button" disabled>Close tab</button>
+      </div>
+    </footer>
+  </main>
+  <script src="taskmanager.js"></script>
+</body>
+</html>
