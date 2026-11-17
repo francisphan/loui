@@ -45,6 +45,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
   const live = new Map(); // session id ('panel' for the Claude panel) -> log
   const index = new Map(); // log id -> summary, for every log on disk or live
   const capturing = new Set(); // tab ids with a picture being taken
+  const waiting = new Map(); // tab id -> the latest step to picture once that one is done
   const welcome = new Map(); // session id -> the user's consent, a step for when its log opens
   const file = (id) => path.join(dir, `${id}.json`);
   const pictures = (id) => path.join(dir, id);
@@ -174,10 +175,13 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
   }
 
   // A small picture of the tab after an acting step. At most one per tab at a
-  // time; a sleeping tab (no page) or a closed one is skipped.
+  // time: a step that finishes while one is being taken waits for it (only the
+  // latest such step; on a slow machine the ones between get none). A sleeping
+  // tab (no page) or a closed one is skipped.
   async function snap(log, s, tab) {
     const wc = tab.wc;
-    if (log.off || !wc || wc.isDestroyed() || capturing.has(tab.id)) return;
+    if (capturing.has(tab.id)) return void waiting.set(tab.id, { log, s, tab });
+    if (log.off || !wc || wc.isDestroyed()) return;
     capturing.add(tab.id);
     try {
       const img = await wc.capturePage();
@@ -194,6 +198,11 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
       // The tab closed or could not be drawn: the step simply has no picture.
     } finally {
       capturing.delete(tab.id);
+      const next = waiting.get(tab.id);
+      if (next) {
+        waiting.delete(tab.id);
+        snap(next.log, next.s, next.tab);
+      }
     }
   }
 
