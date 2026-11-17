@@ -59,7 +59,7 @@ const ICON_BYTES = 150 * 1024; // the most a page's icon may weigh
 const ICON_MS = 5000; // and the longest fetching it may take
 const OPEN_WITHIN = 5000; // a page may open a tab this long after an action in it
 const OPEN_MAX = 10; // and this many in a minute
-const FULL_WITHIN = 1000; // a page may take the whole screen this long after the user's own input in it
+const FULL_WITHIN = 3000; // a page may take the whole screen this long after the user's own input in it
 const clipped = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 ' +
@@ -454,10 +454,18 @@ class Tabs extends EventEmitter {
     // take the window away, nor a page on its own.
     wc.on('enter-html-full-screen', () => {
       if (!this.onScreen(tab) || Date.now() - (tab.userAt || 0) > FULL_WITHIN) {
-        wc.executeJavaScript('document.exitFullscreen()', true).catch(() => {});
-        // The window must not be left full screen on its account either.
+        // Told to let go, and told again: the page may not have finished going
+        // in when the first word arrives, and would then stay in while Loui
+        // shows it as an ordinary page.
         const w = tab.window;
-        setTimeout(() => { if (!w.full && !w.wide && !w.win.isDestroyed() && w.win.isFullScreen()) w.win.setFullScreen(false); }, 300);
+        const out = () => {
+          if (wc.isDestroyed() || w.full === tab.id) return;
+          wc.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
+          // The window must not be left full screen on its account either.
+          if (!w.full && !w.wide && !w.win.isDestroyed() && w.win.isFullScreen()) w.win.setFullScreen(false);
+        };
+        out();
+        for (const ms of [150, 400, 1000]) setTimeout(out, ms);
         return;
       }
       tab.window.full = tab.id;
