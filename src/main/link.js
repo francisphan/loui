@@ -23,12 +23,27 @@ function deviceUrl(base) {
 }
 
 // guard(origins): told the addresses that reach the relay, which sessions' tabs must not open.
-function createLink({ home, version, handle, sessions, changed, guard }) {
+// cipher: as passwords.js makes it. Where the system can encrypt, the key is
+// kept encrypted in relay.json ("keyEnc"); where it cannot, as plain "key" in
+// a file only this user can read.
+function createLink({ home, version, handle, sessions, changed, guard, cipher = { available: false } }) {
   const file = path.join(home, 'relay.json');
   const read = (f, fallback) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return fallback; } };
+  function store() {
+    const { key, ...rest } = config;
+    const out = cipher.available && key ? { ...rest, keyEnc: cipher.encrypt(key) } : config;
+    fs.writeFileSync(file, JSON.stringify(out, null, 2), { mode: 0o600 });
+  }
 
   // url, key, on. The environment wins, for tests and one-off runs.
   let config = read(file, {});
+  if (config.keyEnc) {
+    // A key that will not decrypt (a profile copied from elsewhere) is asked for again.
+    try { config.key = cipher.decrypt(config.keyEnc); } catch { config.key = ''; }
+    delete config.keyEnc;
+  } else if (config.key && cipher.available) {
+    try { store(); } catch {} // a key saved as plain text by an earlier version
+  }
   if (process.env.LOUI_RELAY_URL) config = { url: process.env.LOUI_RELAY_URL, key: process.env.LOUI_RELAY_KEY, on: true };
 
   const idFile = path.join(home, 'device.json');
@@ -106,7 +121,7 @@ function createLink({ home, version, handle, sessions, changed, guard }) {
 
   function configure({ url, key, on }) {
     config = { url: (url || '').trim(), key: (key || '').trim() || config.key, on: on !== false };
-    fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+    store();
     attempt = 0;
     connect();
   }

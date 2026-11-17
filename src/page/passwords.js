@@ -1,7 +1,7 @@
 // Passwords, inside one of the user's own pages (never a Claude session's).
 // Runs in an isolated world of its own (src/main/passwords.js): it shares the
 // DOM with the page but not its JavaScript, so the page can neither see nor
-// call it, nor read the secret it reports with. Only the top frame gets it.
+// call it. Only the top frame gets it.
 //
 // Two jobs:
 // - Noticing a sign-in. When a password the user typed is sent (a form
@@ -12,15 +12,14 @@
 // - Filling, when the user chose an account from the key in the address bar.
 //   Only ever on that click; nothing here fills by itself.
 //
-// Reports go out as console messages that start with a marker and the secret.
-// tabs.js keeps them out of the console history that tools can read.
+// Reports go to the main process through a function that exists only in this
+// world (src/main/tab-preload.js): no page, console or tool sees them.
 //
 // Evaluated more than once (each call carries the file), so it defines itself once.
 (() => {
   if (globalThis.__louiPw) return;
 
   const MAX = 512; // longer than any real username or password
-  let secret = '';
   let installed = false;
   let armed = false; // a sign-in field has been seen on this page
   let watching = 0;
@@ -54,7 +53,7 @@
   const lonelyUser = (inputs) => inputs.find((el) => userLike(el) && visible(el));
 
   function send(kind, data = {}) {
-    console.log(`\u0001loui-pw ${secret} ${JSON.stringify({ kind, ...data })}`);
+    globalThis.__louiReport?.(JSON.stringify({ kind, ...data }));
   }
 
   // What is filled in now, in the form `scope` (or the page). With two or more
@@ -91,10 +90,9 @@
 
   const hasPassword = () => inputsIn(document).some((el) => isPassword(el) && visible(el));
 
-  function install(key) {
+  function install() {
     if (installed) return { password: hasPassword() };
     installed = true;
-    secret = key;
     armed = hasPassword() || !!lonelyUser(inputsIn(document));
     // Listeners only. Until a sign-in field shows up (it may arrive later, as
     // in a sign-in dialog) keys and clicks are ignored at once.
