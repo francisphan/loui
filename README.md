@@ -653,6 +653,56 @@ The page is drawn into Chromium's own error document (`src/ui/errorpage.*`,
 `src/ui/louis.js`), which has an opaque origin: no bridge, no storage, no
 cookies, and history does not record it.
 
+## Voice
+
+Both are in the Claude panel, for you alone: no tool, Claude session or web
+page can start the microphone, read what you said, or make Loui speak, and a
+private window has neither.
+
+- **Reading replies aloud.** The speaker in the panel's head turns it on
+  (kept as `"readBack"` in `settings.json`). Claude's replies are then read by
+  the system's voices, a sentence at a time as they arrive: the prose only, not
+  the steps; a code block is just called "code block", and of an address only
+  the site is said. It stops at once when you press Stop, send a message, start
+  dictating, start a new conversation, turn it off, or press `Esc` in the
+  panel. While it talks the speaker is lit, and pressing it silences that reply
+  without turning reading off. `"readBackVoice"` (a voice's name, as Windows
+  lists it under *Settings › Time & language › Speech*) and `"readBackRate"`
+  (0.5 to 3, 1 is normal) choose the voice and its speed. With several windows
+  open, the one you were in last does the reading.
+- **Dictation.** The microphone beside *Send*: press it, talk, press it again
+  (or `Esc`). What you said goes into the message box where the cursor is,
+  for you to read, change and send; it is never sent by itself. Holding
+  `Ctrl+Shift+Space` while the panel has the keyboard does the same for as
+  long as you hold it. While you talk the words so far show above the box.
+- **Where the listening happens.** On this machine. Chromium's own speech
+  recognition needs Google's servers and keys, and its on-device mode needs
+  language packs that only Chrome can install, so Loui runs a small Whisper
+  model (`Xenova/whisper-base`, multilingual, 8-bit weights, 77 MB) with
+  transformers.js on WebAssembly, in a hidden page of its own
+  (`src/ui/voice-page.js`). The first press of the microphone downloads the
+  model from huggingface.co into `voice/` in the profile, with the progress on
+  the button; the files are checked against fixed hashes, and after that
+  dictation works offline. The hidden page can make no request except for its
+  own files, so the sound cannot leave the machine, and it is never written to
+  disk. Loui decides between the languages in `"dictationLanguages"` (default
+  `["en", "es"]`; one language skips the deciding and is a little faster).
+- **What it costs.** About three seconds to write down five seconds of
+  speech on a four-core laptop. Whisper is hungry while it works: the hidden
+  page holds about 1.4 GB, so it exists only while you dictate and closes half
+  a minute after the last use, which gives all of it back (it loads again while
+  you speak the next time). `"dictation": false` in `settings.json` removes
+  the microphone button altogether.
+- **Windows' own dictation** (`Win+H`) types into the message box too, and
+  needs none of this.
+- **For whoever builds it.** transformers.js also depends on
+  `onnxruntime-node` and `sharp`, native packages for Node that Loui never
+  loads (only the browser bundle and one WebAssembly file are used, and only
+  those are packed: see `build.files`). `overrides` in `package.json` swaps
+  both for a small package that is in the tree anyway, so an install fetches
+  no native binaries. The model test is skipped unless `LOUI_TEST_VOICE=1` is
+  set (`LOUI_VOICE_DIR` points it at a model already downloaded).
+
 ## Layout
 
 ```
@@ -691,10 +741,13 @@ src/main/reader.js    reader view: the check, the loui-reader: page and its sett
 src/main/startpage.js the start page new tabs open with: the loui-start: page, who is served it, its settings
 src/main/startfeeds.js  the start page's weather (Open-Meteo) and news (RSS/Atom), fetched and kept by the main process
 src/main/settings-window.js  the Settings window: every setting, each driven through the module that owns it
+src/main/voice.js     voice: the read-aloud setting, the speech model's download, the hidden page that recognises speech
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/page/passwords.js runs in your own pages only: notices sign-ins, fills on request
 src/page/reader.js    with Readability, in an isolated world: finds the article, cleans it, as text
 src/ui/               tab strip, toolbar, panel
+src/ui/voice.js       the panel's speaker and microphone: reading replies aloud, recording, putting the words in the box
+src/ui/voice-page.js  the hidden page: Whisper through transformers.js, served from loui-voice://app/
 relay/                the relay and its sign-in
 test/                 end-to-end tests
 ```
@@ -730,6 +783,10 @@ break:
   is remembered and forgets it. Tabs in a Claude session's group, including
   tabs you handed over, are refused without asking. Every other permission is
   refused.
+- Loui's own pages ask for nothing except the microphone, which only a normal
+  window's chrome gets, for dictation. The page that recognises speech runs in
+  a session of its own that answers only `loui-voice://app/` addresses and
+  cancels every other request.
 
 ## Not here yet
 

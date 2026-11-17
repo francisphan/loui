@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="reader.css">
   <link rel="stylesheet" href="activity.css">
   <link rel="stylesheet" href="flows.css">
+  <link rel="stylesheet" href="voice.css">
 </head>
 <body>
   <header id="bar">
@@ -141,6 +142,7 @@
       <div id="panel-tools">
         <button id="link" class="quiet" type="button" title="Connection to other Claude sessions"><span class="lamp"></span><span id="link-text"></span></button>
         <button id="activity-open" class="quiet" type="button" title="What Claude sessions did, after they have gone">Sessions</button>
+        <button id="readback" class="quiet" type="button" aria-pressed="false"></button>
         <button id="new-chat" class="quiet" type="button" title="New conversation">New conversation</button>
       </div>
     </div>
@@ -156,9 +158,11 @@
     </div>
     <form id="composer">
       <div id="chips"></div>
+      <p id="voice-note" role="status" hidden></p>
       <textarea id="prompt" rows="1" placeholder="Message Claude" aria-label="Message Claude"></textarea>
       <div id="composer-row">
         <button id="point-here" class="quiet" type="button"><span class="glyph"></span>Point at something</button>
+        <button id="mic" type="button" aria-pressed="false" hidden></button>
         <button id="send" type="submit">Send</button>
       </div>
     </form>
@@ -294,5 +298,6 @@
   <script src="reader.js"></script>
   <script src="activity.js"></script>
   <script src="flows.js"></script>
+  <script src="voice.js"></script>
 </body>
 </html>

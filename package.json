@@ -14,12 +14,17 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.326",
     "@fontsource-variable/source-sans-3": "^5.3.1",
     "@ghostery/adblocker": "^2.20.3",
+    "@huggingface/transformers": "^4.3.2",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@mozilla/readability": "^0.6.0",
     "electron-updater": "^6.8.11",
     "express": "^5.3.0",
     "ws": "^8.23.0",
     "zod": "^4.6.7"
+  },
+  "overrides": {
+    "onnxruntime-node": "npm:onnxruntime-common@1.31.0-dev.20260911-2a43ec07e",
+    "sharp": "npm:onnxruntime-common@1.31.0-dev.20260911-2a43ec07e"
   },
   "devDependencies": {
     "electron": "^45.3.3",
@@ -35,7 +40,13 @@
     "files": [
       "src/**",
       "package.json",
-      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**",
+      "!node_modules/onnxruntime-node/**",
+      "!node_modules/sharp/**",
+      "!node_modules/onnxruntime-web/{lib,types,docs}/**",
+      "!node_modules/onnxruntime-web/dist/!(ort-wasm-simd-threaded.asyncify.*)",
+      "!node_modules/@huggingface/transformers/{src,types}/**",
+      "!node_modules/@huggingface/transformers/dist/!(transformers.min.js)"
     ],
     "win": {
       "target": [
