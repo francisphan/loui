@@ -76,6 +76,22 @@ const settingsFile = path.join(paths.home, 'settings.json');
 const settings = (() => { try { return JSON.parse(fs.readFileSync(settingsFile, 'utf8')); } catch { return {}; } })();
 const saveSettings = () => fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
 nativeTheme.themeSource = ['dark', 'light', 'system'].includes(settings.theme) ? settings.theme : 'dark';
+// The window has no title bar of its own: Loui's top row (the tab strip, or
+// the toolbar with vertical tabs) is the top of the window, and the system
+// draws its window buttons over the right end of that row, in the row's
+// colours and at its height (both as in ui.css).
+function titleBarOverlay(priv) {
+  const dark = nativeTheme.shouldUseDarkColors;
+  const vertical = settings.verticalTabs === true;
+  const [water, paper] = priv ? (dark ? ['#17152A', '#221F3A'] : ['#DDDBEB', '#F3F2F9']) : (dark ? ['#101B22', '#1A2832'] : ['#E6EDEF', '#FBFCFC']);
+  return { color: vertical ? paper : water, symbolColor: dark ? '#E3EBEE' : '#14242C', height: vertical ? 43 : 40 }; // the toolbar's rule shows under them
+}
+function syncTitleBars() {
+  for (const w of tabs?.windows || []) {
+    try { w.win.setTitleBarOverlay(titleBarOverlay(w.private)); } catch {} // a window that is closing
+  }
+}
+nativeTheme.on('updated', syncTitleBars);
 function setTheme(theme) {
   nativeTheme.themeSource = theme;
   settings.theme = theme;
@@ -209,6 +225,7 @@ function setTabStrip({ vertical, collapsed } = {}) {
   if (typeof vertical === 'boolean') settings.verticalTabs = vertical;
   if (typeof collapsed === 'boolean') settings.sidebarCollapsed = collapsed;
   saveSettings();
+  syncTitleBars();
   pushState();
   Menu.setApplicationMenu(appMenu());
 }
@@ -266,13 +283,16 @@ function openWindow({ private: priv = false, blank = true, at } = {}) {
     minHeight: 480,
     title: priv ? 'Loui · Private' : 'Loui',
     icon: path.join(__dirname, '../ui/icon.png'),
-    autoHideMenuBar: true,
+    // No title bar and no menu bar: the menu opens from the toolbar's button (see showMenu).
+    titleBarStyle: 'hidden',
+    titleBarOverlay: titleBarOverlay(priv),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true,
       backgroundThrottling: false,
     },
   });
+  win.setMenuBarVisibility(false);
   lockToApp(win.webContents);
   const w = tabs.addWindow(win, { private: priv, ses: priv ? privateSession() : userSes });
   const first = firstWindow;
@@ -539,6 +559,7 @@ const handlers = {
   'group:detach': (where) => detach(where),
   'group:menu': (id) => tabs.groupMenu(id),
   'window:new': (choice) => openWindow({ private: !!choice?.private }),
+  'menu:show': (at) => showMenu(at),
   'window:close': () => tabs.win?.close(),
   // The answer to "close this private window, and the tabs lent from it?" (see openWindow).
   'window:close-answer': (yes) => {
@@ -685,6 +706,16 @@ async function testHook({ ui, arg }) {
       m.label, m.submenu.items.filter((i) => i.visible).map((i) => (i.type === 'separator' ? '-' : i.label)),
     ]);
   }
+  if (ui === 'menu:shown') { const was = menuShown; if (arg === 'forget') menuShown = null; return was; }
+  // A real key press in the window chrome, with its modifiers, which the menu's shortcuts answer to.
+  if (ui === 'chrome:press') {
+    const chrome = tabs.win.webContents;
+    chrome.focus();
+    for (const type of ['keyDown', 'keyUp']) chrome.sendInputEvent({ type, keyCode: arg.key, modifiers: arg.modifiers || [] });
+    return 'ok';
+  }
+  // What the system draws its window buttons with, over the top row.
+  if (ui === 'titlebar') return { ...titleBarOverlay(tabs.window().private), title: tabs.win.getTitle(), menuBar: tabs.win.isMenuBarVisible() };
   // An item of the application menu, by its id.
   if (ui === 'menu:item') {
     const item = Menu.getApplicationMenu().getMenuItemById(arg);
@@ -740,6 +771,17 @@ async function testHook({ ui, arg }) {
   }
   handlers[ui](arg);
   return 'ok';
+}
+
+// The application menu, which has no bar to live in: it drops from the menu
+// button at the end of the toolbar (Alt+F and F10 press that button).
+let menuShown = null; // for the tests: where it was last opened
+function showMenu({ x, y } = {}) {
+  const w = tabs.window();
+  if (!w || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  menuShown = { window: w.id, x: Math.round(x), y: Math.round(y) };
+  if (process.env.LOUI_TEST) return; // a native menu would wait for a pointer that is not there
+  Menu.getApplicationMenu().popup({ window: w.win, x: menuShown.x, y: menuShown.y });
 }
 
 function deviceMenu() {
@@ -837,6 +879,8 @@ function appMenu() {
           click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
         }]),
         { type: 'separator' },
+        also('Alt+F', () => send('show-menu')), // the menu button in the toolbar
+        also('F10', () => send('show-menu')),
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: handlers['tab:close-active'] },
         { label: 'Close window', accelerator: 'CmdOrCtrl+Shift+W', click: handlers['window:close'] },
         { role: 'quit' },

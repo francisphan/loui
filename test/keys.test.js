@@ -92,7 +92,7 @@ test('the relay form and site permissions are panels like History: × at the top
     const panel = document.getElementById('relay'), close = document.getElementById('relay-close');
     return {
       claude: getComputedStyle(document.getElementById('panel')).display,
-      tall: box(panel).height > innerHeight - 4,
+      tall: box(panel).top === box(document.getElementById('tabrow')).bottom && box(panel).bottom > innerHeight - 4, // from under the top row to the bottom
       closeAtTop: box(close).top - box(panel).top < 40,
       closeIsIcon: !!close.querySelector('svg') && close.textContent === '',
       words: [...panel.querySelectorAll('button')].map((x) => x.textContent).includes('Close'),
