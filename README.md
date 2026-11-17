@@ -155,6 +155,9 @@ copy this repository there, run `npm install --omit=dev`, start
   deep: new tab and windows, History, Bookmarks, Downloads, Passwords, zoom,
   Find, Print, Claude, Settings. The full menus are in the command palette and
   behind their shortcuts.
+- **Louis**, at the top left of the window, is a button (`Alt+L`): Loui's own
+  menu. Appearance, vertical tabs, the bookmarks bar, the Claude panel, new
+  windows, Settings (and the start page's), checking for updates, About.
 - **Vertical tabs.** *View › Vertical tabs* (or *File › Settings*) moves the
   tabs to a sidebar on the left: pinned tabs as a grid of icons, your tabs,
   then each session's group with what it is doing. The button at the top

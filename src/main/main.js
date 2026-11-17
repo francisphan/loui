@@ -621,6 +621,7 @@ const handlers = {
   'group:menu': (id) => tabs.groupMenu(id),
   'window:new': (choice) => openWindow({ private: !!choice?.private }),
   'menu:show': (at) => showMenu(at),
+  'louis:menu': (at) => showLouisMenu(at),
   'window:close': () => tabs.win?.close(),
   // The answer to "close this private window, and the tabs lent from it?" (see openWindow).
   'window:close-answer': (yes) => {
@@ -782,12 +783,22 @@ async function testHook({ ui, arg }) {
     return items.map((i) => (i.type === 'separator' ? '-'
       : i.submenu ? [i.label, i.submenu.filter((x) => x.visible !== false).map((x) => (x.type === 'separator' ? '-' : x.label))] : i.label));
   }
+  // Louis's menu, the same way; an item that is ticked reads "✓ name".
+  if (ui === 'menu:louis') {
+    const items = louisMenu();
+    const list = arg?.in ? items.find((i) => i.label === arg.in)?.submenu || [] : items;
+    if (arg?.click) list.find((i) => i.label === arg.click)?.click({}, tabs.win);
+    const name = (i) => (i.type === 'separator' ? '-' : i.checked ? `✓ ${i.label}` : i.label);
+    return items.map((i) => (i.submenu ? [i.label, i.submenu.map(name)] : name(i)));
+  }
+  if (ui === 'menu:louis-shown') { const was = louisShown; if (arg === 'forget') { louisShown = null; send('louis:closed'); } return was; }
   if (ui === 'window:bounds') return windowById(arg)?.win.getBounds();
-  // A real key press in the window chrome, with its modifiers, which the menu's shortcuts answer to.
+  // A real key press in the window chrome, with its modifiers, which the menu's shortcuts answer to
+  // (char: with the character it types, which is what presses a button on Enter).
   if (ui === 'chrome:press') {
     const chrome = tabs.win.webContents;
     chrome.focus();
-    for (const type of ['keyDown', 'keyUp']) chrome.sendInputEvent({ type, keyCode: arg.key, modifiers: arg.modifiers || [] });
+    for (const type of arg.char ? ['keyDown', 'char', 'keyUp'] : ['keyDown', 'keyUp']) chrome.sendInputEvent({ type, keyCode: arg.key, modifiers: arg.modifiers || [] });
     return 'ok';
   }
   // What the system draws its window buttons with, over the top row.
@@ -865,6 +876,52 @@ function showMenu({ x, y } = {}) {
   menuShown = { window: w.id, x: Math.round(x), y: Math.round(y) };
   if (process.env.LOUI_TEST) return; // a native menu would wait for a pointer that is not there
   Menu.buildFromTemplate(buttonMenu()).popup({ window: w.win, x: menuShown.x, y: menuShown.y });
+}
+
+// Louis, at the top left of the window (Alt+L presses him), has Loui's own
+// menu: how it looks and is set up, as against what the page and the tabs can
+// do, which is the menu button's. Each item does what the application menu's
+// or the Settings window's does.
+let louisShown = null; // for the tests: where it was last opened
+function showLouisMenu({ x, y } = {}) {
+  const w = tabs.window();
+  if (!w || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  louisShown = { window: w.id, x: Math.round(x), y: Math.round(y) };
+  if (process.env.LOUI_TEST) return; // a native menu would wait for a pointer that is not there
+  const closed = () => { if (!w.win.isDestroyed()) w.win.webContents.send('louis:closed'); };
+  Menu.buildFromTemplate(louisMenu()).popup({ window: w.win, x: louisShown.x, y: louisShown.y, callback: closed });
+}
+function louisMenu() {
+  const w = tabs.window();
+  const keys = (accelerator) => ({ accelerator, registerAccelerator: false });
+  return inWindow([
+    {
+      label: 'Appearance',
+      submenu: [['dark', 'Dark'], ['light', 'Light'], ['system', 'Follow the system']].map(([theme, label]) => ({
+        label, type: 'radio', checked: nativeTheme.themeSource === theme, click: () => setTheme(theme),
+      })),
+    },
+    { type: 'separator' },
+    { label: 'Vertical tabs', type: 'checkbox', checked: tabStrip().vertical, click: () => setTabStrip({ vertical: !tabStrip().vertical }) },
+    {
+      label: 'Show the bookmarks bar', type: 'checkbox', checked: bookmarks.barShown(), ...keys('CmdOrCtrl+Shift+B'),
+      click: () => bookmarks.setBar(!bookmarks.barShown()),
+    },
+    // The panel stays out of private windows.
+    ...(w?.private ? [] : [{
+      label: 'Claude panel', type: 'checkbox', checked: w?.panelShown !== false, ...keys('CmdOrCtrl+Shift+L'), click: () => send('toggle-panel'),
+    }]),
+    { type: 'separator' },
+    { label: 'New window', ...keys('CmdOrCtrl+N'), click: () => openWindow() },
+    { label: 'New private window', ...keys('CmdOrCtrl+Shift+N'), click: () => openWindow({ private: true }) },
+    { type: 'separator' },
+    { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
+    { label: 'Start page settings', click: () => settingsWindow.open('general', 'Start page') },
+    // How the check went is said in Settings, under About.
+    { label: 'Check for updates', click: () => { updater.check(); settingsWindow.open('about'); } },
+    { type: 'separator' },
+    { label: `About Loui ${app.getVersion()}`, click: () => app.showAboutPanel() },
+  ]);
 }
 
 const RECENT_PAGES = 10;
@@ -1031,6 +1088,7 @@ function appMenu() {
         { type: 'separator' },
         also('Alt+F', () => send('show-menu')), // the menu button in the toolbar
         also('F10', () => send('show-menu')),
+        also('Alt+L', () => send('show-louis')), // Louis, at the top left
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: handlers['tab:close-active'] },
         { label: 'Close window', accelerator: 'CmdOrCtrl+Shift+W', click: handlers['window:close'] },
         { role: 'quit' },

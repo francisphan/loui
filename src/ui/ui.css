@@ -96,7 +96,7 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
    short of the window buttons, with a gap that is always free to drag by. */
 #tabrow, body.vertical #navrow {
   position: fixed;
-  inset: 0 0 auto;
+  inset: 0 0 auto var(--louis-in); /* right of Louis */
   box-sizing: border-box;
   height: var(--top-h);
   padding-right: calc(var(--wco) + 40px);
@@ -133,10 +133,42 @@ body.vertical #tabrow { display: none; }
 .stray.paused { color: var(--ink-2); }
 .stray-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* A short row (a small window with the Claude panel open) has room for the marks alone: of those working, asking or paused. */
-/* Louis, at the start of the top row in either layout: part of what the
-   window is dragged by. */
-#brand { flex: none; align-self: center; width: 28px; height: 28px; margin: 0 10px 0 14px; object-fit: contain; user-select: none; }
-#tabrow > #brand, body.vertical #navrow > #brand { -webkit-app-region: drag; }
+/* Louis, at the top left of the window, is a button: Loui's own menu drops
+   from him. He spans the tab row and the toolbar, which both start to his
+   right. With the tabs in the sidebar he is the top of that column: the
+   toolbar starts to his right, and the sidebar and whatever strip is under
+   the toolbar begin clear of him. A collapsed sidebar sizes him to it. In a
+   small window, where the toolbar has no room to give, he is smaller and
+   under it, at the head of the sidebar. --louis-in is how far in the rows
+   beside him start; --strips (from ui.js) the height of the strips under the
+   toolbar. */
+body { --louis-w: 64px; --louis-h: calc(var(--top-h) + 44px); --louis: 52px; --louis-in: var(--louis-w); --louis-top: 0px; }
+body.vertical { --louis-h: 64px; }
+body.vertical.sidebar-collapsed { --louis-w: 52px; --louis-h: 52px; --louis: 40px; }
+@media (max-width: 900px) {
+  body.vertical { --louis-w: 44px; --louis-h: 44px; --louis: 32px; --louis-in: 0px; --louis-top: calc(var(--top-h) + var(--strips, 0px)); }
+  body.vertical.sidebar-collapsed { --louis-w: 52px; --louis-h: 44px; --louis: 32px; }
+}
+#brand {
+  position: fixed;
+  inset: var(--louis-top) auto auto 0;
+  display: grid;
+  place-items: center;
+  width: var(--louis-w);
+  height: var(--louis-h);
+  padding: 0;
+  border: 0;
+  background: var(--water);
+  -webkit-app-region: no-drag;
+}
+#brand img { display: block; width: var(--louis); height: var(--louis); padding: 4px; border-radius: 12px; object-fit: contain; user-select: none; }
+#brand:hover img, #brand[aria-expanded="true"] img { background: var(--shoal); }
+#brand:active img { background: color-mix(in srgb, var(--shoal) 80%, var(--ink-2)); scale: .95; }
+#brand:focus-visible { outline: none; }
+#brand:focus-visible img { outline: 2px solid var(--focus); outline-offset: -2px; }
+@media (prefers-reduced-motion: no-preference) { #brand img { transition: background-color .12s ease, scale .12s ease; } }
+body:not(.vertical) #navrow { margin-left: var(--louis-in); }
+body.vertical #bar { padding-left: var(--louis-in); }
 #tabrow { container: tabrow / inline-size; }
 @container tabrow (max-width: 640px) {
   .stray { padding: 0 7px; }
@@ -317,6 +349,13 @@ body.vertical #newtab { display: none; }
   background: var(--water);
 }
 #sidebar[hidden] { display: none; }
+/* Louis reaches below the toolbar: the sidebar's tabs start under him (less
+   whatever strip is between), and its rule runs on up. */
+body.vertical #sidebar {
+  border-top: max(0px, var(--louis-top) + var(--louis-h) - var(--top-h) - var(--strips, 0px)) solid transparent;
+  background: linear-gradient(var(--rule), var(--rule)) right / 1px 100% no-repeat border-box, var(--water);
+  box-shadow: none;
+}
 /* Its toggle sits at the start of the toolbar above it. */
 #sidebar-toggle { margin-right: 4px; }
 #sidebar-toggle[hidden] { display: none; }
@@ -522,14 +561,18 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 }
 @container navrow (max-width: 520px) { #device, #devtools { display: none; } }
 @container navrow (max-width: 440px) { #history-toggle, #point { display: none; } }
+/* Louis takes the start of both rows: in the smallest window the downloads button shows only while it has
+   something to say (Ctrl+J and the menu still open the list), and the address field sits closer to its neighbours. */
+@container navrow (max-width: 380px) {
+  #downloads-toggle:not(.on, .running) { display: none; }
+  #address-form { margin: 0 2px; }
+}
 /* With the tabs in the sidebar the toolbar is the top row and holds the
    sidebar's button and the helm as well, so it gives way sooner. */
 @container navrow (max-width: 780px) {
   body.vertical #point span:not(.glyph) { display: none; }
   body.vertical #point { padding-right: 8px; }
 }
-/* Louis gives way first when the toolbar is the top row and short of room. */
-@container navrow (max-width: 900px) { body.vertical #brand { display: none; } }
 @container navrow (max-width: 720px) { body.vertical :is(#device, #devtools) { display: none; } }
 @container navrow (max-width: 660px) { body.vertical :is(#history-toggle, #point) { display: none; } }
 @container navrow (max-width: 600px) { body.vertical #downloads-toggle:not(.on, .running) { display: none; } }
