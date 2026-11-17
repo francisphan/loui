@@ -59,6 +59,7 @@ test('before quitting: the user has two tabs, one on a phone size, and a session
 
 test('after quitting and reopening, the user\'s tabs come back as they were', async () => {
   await b.close(); // quits cleanly right after the last change
+  fs.rmSync(path.join(home, 'loui.sock'), { force: true }); // else launch may find the old one
   b = await launch({}, { home });
   const state = await b.state();
   assert.deepEqual(state.groups.map((g) => g.id), ['you'], 'no session groups come back');
