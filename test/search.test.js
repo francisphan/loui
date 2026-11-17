@@ -56,23 +56,25 @@ test('a custom address searches with the words in place of %s', async () => {
   assert.equal(tab.url, `${b.base}/second.html?q=find%20me`);
 });
 
-test('File › Settings shows the engines, the choice, and the sites that open in Brave', async () => {
-  await b.ui('chrome:eval', 'showSettings(true)');
-  const sheet = await b.ui('chrome:eval', `({
-    hidden: document.getElementById('settings').hidden,
-    engines: [...document.querySelectorAll('#search-engine option')].map((o) => o.textContent),
-    chosen: document.getElementById('search-engine').value,
-    custom: document.getElementById('search-url').value,
-    sites: [...document.querySelectorAll('#elsewhere-list .site')].map((s) => s.textContent),
+test('the Settings window shows the engines, the choice, and the sites that open in Brave', async () => {
+  await b.ui('settings:open');
+  const js = (code) => b.ui('settings:js', code);
+  for (let i = 0; i < 80 && !(await js("document.querySelectorAll('#set-search-engine option').length").catch(() => 0)); i++) await sleep(100);
+  const sheet = await js(`({
+    engines: [...document.querySelectorAll('#set-search-engine option')].map((o) => o.textContent),
+    chosen: document.getElementById('set-search-engine').value,
+    custom: document.getElementById('set-search-url').value,
+    customShown: !document.querySelector('[data-setting="search-url"]').hidden,
+    sites: [...document.querySelectorAll('[data-setting="elsewhere"] .st-item')].map((s) => s.textContent),
   })`);
   assert.deepEqual(sheet, {
-    hidden: false,
     engines: ['Brave Search', 'DuckDuckGo', 'Google', 'Kagi', 'Custom address'],
     chosen: 'custom',
     custom: `${b.base}/second.html?q=%s`,
+    customShown: true,
     sites: [],
   });
-  await b.ui('chrome:eval', 'showSettings(false)');
+  await b.ui('settings:close');
 });
 
 test('the choice survives a restart', async () => {

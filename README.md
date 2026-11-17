@@ -126,8 +126,8 @@ copy this repository there, run `npm install --omit=dev`, start
   asleep. Never put to sleep: the tab on screen, tabs playing sound, asking
   for a permission, downloading or holding unsent form input, sessions' tabs,
   and sites you keep awake (right-click a tab). Right-click a tab and choose
-  *Sleep this tab now* to do it at once. Change the time with
-  `"sleepAfterMinutes"` in `settings.json` in the profile (0 turns it off).
+  *Sleep this tab now* to do it at once. Change the time in *File › Settings*
+  (`"sleepAfterMinutes"` in `settings.json` in the profile; 0 turns it off).
 - **Background speed.** Your tabs out of sight are throttled like in any
   browser. A session's tabs run at full speed while it works in them.
 - **Arranging tabs.** Drag a tab to reorder it, or move the tab on screen
@@ -349,9 +349,44 @@ A page may start a download when you (or the session whose tab it is) just
 acted in the tab, and one more per page load. Any others are stopped and
 listed as blocked, with *Download anyway*.
 
+## Settings
+
+*File › Settings* (`Ctrl+,`, or "Settings" in the command palette) opens the
+Settings window: sections down the left, a search box above them that finds a
+setting by its name or description, and the chosen section on the right. A
+change applies at once; there is no Save button. `Esc` or `Ctrl+W` closes it.
+
+- **General**: appearance; whether Loui starts with the tabs from last time
+  or a new tab (`"startup"`); open at sign-in and the default browser
+  (Windows); the downloads folder and *Ask where to save each file*.
+- **Tabs**: vertical tabs, the bookmarks bar, how long before a background
+  tab sleeps (or never), and the sites that are never put to sleep.
+- **Search**: the search engine, or an address of your own.
+- **Privacy and security**: sites with Shields off and the filter lists
+  (*Update now*), remembered site permissions, sites that open in your other
+  browser, and what pop-ups and private windows do.
+- **Passwords**: whether saving is offered (`"offerPasswords"`; filling
+  works either way), the sites never offered, the Passwords panel, import.
+- **Claude**: the relay (address, key, on or off, status), connectors let in
+  without asking, guardrails, how long and how much of what sessions did is
+  kept, and the local control socket.
+- **Reading**: reader view's text size, font and line width.
+- **About**: versions, the profile folder, updates (*Check for updates now*,
+  *Restart to update*), and the releases page.
+
+It is a window of its own, like the task manager, not a tab: no page and no
+Claude session can reach it, and it is sent no secret (the relay key is only
+ever typed into it; passwords stay in the Passwords panel). It keeps no
+settings itself: each control drives the module that owns the behaviour
+(`src/main/settings-window.js`), so the menus, the window chrome and Settings
+always agree. Values live where they always did: `settings.json` in the
+profile for most, and the module's own file for the rest (`relay.json`,
+`guardrails.json`, `consent.json`, `permissions.json`, `shields.json`,
+`downloads.json`, `bookmarks.json`, `passwords.json`).
+
 ## Appearance
 
-Dark by default. *View › Appearance* switches to Light or Match system; the
+Dark by default. *View › Appearance* (or Settings) switches to Light or Match system; the
 choice is kept in `settings.json` in the profile. Pages see it as
 `prefers-color-scheme`. Under WSL, *Match system* follows Linux's setting, not
 Windows'.
@@ -570,6 +605,7 @@ src/main/taskmanager.js  the task manager window: memory and CPU per tab and pro
 src/main/pip.js       watching a session in a small window: its tab's frames, scaled down
 src/main/default-browser.js  links from other apps (command line, second launch), Default apps
 src/main/reader.js    reader view: the check, the loui-reader: page and its settings, read_article's text
+src/main/settings-window.js  the Settings window: every setting, each driven through the module that owns it
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/page/passwords.js runs in your own pages only: notices sign-ins, fills on request
 src/page/reader.js    with Readability, in an isolated world: finds the article, cleans it, as text

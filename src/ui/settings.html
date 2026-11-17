@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" class="settings-page">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'">
+  <title>Settings</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <nav id="st-nav" aria-label="Settings">
+    <h1>Settings</h1>
+    <input id="st-search" type="search" spellcheck="false" autocomplete="off"
+           placeholder="Search settings" aria-label="Search settings">
+    <div id="st-sections" role="tablist" aria-orientation="vertical" aria-label="Sections"></div>
+  </nav>
+  <main id="st-main">
+    <p id="st-none" role="status" hidden></p>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

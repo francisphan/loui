@@ -14,8 +14,7 @@
   box-shadow: inset 3px 0 0 var(--claude), inset 0 -1px 0 var(--rule);
   font-size: 13.5px;
 }
-#guard-ask[hidden], #guard-shot[hidden], #guard-show[hidden], #guard-always[hidden],
-#guard-trusted[hidden], #guard-trusted-title[hidden] { display: none; }
+#guard-ask[hidden], #guard-shot[hidden], #guard-show[hidden], #guard-always[hidden] { display: none; }
 #guard-shot {
   flex: none;
   max-width: 180px;
@@ -41,12 +40,3 @@
 #guard-block, #guard-always { border: 1px solid var(--rule); background: var(--paper); }
 #guard-once { border: 0; background: var(--claude); color: var(--on-claude); }
 #guard-ask button:disabled { opacity: .5; }
-
-/* Its part of the Settings sheet. */
-#settings label.check { display: flex; align-items: center; gap: 7px; font-weight: 400; }
-#guard-site { flex: 1; min-width: 0; }
-.guard-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.guard-list li { display: flex; align-items: center; gap: 8px; min-height: 28px; }
-.guard-list .site { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
-.guard-list .kind { color: var(--ink-2); white-space: nowrap; }
-.guard-list .none { color: var(--ink-2); }

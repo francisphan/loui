@@ -742,11 +742,11 @@ function drawChips() {
 }
 
 // ── side panels ─────────────────────────────────────────────────────────────
-// Settings, the relay form and site permissions each take the Claude panel's
+// The relay form and site permissions each take the Claude panel's
 // place while open, as History, Bookmarks, Passwords and Sessions do: one at
 // a time, with a × at the top, and Esc closes. opened(): once it is on show.
 // Returns show(open, quiet): quiet opens it without taking the keyboard.
-const SIDE_PANELS = ['history', 'bookmarks', 'passwords', 'activity', 'settings', 'relay', 'perms'];
+const SIDE_PANELS = ['history', 'bookmarks', 'passwords', 'activity', 'relay', 'perms'];
 function sidePanel(name, node, opened) {
   const cls = document.body.classList;
   const isOpen = () => cls.contains(`${name}-open`);

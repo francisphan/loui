@@ -69,8 +69,9 @@ function createDefaultBrowser({ getWin, tabs }) {
     open(urls);
   }
 
-  async function makeDefault() {
-    const { response } = await dialog.showMessageBox(getWin(), {
+  // parent: the window that asked (the Settings window), otherwise the main one.
+  async function makeDefault(parent) {
+    const { response } = await dialog.showMessageBox(parent?.webContents ? parent : getWin(), {
       type: 'info',
       message: 'Choose Loui in Windows Settings',
       detail: 'Windows lets only you change the default browser. Settings opens at Loui: choose ' +
@@ -87,7 +88,13 @@ function createDefaultBrowser({ getWin, tabs }) {
     ? [{ label: 'Make Loui your default browser…', click: makeDefault }]
     : []);
 
-  return { open, secondInstance, menuItems };
+  // For the Settings window. can: the installer registered Loui (Windows, installed).
+  const state = () => {
+    const can = process.platform === 'win32' && app.isPackaged;
+    return { can, isDefault: can && app.isDefaultProtocolClient('http') && app.isDefaultProtocolClient('https') };
+  };
+
+  return { open, secondInstance, menuItems, makeDefault, state };
 }
 
 module.exports = { createDefaultBrowser, urlsFrom, accept };

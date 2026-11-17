@@ -102,6 +102,13 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
     if (on) list.push(host);
     settings.keepAwake = list;
     save();
+    tabs.emit('change'); // the Settings window lists them
+  }
+  // 0: never.
+  function setMinutes(m) {
+    if (!Number.isFinite(m) || m < 0) return;
+    settings.sleepAfterMinutes = m;
+    save();
   }
 
   // "Sleep this tab now": the user's word is enough, unsent form input or not.
@@ -123,7 +130,7 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
     }
   });
 
-  return { check, sleepNow, mayRest, attach };
+  return { check, sleepNow, mayRest, attach, setMinutes, setKeepAwake, prefs: () => ({ minutes: minutes(), keepAwake: keepAwake() }) };
 }
 
 module.exports = { createSleep };

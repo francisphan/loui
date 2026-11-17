@@ -114,6 +114,7 @@ function createShields({ ses, tabs, home, changed }) {
     updating.once('exit', (code) => {
       updating = null;
       if (code === 0) load();
+      else changed();
     });
   }
 
@@ -263,7 +264,17 @@ function createShields({ ses, tabs, home, changed }) {
   setTimeout(check, 60000);
   setInterval(check, RETRY);
 
-  return { state, set, menu, attach, forgetPrivate: () => offPrivate.clear() };
+  // For the Settings window: the sites Shields is off for (never a private
+  // window's), and the lists' age. can: there are lists to download.
+  const prefs = () => ({ off: [...off].sort(), updated, updating: !!updating, ready: !!engine, can: !!lists });
+  // Shields back on for a site, from the list in Settings.
+  function allow(site) {
+    if (!off.delete(site)) return;
+    fs.writeFileSync(sitesFile, JSON.stringify({ off: [...off].sort() }, null, 2));
+    changed();
+  }
+
+  return { state, set, menu, attach, forgetPrivate: () => offPrivate.clear(), prefs, allow, update };
 }
 
 module.exports = { createShields, RESOURCES };

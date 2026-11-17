@@ -156,7 +156,7 @@ function createBrave({ tabs, settings, save, changed }) {
         title: `Opened in ${name() === 'Brave' ? 'Brave' : 'your other browser'}`,
         lines: [
           [`Loui sent this page to ${name()}, because ${site} is on your list of sites that open there. ` +
-            'Some sites, Google sign-in among them, refuse browsers like Loui.'],
+            'Some sites refuse to work in browsers like Loui.'],
           [url, 'where'],
         ],
         link: { href: UNDO + nonce, text: `Open ${site} in Loui from now on` },

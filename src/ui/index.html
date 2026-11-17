@@ -8,7 +8,6 @@
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="history.css">
-  <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="bookmarks.css">
   <link rel="stylesheet" href="guardrails.css">
   <link rel="stylesheet" href="passwords.css">
@@ -280,60 +279,13 @@
     </div>
   </aside>
 
-  <aside id="settings" aria-label="Settings" hidden>
-    <div class="side-head">
-      <h1>Settings</h1>
-      <button id="settings-close" class="quiet" type="button" title="Close (Esc)" aria-label="Close settings"></button>
-    </div>
-    <div class="side-body">
-      <label>Search with
-        <select id="search-engine"></select>
-      </label>
-      <form id="search-custom" hidden>
-        <label>Search address, with %s where the words go
-          <input id="search-url" type="text" spellcheck="false" autocomplete="off" placeholder="https://example.com/search?q=%s">
-        </label>
-        <div class="row">
-          <span id="search-url-note" role="status"></span>
-          <button type="submit" class="quiet">Use this address</button>
-        </div>
-      </form>
-      <label class="check"><input id="tabs-vertical" type="checkbox"> Show tabs in a sidebar on the left</label>
-      <h3 id="elsewhere-title"></h3>
-      <p>Loui sends these sites to your other browser instead of opening them, for sites like Google sign-in that refuse browsers like Loui. Claude's tabs never open them.</p>
-      <ul id="elsewhere-list"></ul>
-      <form id="elsewhere-add" class="row">
-        <input id="elsewhere-site" type="text" spellcheck="false" autocomplete="off" placeholder="accounts.google.com" aria-label="Site to send to your other browser">
-        <button type="submit" class="quiet">Add</button>
-      </form>
-      <h3>Claude sessions let in without asking</h3>
-      <p>The first time a new Claude session uses Loui, Loui asks you. Sessions from these are let in straight away.</p>
-      <ul id="consent-list"></ul>
-      <h3>Ask before Claude acts</h3>
-      <label class="check"><input id="guard-on" type="checkbox"> Ask me before Claude pays, buys, sends, deletes or signs in</label>
-      <p>Loui pauses Claude and asks you above the page first. This covers every Claude session and the Claude panel, never what you do yourself.</p>
-      <h3>Sites Claude asks before opening</h3>
-      <ul id="guard-sites" class="guard-list"></ul>
-      <form id="guard-site-add" class="row">
-        <input id="guard-site" type="text" spellcheck="false" autocomplete="off" placeholder="mybank.com" aria-label="Site Claude should ask before opening">
-        <button type="submit" class="quiet">Add</button>
-      </form>
-      <h3>Allowed without asking</h3>
-      <ul id="guard-remembered" class="guard-list"></ul>
-      <h3 id="guard-trusted-title" hidden>Sessions you trust until they end</h3>
-      <ul id="guard-trusted" class="guard-list" hidden></ul>
-    </div>
-  </aside>
-
   <script src="ui.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
   <script src="permissions.js"></script>
   <script src="history.js"></script>
   <script src="shields.js"></script>
-  <script src="settings.js"></script>
   <script src="bookmarks.js"></script>
-  <script src="consent.js"></script>
   <script src="guardrails.js"></script>
   <script src="passwords.js"></script>
   <script src="reader.js"></script>

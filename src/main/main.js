@@ -46,6 +46,7 @@ const { createPip } = require('./pip');
 const { createDefaultBrowser, urlsFrom } = require('./default-browser');
 const { createReader } = require('./reader');
 const { createPalette } = require('./palette');
+const { createSettingsWindow } = require('./settings-window');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -80,6 +81,7 @@ function setTheme(theme) {
   settings.theme = theme;
   saveSettings();
   Menu.setApplicationMenu(appMenu());
+  pushState(); // the Settings window shows the choice
 }
 
 let tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
@@ -97,6 +99,7 @@ let identity;
 let activity;
 let palette;
 let pip;
+let settingsWindow;
 let userSes;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
@@ -135,6 +138,7 @@ function pushState() {
       }
     }
     pip?.changed(); // the small window watching a session shows its status too
+    settingsWindow?.changed();
   });
 }
 
@@ -345,7 +349,7 @@ function start() {
   shields = createShields({ ses: userSes, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first
   brave = createBrave({ tabs, settings, save: saveSettings, changed: pushState });
   print = createPrint({ win: () => tabs.win, active: () => tabs.active() });
-  restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json'), openWindow: () => openWindow({ blank: false }) });
+  restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json'), openWindow: () => openWindow({ blank: false }), settings });
   downloads = createDownloads({ ses: userSes, tabs, home: paths.home, changed: pushState });
   permissions = createPermissions({ ses: userSes, tabs, home: paths.home, changed: pushState });
   sleep = createSleep({
@@ -363,7 +367,7 @@ function start() {
   lockToApp(suggest.webContents);
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), tabs, ses: userSes, send, broadcast, changed: pushState });
   suggest.add(bookmarks);
-  passwords = createPasswords({ tabs, home: paths.home, send, changed: pushState });
+  passwords = createPasswords({ tabs, home: paths.home, send, changed: pushState, settings, saveSettings });
   prompts = createPrompts({
     changed: () => {
       pushState();
@@ -374,7 +378,7 @@ function start() {
   reader = createReader({ tabs, ses: userSes, settings, save: saveSettings, changed: pushState });
   activity = createActivity({
     dir: path.join(paths.home, 'activity'), tabs, settings, save: saveSettings,
-    changed: (ids) => broadcast('activity', { type: 'changed', ids }, false),
+    changed: (ids) => { broadcast('activity', { type: 'changed', ids }, false); settingsWindow?.changed(); },
     cipher: createCipher(),
   });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState, decided: activity.consent });
@@ -430,6 +434,7 @@ function start() {
       })),
       { label: 'Address suggestions', wc: suggest.webContents },
       { label: 'Command palette', wc: palette.webContents },
+      { label: 'Settings', wc: settingsWindow?.webContents() },
     ],
     claude: () => chat.process(),
     focusMain: (tab) => {
@@ -449,6 +454,12 @@ function start() {
       if (win.isMinimized()) win.restore();
       win.focus();
     },
+  });
+  settingsWindow = createSettingsWindow({
+    settings, save: saveSettings, tabs, home: paths.home, lockToApp, setTheme, setTabStrip, tabStrip,
+    refreshMenu: () => Menu.setApplicationMenu(appMenu()),
+    search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
+    guardrails, activity, reader, updater, defaultBrowser,
   });
 
   tabs.on('change', pushState);
@@ -717,6 +728,7 @@ async function testHook({ ui, arg }) {
   if (activity.probes[ui]) return activity.probes[ui](arg);
   if (palette.probes[ui]) return palette.probes[ui](arg);
   if (pip.probes[ui]) return pip.probes[ui](arg);
+  if (settingsWindow.probes[ui]) return settingsWindow.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
@@ -818,7 +830,7 @@ function appMenu() {
         { label: 'Save as PDF…', click: handlers['print:save-pdf'] },
         { label: `Open in ${brave?.name() || 'Brave'}`, click: handlers['brave:open'] },
         { type: 'separator' },
-        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: show('show-settings') },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => settingsWindow.open() },
         ...defaultBrowser.menuItems(),
         ...(process.platform === 'linux' ? [] : [{
           label: 'Open Loui when I sign in', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
