@@ -61,17 +61,28 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
   let telling = null;
   const tell = () => { telling ||= setTimeout(() => { telling = null; changed(); }, 500); };
 
+  // Saves still on their way, by session id. A session's last save can still be
+  // running after its log has stopped being live, so removing a session waits
+  // for it here, and a removed session's late save is dropped (else "Clear
+  // all" could delete a file that the save then wrote back).
+  const saving = new Map();
+  const removed = new Set();
   function write(log) {
+    const id = log.data.id;
     log.saving = (log.saving || Promise.resolve()).then(async () => {
-      if (log.off) return;
-      const to = file(log.data.id);
+      if (log.off || removed.has(id)) return;
+      const to = file(id);
       await fsp.writeFile(`${to}.tmp`, JSON.stringify(log.data), { mode: 0o600 });
+      if (removed.has(id)) return void fsp.rm(`${to}.tmp`, { force: true }).catch(() => {});
       await fsp.rename(`${to}.tmp`, to);
     }).catch(() => {});
+    saving.set(id, log.saving);
+    log.saving.then(() => { if (saving.get(id) === log.saving) saving.delete(id); });
     return log.saving;
   }
   // Writes are bunched: a busy session takes several steps a second.
   function dirty(log) {
+    if (log.off) return; // removed: a late picture must not bring it back
     index.set(log.data.id, summary(log.data));
     tell();
     if (log.timer || log.off) return;
@@ -80,6 +91,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
 
   function newLog(data) {
     const log = { data, off: false, saving: null, timer: null };
+    removed.delete(data.id); // a session id seen again starts a log afresh
     dirty(log);
     return log;
   }
@@ -229,7 +241,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
   }
 
   async function remove(id) {
-    index.delete(id);
+    removed.add(id);
     for (const [key, log] of live) {
       if (log.data.id !== id) continue;
       log.off = true;
@@ -237,8 +249,10 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
       live.delete(key);
       await log.saving;
     }
+    await saving.get(id); // a save that outlived the live log
     await fsp.rm(file(id), { force: true }).catch(() => {});
     await fsp.rm(pictures(id), { recursive: true, force: true }).catch(() => {});
+    index.delete(id); // off the list once its files are gone
     tell();
   }
 
