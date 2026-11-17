@@ -20,6 +20,7 @@ const { createDownloads } = require('./downloads');
 const { createPermissions } = require('./permissions');
 const { createHistory } = require('./history');
 const { createSuggest } = require('./suggest');
+const { createSleep } = require('./sleep');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -53,7 +54,7 @@ function setTheme(theme) {
   Menu.setApplicationMenu(appMenu());
 }
 
-let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest;
+let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -108,6 +109,9 @@ function createWindow() {
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
   permissions = createPermissions({ ses, tabs, home: paths.home, changed: pushState });
+  sleep = createSleep({
+    tabs, ses, settings, permissions, save: () => fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2)),
+  });
   history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => send('history:changed') });
   suggest = createSuggest({ win, tabs, send, sources: [history] });
   lockToApp(suggest.webContents);
@@ -216,6 +220,14 @@ const handlers = {
 async function testHook({ ui, arg }) {
   if (ui === 'state') return currentState();
   if (suggest.probes[ui]) return suggest.probes[ui](arg);
+  if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
+  // Runs a script in any tab's page, which the tools only allow in a session's own tabs.
+  if (ui === 'tab:js') return tabs.get(arg.id)?.wc?.executeJavaScript(arg.code);
+  // Memory in use by all of Loui's processes, in KB, and how many there are.
+  if (ui === 'memory') {
+    const metrics = app.getAppMetrics();
+    return { kb: metrics.reduce((sum, m) => sum + m.memory.workingSetSize, 0), processes: metrics.length };
+  }
   // A page trying to take over the window chrome, as a dropped link would.
   if (ui === 'chrome-navigate') {
     await win.webContents.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});

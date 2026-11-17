@@ -70,7 +70,7 @@ function createPermissions({ ses, tabs, home, changed }) {
   let seq = 0;
 
   const tabOf = (wc) => (wc ? tabs.list.find((t) => t.wc === wc) : null);
-  const yours = (tab) => !!tab && tab.group === YOU && !tab.wc.isDestroyed();
+  const yours = (tab) => !!tab?.wc && tab.group === YOU && !tab.wc.isDestroyed();
 
   // true, false, or undefined if the user has not answered for this kind.
   function answered(tab, origin, kind) {
@@ -198,7 +198,10 @@ function createPermissions({ ses, tabs, home, changed }) {
     };
   }
 
-  return { state, answer, forget };
+  // Whether a tab has a question waiting (such a tab is not put to sleep).
+  const asking = (tabId) => pending.some((p) => p.tabId === tabId);
+
+  return { state, answer, forget, asking };
 }
 
 module.exports = { createPermissions };
