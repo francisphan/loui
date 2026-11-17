@@ -1,0 +1,12 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Inner sign in</title></head>
+<body>
+  <form><input id="user" type="email" autocomplete="username"><input id="pass" type="password"></form>
+  <script>
+    // Tells the page around it about anything typed or filled in.
+    for (const ev of ['input', 'change']) document.addEventListener(ev, (e) => parent.postMessage(`${e.target.id}=${e.target.value}`, '*'));
+    parent.postMessage('ready', '*');
+  </script>
+</body>
+</html>

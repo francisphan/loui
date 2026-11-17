@@ -299,6 +299,51 @@ Brave, Chrome, Edge or Firefox export (Brave: *Bookmarks › Bookmark manager �
 (`javascript:` addresses) are left out. They are kept in `bookmarks.json` in
 the profile. Claude sessions have no tool that reads or changes them.
 
+## Passwords
+
+When you sign in to a site in one of your own tabs, a strip above the page
+offers *Save password for <site>?* (Save, Never for this site, Not now), or to
+update the password if it changed. It asks only once the sign-in went through:
+the page moved on to one without a password field, or the field went away.
+On a page whose address has saved logins, a key shows in the address bar; its
+menu lists the accounts, and choosing one fills the username and password.
+Nothing is ever filled when a page loads, only when you choose. *File ›
+Passwords* lists them, shows one for 30 seconds, copies one (the clipboard is
+cleared 30 seconds later), edits and deletes, and imports the CSV that Brave
+or Chrome export (Brave: *Settings › Autofill and passwords › Password manager
+› ⋮ › Export*). Delete that file afterwards: it holds every password
+unencrypted, and Loui offers to delete it for you.
+
+They are kept in `passwords.json` in the profile. Each password and each
+username is encrypted on its own with the system's protection for app secrets
+(DPAPI on Windows, the Keychain on macOS, GNOME Keyring or KWallet on Linux);
+site addresses are kept readable, so the key can show without decrypting
+anything. Without that protection (Linux without a keyring), passwords are off
+and nothing is written.
+
+Logins match by exact origin: one saved on `accounts.example.com` is not
+offered on `example.com`, and one saved on an `https` page is never offered on
+`http`. Only the page itself is filled, never a frame inside it, and never a
+field that can't be seen.
+
+**What this protects against, and what not:**
+
+- *Claude sessions* have no tool that reads, lists, fills or saves passwords.
+  Their tabs, including tabs you handed over, get no key, no offer and no
+  fill. The Claude panel can't fill either: only your click in the key's menu
+  (a native menu no page and no Claude can open) fills. The page script that
+  notices sign-ins runs only in your own tabs, in an isolated world of its
+  own, and its reports never reach the console history tools read. Snapshots
+  show a password field's value as `••••`.
+- *Pages:* a page can't ask for a fill, and an injected or hidden form gets
+  nothing on load. But once a password is in a page, the page's own scripts
+  can read it, and so can `evaluate`, which runs in the page. So a password
+  you fill in a tab you then hand to a session, or that the panel works in, is
+  readable from there: fill and sign in yourself, then hand the tab over.
+- *Someone with your disk or a backup* gets ciphertext. *Programs running as
+  you* can ask the system to decrypt, as they can for Chrome's and Brave's
+  passwords; Loui does not defend against malware on your account.
+
 ## When a page can't be opened
 
 The tab explains what went wrong in a sentence or two, with *Try again*. The
@@ -342,7 +387,9 @@ src/main/brave.js     Open in Brave, and the sites that open there instead of in
 src/main/print.js     printing and Save as PDF
 src/main/bookmarks.js bookmarks: the bar's folder menus, import, bookmarks.json
 src/main/errorpage.js the page shown when a page can't be opened (and Louis's walk)
+src/main/passwords.js passwords: the encrypted store, offers to save, filling, import
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
+src/page/passwords.js runs in your own pages only: notices sign-ins, fills on request
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
 test/                 end-to-end tests
@@ -383,5 +430,4 @@ break:
 ## Not here yet
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
-- Password manager,
-  extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).
+- Extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).

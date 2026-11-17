@@ -155,7 +155,7 @@
       const t = el.getAttribute('type');
       if (t && t !== 'text' && role === 'textbox') s += ` type=${t}`;
       if (role === 'checkbox' || role === 'radio') s += el.checked ? ' (checked)' : '';
-      else if (el.value) s += ` value=${q(t === 'password' ? '••••' : clean(el.value, 80))}`;
+      else if (el.value) s += ` value=${q(el.type === 'password' ? '••••' : clean(el.value, 80))}`; // never a password's characters
     } else if (role === 'textbox') {
       const v = clean(el.innerText, 80);
       if (v && v !== nameOf(el)) s += ` value=${q(v)}`;

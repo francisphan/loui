@@ -12,14 +12,14 @@ const SEND = new Set([
   'suggest:query', 'suggest:show', 'suggest:hide', 'suggest:pick', 'history:list', 'history:remove', 'history:clear',
   'shields:menu', 'shields:set',
   'print', 'print:save-pdf', 'search:set', 'brave:open', 'brave:add', 'brave:remove',
-  'bookmarks',
+  'bookmarks', 'passwords',
   'prompt:answer', 'consent:revoke',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
   'show-permissions', 'suggestions', 'suggest', 'suggest:pick', 'history', 'history:changed', 'show-history',
   'show-settings',
-  'bookmarks',
+  'bookmarks', 'passwords',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {
