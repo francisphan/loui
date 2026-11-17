@@ -154,7 +154,7 @@ test('arrow keys move through the suggestions and Enter opens one', async () => 
   assert.deepEqual(s.rows.map((r) => r.chosen), [false, true]);
   assert.equal(await address(), b.base + '/second.html');
   await key('Up');
-  assert.equal(await address(), host(), 'back on the first row: what was typed, completed');
+  await until(async () => (await address()) === host(), 'back on the first row: what was typed, completed'); // the key lands a moment later
   await key('Enter');
   await until(async () => (await onScreen()).url === b.base + '/', 'the suggested page to open');
   assert.equal((await suggestions()).open, false);

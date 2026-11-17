@@ -213,13 +213,16 @@ test('the bookmarks bar is one Tab stop, and Left and Right move along it', asyn
   const start = await until(async () => { const s = await bar(); return s.count >= 2 && s.stops === 1 && s; }, 'one Tab stop on the bar');
   assert.equal(start.at, -1);
   await chrome("document.querySelector('#bookmarks-items .bar-item').focus()");
+  // A key arrives a moment after it is sent: each step waits for where it leads.
+  const lands = (at, what) => until(async () => { const s = await bar(); return s.stops === 1 && s.at === at && s.count === start.count; }, what);
   await b.ui('address:key', 'Right');
-  assert.deepEqual(await bar(), { stops: 1, at: 1, count: start.count });
+  await lands(1, 'Right to move to the second');
   await b.ui('address:key', 'End');
-  assert.deepEqual(await bar(), { stops: 1, at: start.count - 1, count: start.count });
+  await lands(start.count - 1, 'End to move to the last');
   await b.ui('address:key', 'Left');
+  await lands(start.count - 2, 'Left to move back one');
   await b.ui('address:key', 'Home');
-  assert.deepEqual(await bar(), { stops: 1, at: 0, count: start.count });
+  await lands(0, 'Home to move to the first');
 });
 
 test('a bookmarks file exported from Brave or Chrome imports onto the bar and into other bookmarks', async () => {

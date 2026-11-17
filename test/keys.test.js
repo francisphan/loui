@@ -130,13 +130,13 @@ test('the tab strip is one Tab stop, and the arrow keys move along it', async ()
   const at = () => chrome("document.activeElement.classList.contains('tab') ? +document.activeElement.dataset.id : null");
   assert.equal(await at(), second.id);
   await press('Left');
-  assert.equal(await at(), a.id);
+  await until(async () => (await at()) === a.id, 'Left to land on the first tab'); // the key lands a moment later
   // The strip is redrawn with every change of state: the keyboard stays on the tab.
   await b.ui('tabs:layout', {});
   await sleep(300);
   assert.equal(await at(), a.id);
   await press('End');
-  assert.equal(await at(), third.id);
+  await until(async () => (await at()) === third.id, 'End to land on the last tab');
   await press('Home');
   await press('Enter');
   await until(async () => (await onScreen()).id === a.id, 'Enter to show the tab');
