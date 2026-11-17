@@ -204,6 +204,88 @@ test('reader view works in a private window', async () => {
   await from(priv, 'reader:toggle');
 });
 
+test('a private window stays out of the Claude panel\'s reach, and out of a normal window\'s palette', async () => {
+  await from(priv, 'go', b.base + '/index.html?private-opener');
+  const opener = await loaded(priv);
+  // The page opens a tab on the user's click, as a target=_blank link does.
+  await b.ui('tab:js', { id: opener.id, acted: true, code: 'window.open("/second.html?secret-private"); 1' });
+  await wait('the opened tab', async () => (await stateOf(priv)).tabs.find((t) => t.url.includes('secret-private') && !t.loading));
+  await b.ui('window:focus', priv);
+  // The panel reads the user's current tab: never one of these.
+  const seen = JSON.stringify(await b.ui('panel', { tool: 'snapshot' }).catch((e) => String(e)));
+  assert.ok(!seen.includes('secret-private') && !seen.includes('private-opener'), seen);
+  // A tab the panel opens goes to the normal window, though the private one is focused.
+  const before = (await win(priv)).tabs.length;
+  await b.ui('panel', { tool: 'tabs', args: { action: 'new' } });
+  assert.equal((await win(priv)).tabs.length, before);
+  // The normal window's palette does not list private tabs; the private window's lists only them.
+  const rows = async (id) => {
+    await from(id, 'menu:key', 'CmdOrCtrl+K');
+    await wait('the palette', async () => { const p = await from(id, 'palette'); return p.open && p.window === id; });
+    await from(id, 'palette:type', 'second');
+    const p = await wait('results', async () => { const now = await from(id, 'palette'); return now.answered === 'second' && now; });
+    await from(id, 'palette:key', { key: 'Escape' });
+    await wait('the palette to close', async () => !(await from(id, 'palette')).open);
+    return p.groups.flatMap((g) => g.rows).map((r) => r.detail);
+  };
+  assert.ok(!(await rows(one)).some((d) => d.includes('secret-private')));
+  assert.ok((await rows(priv)).some((d) => d.includes('secret-private')));
+});
+
+test('a private tab\'s icon is fetched in its own session and leaves nothing on disk', async () => {
+  await from(priv, 'go', b.base + '/icon.html');
+  const tab = await wait('the icon', async () => {
+    const t = await tabIn(priv);
+    return t?.favicon && t;
+  });
+  assert.match(tab.favicon, /^data:image\/png;base64,/, 'the window chrome is given the picture, not its address');
+  await pause(1500); // anything a cache would write
+  const found = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      let st;
+      try { st = fs.statSync(p); } catch { continue; }
+      if (st.isDirectory()) walk(p);
+      else if (st.size < 20e6) {
+        try { if (fs.readFileSync(p).includes('private-icon-marker')) found.push(path.relative(home, p)); } catch {}
+      }
+    }
+  };
+  walk(home);
+  assert.deepEqual(found, []);
+});
+
+test('a page opens tabs only after an action in it, and only so many', async () => {
+  await from(one, 'go', b.base + '/index.html?opener');
+  const tab = await loaded(one);
+  const count = async (mark) => (await stateOf(one)).tabs.filter((t) => t.url.includes(mark)).length;
+  await js(tab.id, 'window.open("/second.html?unasked"); 1');
+  await pause(600);
+  assert.equal(await count('unasked'), 0, 'not by itself');
+  for (let i = 0; i < 13; i++) await b.ui('tab:js', { id: tab.id, acted: true, code: `window.open("/second.html?asked-${i}"); 1` });
+  await pause(600);
+  assert.equal(await count('asked-'), 10, 'ten in a minute');
+  for (const t of (await stateOf(one)).tabs.filter((x) => x.url.includes('asked-'))) await from(one, 'tab:close', t.id);
+});
+
+test('a tab handed to a session does not bring what it logged for the user', async () => {
+  const s = b.as('h', 'Claude Code · handed');
+  await s.text('navigate', { url: b.base + '/second.html?own' });
+  await b.ui('window:focus', one);
+  await from(one, 'go', b.base + '/index.html?before-handing');
+  const mine = await loaded(one);
+  await js(mine.id, 'console.log("said-before-handing"); 1');
+  const asked = s.text('request_tab');
+  await wait('the question', async () => (await stateOf(one)).asking);
+  await from(one, 'handoff:answer', true);
+  await asked;
+  assert.doesNotMatch(await s.text('console_logs'), /said-before-handing/);
+  assert.doesNotMatch(await s.text('network_requests'), /before-handing/);
+  s.end();
+  await wait('the tab to come back', async () => (await stateOf(one)).tabs.some((t) => t.id === mine.id && t.group === 'you'));
+});
+
 test('Claude sessions do not work in a private window unless handed a tab, which stays private', async () => {
   // Focused on the private window, a new session still gets a normal window.
   await b.ui('window:focus', priv);

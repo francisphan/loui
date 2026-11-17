@@ -64,6 +64,8 @@ function createShields({ ses, tabs, home, changed }) {
   const off = new Set((() => {
     try { return JSON.parse(fs.readFileSync(sitesFile, 'utf8')).off || []; } catch { return []; }
   })());
+  const offPrivate = new Set(); // sites switched off in a private window, until it closes
+  const isOff = (site, tab) => off.has(site) || (!!tab?.private && offPrivate.has(site));
   const custom = process.env.LOUI_SHIELDS_LISTS;
   const lists = custom ? custom.split(',').filter(Boolean)
     : process.env.LOUI_TEST ? null : adsAndTrackingLists;
@@ -127,7 +129,7 @@ function createShields({ ses, tabs, home, changed }) {
     if (!engine || !/^(https?|wss?):/.test(d.url)) return null;
     const tab = tabOf(d.webContentsId);
     const top = topOf(d, tab);
-    if (off.has(siteOf(top))) return null;
+    if (isOff(siteOf(top), tab)) return null;
     const { match, redirect } = engine.match(Request.fromRawDetails({
       requestId: String(d.id), tabId: d.webContentsId || 0, url: d.url, sourceUrl: top, type: d.resourceType || 'other',
     }));
@@ -151,11 +153,11 @@ function createShields({ ses, tabs, home, changed }) {
     const page = pages.get(tab.id);
     const url = wc.getURL();
     const site = siteOf(url);
-    if (!engine || !page || !site || off.has(site)) return;
+    if (!engine || !page || !site || isOff(site, tab)) return;
     let found = { classes: [], ids: [], hrefs: [] };
     try { found = await wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code: SCAN }]); } catch {}
     // The tab may have moved on (or reloaded with Shields off) while the page was looked at.
-    if (wc.isDestroyed() || pages.get(tab.id) !== page || off.has(site)) return;
+    if (wc.isDestroyed() || pages.get(tab.id) !== page || isOff(site, tab)) return;
     const asked = page.seen;
     const fresh = (kind) => (found?.[kind] || []).filter((x) => !asked[kind].has(x) && asked[kind].add(x));
     const { hostname, domain } = Request.fromRawDetails({ url });
@@ -202,11 +204,17 @@ function createShields({ ses, tabs, home, changed }) {
   // ── the switch ──
   function set({ site, on } = {}) {
     if (typeof site !== 'string' || !site) return;
-    if (on) off.delete(site);
-    else off.add(site);
-    fs.writeFileSync(sitesFile, JSON.stringify({ off: [...off].sort() }, null, 2));
-    // The page on screen reloads, so that what was blocked loads, or the other way round.
     const tab = tabs.active();
+    if (tab?.private) {
+      // Chosen in a private window: for its pages only, and never written down.
+      if (on) offPrivate.delete(site);
+      else offPrivate.add(site);
+    } else {
+      if (on) off.delete(site);
+      else off.add(site);
+      fs.writeFileSync(sitesFile, JSON.stringify({ off: [...off].sort() }, null, 2));
+    }
+    // The page on screen reloads, so that what was blocked loads, or the other way round.
     if (tab?.wc && siteOf(tab.wc.getURL()) === site) tab.wc.reload();
     changed();
   }
@@ -216,7 +224,7 @@ function createShields({ ses, tabs, home, changed }) {
     const tab = tabs.active();
     const site = siteOf(tab?.url);
     return {
-      shields: site ? { site, on: !off.has(site), blocked: pages.get(tab.id)?.blocked || 0, ready: !!engine } : null,
+      shields: site ? { site, on: !isOff(site, tab), blocked: pages.get(tab.id)?.blocked || 0, ready: !!engine } : null,
     };
   }
 
@@ -244,7 +252,7 @@ function createShields({ ses, tabs, home, changed }) {
   setTimeout(check, 60000);
   setInterval(check, RETRY);
 
-  return { state, set, menu, attach };
+  return { state, set, menu, attach, forgetPrivate: () => offPrivate.clear() };
 }
 
 module.exports = { createShields };

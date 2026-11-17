@@ -182,27 +182,32 @@ function setTabStrip({ vertical, collapsed } = {}) {
 // window gets a new session, so nothing carries over.
 let privateSes = null;
 let privateCount = 0;
+const privateSpare = []; // ended private sessions, emptied, to use again (Electron keeps a session until quit)
 function privateSession() {
   if (privateSes) return privateSes;
-  const ses = session.fromPartition(`loui-private-${++privateCount}`);
-  // The same watchers as the user's session, in the same order: the relay
-  // guard first (tabs.js), then Shields, and the guardrails' hold last.
-  tabs.watchNetwork(ses);
-  shields.attach(ses);
-  downloads.attach(ses, { private: true });
-  permissions.attach(ses);
-  sleep.attach(ses);
-  guardrails.attach(ses);
-  reader.attach(ses);
+  let ses = privateSpare.pop();
+  if (!ses) {
+    ses = session.fromPartition(`loui-private-${++privateCount}`);
+    // The same watchers as the user's session, in the same order: the relay
+    // guard first (tabs.js), then Shields, and the guardrails' hold last.
+    tabs.watchNetwork(ses);
+    shields.attach(ses);
+    downloads.attach(ses, { private: true });
+    permissions.attach(ses);
+    sleep.attach(ses);
+    guardrails.attach(ses);
+    reader.attach(ses);
+  }
   privateSes = ses;
   return ses;
 }
 function endPrivate(ses) {
   if (privateSes === ses) privateSes = null;
   downloads.forgetPrivate();
-  ses.clearStorageData().catch(() => {});
-  ses.clearCache().catch(() => {});
-  ses.clearAuthCache().catch(() => {});
+  shields.forgetPrivate();
+  // Used again only once everything in it is gone.
+  Promise.all([ses.clearStorageData(), ses.clearCache(), ses.clearAuthCache()])
+    .then(() => privateSpare.push(ses), () => {});
 }
 
 // ── windows ─────────────────────────────────────────────────────────────────
@@ -378,9 +383,9 @@ function start() {
   pip = createPip({
     tabs, settings, save: saveSettings, lockToApp,
     pause: (group, on) => handlers.pause({ group, on }),
-    focusMain: () => {
-      const win = (tabs.normalWindow() || tabs.window())?.win;
-      if (!win) return;
+    focusMain: (tab) => {
+      const win = (tab?.window || tabs.normalWindow() || tabs.window())?.win;
+      if (!win || win.isDestroyed()) return;
       if (win.isMinimized()) win.restore();
       win.focus();
     },
@@ -533,7 +538,12 @@ async function testHook({ ui, arg }) {
   if (suggest.probes[ui]) return suggest.probes[ui](arg);
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
   // Runs a script in any tab's page, which the tools only allow in a session's own tabs.
-  if (ui === 'tab:js') return tabs.get(arg.id)?.wc?.executeJavaScript(arg.code);
+  // acted: as if the user had just clicked or typed in the tab (a page may then open a tab).
+  if (ui === 'tab:js') {
+    const tab = tabs.get(arg.id);
+    if (tab && arg.acted) tab.actedAt = Date.now();
+    return tab?.wc?.executeJavaScript(arg.code);
+  }
   // Memory in use by all of Loui's processes, in KB, and how many there are.
   if (ui === 'memory') {
     const metrics = app.getAppMetrics();
@@ -714,8 +724,14 @@ if (!app.requestSingleInstanceLock({ urls: launched })) {
   app.on('second-instance', (_e, argv, cwd, data) => defaultBrowser?.secondInstance(argv, cwd, data));
   app.whenReady().then(() => {
     // Each request runs with the window whose chrome sent it as the one being served.
+    // Only a window's chrome may ask (and the suggestion list, to pick a row):
+    // never a tab's page, nor the chrome of a window that has closed.
     for (const [name, fn] of Object.entries(handlers)) {
-      ipcMain.on(name, (e, arg) => tabs.as(tabs.windowOf(e.sender), () => fn(arg)));
+      ipcMain.on(name, (e, arg) => {
+        const w = tabs.windowOf(e.sender);
+        if (!w && !(name === 'suggest:pick' && e.sender === suggest?.webContents)) return;
+        tabs.as(w, () => fn(arg));
+      });
     }
     start();
     Menu.setApplicationMenu(appMenu()); // after the window: some items come from modules it creates

@@ -247,13 +247,16 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
     // Open tabs: the user's and each session's, labelled with the session.
     const labels = new Map(tabs.groups.map((g) => [g.id, g.label]));
     const tabRows = [];
+    // Private tabs are listed in a private window only, and no others there.
+    const inPrivate = !!tabs.window()?.private;
     for (const t of tabs.summary()) {
+      if (!!t.private !== inPrivate) continue;
       const title = fuzzy(q, t.title);
       const url = fuzzy(q, plain(t.url));
       if (q && !title && !url) continue;
       tabRows.push({
         score: Math.max(title ? title.score + 1 : -Infinity, url ? url.score : -Infinity),
-        row: row(`tab:${t.id}`, () => tabs.select(t.id), {
+        row: row(`tab:${t.id}`, () => tabs.reveal(t.id), {
           kind: 'tab',
           title: t.title,
           titleMarks: title?.marks || [],

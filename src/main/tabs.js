@@ -42,7 +42,7 @@
 // Code that asks about "the tab on screen" without naming a window (active(),
 // activeId) gets the window being served: the one whose chrome sent the
 // request, or whose state is being drawn (see as()), else the focused one.
-const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
+const { WebContentsView, View, Menu, clipboard, nativeTheme, nativeImage } = require('electron');
 const { EventEmitter } = require('events');
 const path = require('path');
 const { requestRules } = require('./requests');
@@ -50,6 +50,10 @@ const { searchFor } = require('./search');
 
 const YOU = 'you';
 const LOG_LIMIT = 500;
+const ICON_MAX = 6000; // characters of a data: URL; a 32-pixel PNG is well under
+const OPEN_WITHIN = 5000; // a page may open a tab this long after an action in it
+const OPEN_MAX = 10; // and this many in a minute
+const clipped = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 ' +
   '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
@@ -230,8 +234,11 @@ class Tabs extends EventEmitter {
   }
 
   // The tab a group's session is working in.
+  // Never a private tab for the user's own group: that is the tab the Claude
+  // panel works in, and it must not see a private window's pages.
   current(groupId) {
-    return this.get(this.group(groupId)?.current);
+    const tab = this.get(this.group(groupId)?.current);
+    return groupId === YOU && tab?.private ? null : tab;
   }
 
   // show: put the new tab on screen. Left unset, a tab opened in the group the
@@ -334,7 +341,7 @@ class Tabs extends EventEmitter {
     const changed = () => this.emit('change');
 
     wc.on('page-title-updated', (_e, title) => { tab.title = title; changed(); });
-    wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0] || null; changed(); });
+    wc.on('page-favicon-updated', (_e, icons) => this.icon(tab, icons[0] || null));
     wc.on('did-start-loading', () => { tab.loading = true; changed(); });
     wc.on('did-stop-loading', () => {
       tab.loading = false;
@@ -349,6 +356,7 @@ class Tabs extends EventEmitter {
     wc.on('did-navigate', (_e, to) => {
       tab.url = to;
       tab.favicon = null;
+      tab.iconUrl = null;
       tab.pointer = null;
       tab.history = null; // the page keeps its own history from here (see wake())
       const mark = { mark: true, text: `navigated to ${to}`, at: Date.now() };
@@ -364,6 +372,7 @@ class Tabs extends EventEmitter {
       tab.url = failedUrl;
       tab.title = "Can't open this page";
       tab.favicon = null;
+      tab.iconUrl = null;
       this.emit('failed', tab, { code, reason, url: failedUrl }); // errorpage.js draws the page
       changed();
     });
@@ -372,7 +381,7 @@ class Tabs extends EventEmitter {
       const d = e.message !== undefined ? e
         : { level: ['debug', 'info', 'warning', 'error'][old[0]], message: old[1], lineNumber: old[2], sourceId: old[3] };
       keep(tab.console, {
-        level: d.level, text: d.message, source: d.sourceId, line: d.lineNumber, at: Date.now(),
+        level: d.level, text: clipped(d.message, 2000), source: clipped(d.sourceId, 300), line: d.lineNumber, at: Date.now(),
       });
     });
     wc.on('render-process-gone', (_e, details) => {
@@ -380,12 +389,20 @@ class Tabs extends EventEmitter {
       changed();
     });
     // A page's new window becomes a new tab in the same group (and window).
+    // Only soon after someone acted in the tab (the user's keys and mouse, or
+    // a session's), and only so many: Electron has no popup blocker of its own.
+    const acted = () => { tab.actedAt = Date.now(); };
+    wc.on('before-input-event', acted);
+    // Presses only: the pointer entering or crossing the page is not an action.
+    wc.on('before-mouse-event', (_e, mouse) => { if (mouse.type === 'mouseDown' || mouse.type === 'mouseUp') acted(); });
     wc.setWindowOpenHandler(({ url: to, disposition }) => {
-      if (/^https?:|^about:blank/i.test(to)) {
+      if (/^https?:|^about:blank/i.test(to) && this.mayOpen(tab)) {
         const opened = this.create(to, {
           group: tab.group, window: tab.window, show: this.onScreen(tab) && disposition !== 'background-tab',
         });
-        if (disposition !== 'background-tab') this.group(tab.group).current = opened.id;
+        if (disposition !== 'background-tab' && !(tab.group === YOU && opened.private)) {
+          this.group(tab.group).current = opened.id;
+        }
       }
       return { action: 'deny' };
     });
@@ -394,6 +411,43 @@ class Tabs extends EventEmitter {
     // Before its first load, so other modules can watch its navigations. Also
     // when a sleeping tab wakes, since it then has a new page.
     this.emit('created', tab);
+  }
+
+  // Whether a page may open a tab now: within OPEN_WITHIN of an action in the
+  // tab, and at most OPEN_MAX in a minute.
+  mayOpen(tab) {
+    const now = Date.now();
+    if (now - (tab.actedAt || 0) > OPEN_WITHIN) return false;
+    tab.opened = (tab.opened || []).filter((at) => now - at < 60000);
+    if (tab.opened.length >= OPEN_MAX) return false;
+    tab.opened.push(now);
+    return true;
+  }
+
+  // The page's icon, as a small data: URL fetched through the tab's own
+  // session: the window chrome loads nothing from the web, and a private
+  // tab's icon never passes through another session's cache or cookies.
+  async icon(tab, url) {
+    tab.iconUrl = url;
+    let icon = null;
+    if (url && /^data:image\//i.test(url)) icon = url.length <= ICON_MAX ? url : null;
+    else if (url && /^https?:/i.test(url)) {
+      try {
+        const res = await tab.ses.fetch(url, { cache: 'force-cache' });
+        const bytes = res.ok ? Buffer.from(await res.arrayBuffer()) : null;
+        const img = bytes && nativeImage.createFromBuffer(bytes);
+        if (img && !img.isEmpty()) icon = img.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
+        else if (bytes) {
+          // Formats nativeImage cannot read here (SVG, and ICO outside Windows), if small.
+          const type = (res.headers.get('content-type') || '').split(';')[0];
+          const data = `data:${type};base64,${bytes.toString('base64')}`;
+          if (type.startsWith('image/') && data.length <= ICON_MAX) icon = data;
+        }
+      } catch {}
+    }
+    if (tab.iconUrl !== url || !this.list.includes(tab)) return; // the page moved on meanwhile
+    tab.favicon = icon;
+    this.emit('change');
   }
 
   // A user's tab out of sight is hidden and throttled; it stays in sight and
@@ -425,6 +479,16 @@ class Tabs extends EventEmitter {
       this.peek(tab);
       this.tuckWhenDrawn(tab);
     }
+    return tab;
+  }
+
+  // Puts a tab on screen and brings its window to the front.
+  reveal(id) {
+    const tab = this.select(id);
+    const win = tab?.window?.win;
+    if (!win || win.isDestroyed()) return tab;
+    if (win.isMinimized()) win.restore();
+    win.focus();
     return tab;
   }
 
@@ -499,7 +563,7 @@ class Tabs extends EventEmitter {
   setCurrent(groupId, id) {
     const tab = this.get(id);
     if (tab && this.get(tab.window.activeId)?.group === groupId) return this.select(id);
-    this.group(groupId).current = id;
+    if (!(groupId === YOU && tab?.private)) this.group(groupId).current = id;
     this.emit('change');
     return tab;
   }
@@ -633,6 +697,10 @@ class Tabs extends EventEmitter {
       if (!dest) return this.close(id); // a private tab whose private windows have all closed
     }
     const left = tab.window;
+    // What the tab logged for whoever had it is not the next one's to read.
+    tab.console = [];
+    tab.network = [];
+    tab.pointer = null;
     tab.group = groupId;
     tab.lent = lent;
     tab.pinned = false; // pinning is for the user's own tabs, and one coming back lands among the others

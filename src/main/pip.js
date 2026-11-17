@@ -255,7 +255,7 @@ function createPip({ tabs, settings, save, lockToApp, pause, focusMain }) {
     else if (action === 'show') {
       const tab = tabs.current(g.id);
       if (tab) tabs.select(tab.id);
-      focusMain();
+      focusMain(tab); // the window the session's tabs are in
     }
   });
   // The picture area's size in device pixels, so pictures are made to fit it.
