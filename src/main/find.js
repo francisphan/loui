@@ -10,12 +10,12 @@ function createFind({ tabs, changed, focus }) {
   let active = 0;
   const watched = new WeakSet();
 
-  const live = (t) => t && !t.wc.isDestroyed();
+  const live = (t) => t && t.wc && !t.wc.isDestroyed();
   const clear = (t) => { if (live(t)) t.wc.stopFindInPage('clearSelection'); };
 
   function watch(t) {
-    if (watched.has(t)) return;
-    watched.add(t);
+    if (watched.has(t.wc)) return; // a tab that slept and woke has a new page
+    watched.add(t.wc);
     t.wc.on('found-in-page', (_e, r) => {
       if (t !== tab || r.requestId !== request) return;
       matches = r.matches;

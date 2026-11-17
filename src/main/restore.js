@@ -25,11 +25,12 @@ function createRestore({ tabs, file }) {
 
   // Back/forward history, without Chromium's page state (large, and not needed).
   function history(tab) {
-    if (tab.wc.isDestroyed()) return pending.get(tab) || null;
-    const nav = tab.wc.navigationHistory;
-    const all = nav.getAllEntries();
+    // A sleeping tab, or one just woken whose page has not come back yet, has the history it kept.
+    const nav = tab.wc && !tab.wc.isDestroyed() ? tab.wc.navigationHistory : null;
+    let all = nav ? nav.getAllEntries() : [];
+    let at = nav ? nav.getActiveIndex() : 0;
+    if (!all.length && tab.history) ({ entries: all, index: at } = tab.history);
     if (!all.length) return pending.get(tab) || null;
-    const at = nav.getActiveIndex();
     const start = Math.max(0, Math.min(at - MAX_ENTRIES / 2, all.length - MAX_ENTRIES));
     const entries = all.slice(start, start + MAX_ENTRIES).map(({ url, title }) => ({ url, title }));
     return { entries, index: at - start };
@@ -90,9 +91,10 @@ function createRestore({ tabs, file }) {
   app.on('before-quit', stop);
   tabs.win.on('close', stop);
 
-  function open(was, show) {
+  // asleep: the tab loads only when it is selected (or Claude uses it).
+  function open(was, show, asleep = false) {
     const h = Array.isArray(was?.history?.entries) && was.history.entries.length ? was.history : null;
-    const tab = tabs.create('', { show, device: was?.device || undefined, history: h || undefined });
+    const tab = tabs.create('', { show, device: was?.device || undefined, history: h || undefined, asleep });
     if (h) pending.set(tab, h);
     return tab;
   }
@@ -103,7 +105,8 @@ function createRestore({ tabs, file }) {
       let saved;
       try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return false; }
       if (!Array.isArray(saved?.tabs) || !saved.tabs.length) return false;
-      const opened = saved.tabs.map((t) => open(t, false));
+      // All but the one on screen start asleep, so a restart does not load every tab at once.
+      const opened = saved.tabs.map((t) => open(t, false, true));
       tabs.select((opened[saved.active] || opened[0]).id);
       return true;
     },

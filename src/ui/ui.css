@@ -129,6 +129,9 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 .tab .dot { box-sizing: border-box; border: 1.5px solid var(--rule); border-radius: 50%; scale: .7; }
 .tab.loading .dot { border-color: var(--rule); border-top-color: var(--focus); scale: 1; animation: turn .8s linear infinite; }
 .tab .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A sleeping tab: its page is unloaded until it is opened. */
+.tab.asleep img, .tab.asleep .dot, .tab.asleep .title { opacity: .5; }
+.tab.asleep img { filter: grayscale(1); }
 .tab .close {
   flex: none;
   display: grid;

@@ -90,11 +90,11 @@ sendLayout();
 new ResizeObserver(sendLayout).observe($('stage'));
 
 function drawTab(t) {
-  const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : ''));
+  const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : ''));
   tab.setAttribute('role', 'tab');
   tab.setAttribute('aria-selected', t.active);
   tab.tabIndex = 0;
-  tab.title = t.title;
+  tab.title = t.asleep ? `${t.title} (asleep, loads when you open it)` : t.title;
 
   let mark;
   if (t.favicon && !t.loading) {

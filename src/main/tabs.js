@@ -13,6 +13,14 @@
 // of pixels shows at the right edge of the page area, and it is tucked back
 // underneath when the load is done. Its size never changes, so the page
 // cannot tell.
+//
+// Speed and memory. A covered view still counts as visible, so Chromium never
+// throttles it. The user's own background tabs are therefore hidden as well
+// as covered (see rest()), and throttled like in any browser; tabs in a Claude
+// session's group stay in sight, unthrottled, so the session can work in them.
+// A tab can also be put to sleep (sleep.js decides when): its view and page
+// are destroyed and only what the tab strip shows and its history are kept,
+// until it is woken by being selected or used by Claude.
 const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
 const { EventEmitter } = require('events');
 
@@ -87,19 +95,93 @@ class Tabs extends EventEmitter {
 
   // show: put the new tab on screen. Left unset, a tab opened in the group the
   // user is watching is shown, and one opened elsewhere stays in the background.
-  // device and history: what a restored tab had (see restore.js).
-  create(url, { group = YOU, show, device, history } = {}) {
+  // device and history: what a restored tab had (see restore.js). asleep: a
+  // restored tab with history starts asleep unless shown, and loads when woken.
+  create(url, { group = YOU, show, device, history, asleep = false } = {}) {
+    const tab = {
+      id: ++this.seq, view: null, wc: null, group, lent: false, title: '', url: '', favicon: null,
+      loading: false, console: [], network: [], pointer: null, device: null, shotScale: 1,
+      asleep: false, history: null, seenAt: Date.now(),
+    };
+    this.list.push(tab);
+    const g = this.group(group);
+    const watching = this.active()?.group === group;
+    if (!g.current) g.current = tab.id;
+    // Before loading, so the first request has its user agent.
+    tab.device = (typeof device === 'string' ? PRESETS[device] : device) || null;
+    show = show ?? (watching || !this.active());
+    if (asleep && history && !show) {
+      tab.asleep = true;
+      tab.history = history;
+      const shown = history.entries[history.index] || history.entries[0];
+      tab.url = shown?.url || '';
+      tab.title = shown?.title || '';
+      this.emit('change');
+      return tab;
+    }
+    this.open(tab, show, { url, history });
+    return tab;
+  }
+
+  // Gives a tab a new view and loads its page (or its history) into it, in
+  // sight while it loads (see the note at the top).
+  open(tab, show, { url, history }) {
+    this.build(tab);
+    this.win.contentView.addChildView(tab.view);
+    if (show) this.select(tab.id);
+    else this.peek(tab);
+    this.rest(tab);
+    const wc = tab.wc;
+    if (history) wc.navigationHistory.restore(history).catch(() => wc.isDestroyed() || wc.loadURL(toUrl(url || '')).catch(() => {}));
+    else wc.loadURL(toUrl(url || '')).catch(() => {});
+    this.emit('change');
+  }
+
+  // Wakes a sleeping tab: its page loads again, with its history and scroll
+  // position. Returns the tab.
+  wake(tab) {
+    if (!tab?.asleep) return tab;
+    tab.asleep = false;
+    tab.seenAt = Date.now();
+    this.open(tab, false, { url: tab.url, history: tab.history });
+    return tab;
+  }
+
+  // Puts a tab to sleep: its page and renderer go, its place in the tab strip,
+  // title, icon and history stay. The tab on screen never sleeps. sleep.js
+  // decides which tabs may.
+  sleep(tab) {
+    if (!tab || tab.asleep || tab.id === this.activeId || !tab.wc || tab.wc.isDestroyed()) return false;
+    const nav = tab.wc.navigationHistory;
+    const entries = nav.getAllEntries();
+    // Kept with each entry's page state, which brings back the scroll position.
+    tab.history = entries.length ? { entries, index: nav.getActiveIndex() } : null;
+    this.emit('leaving', tab); // its page goes away, as if it navigated
+    clearTimeout(tab.tuckTimer);
+    tab.peeking = false;
+    this.win.contentView.removeChildView(tab.view);
+    tab.wc.close();
+    tab.view = tab.wc = null;
+    tab.asleep = true;
+    tab.loading = false;
+    tab.pointer = null;
+    this.emit('change');
+    return true;
+  }
+
+  // A view and its page for a tab, with the page's events wired to it.
+  build(tab) {
     const view = new WebContentsView({
-      // Not throttled in the background: Claude works in tabs the user is not looking at.
-      webPreferences: { session: this.ses, sandbox: true, contextIsolation: true, backgroundThrottling: false },
+      // Throttled in the background unless a Claude session works in it (see rest()).
+      webPreferences: { session: this.ses, sandbox: true, contextIsolation: true },
     });
     view.setBackgroundColor('#ffffff');
     const wc = view.webContents;
-    const tab = {
-      id: ++this.seq, view, wc, group, lent: false, title: '', url: '', favicon: null,
-      loading: false, console: [], network: [], pointer: null, device: null, shotScale: 1,
-    };
-    this.list.push(tab);
+    tab.view = view;
+    tab.wc = wc;
+    tab.audible = false;
+    tab.throttled = true; // as the view is made; rest() changes it
+    if (tab.device) wc.setUserAgent(tab.device.mobile ? MOBILE_UA : this.ses.getUserAgent());
     const changed = () => this.emit('change');
 
     wc.on('page-title-updated', (_e, title) => { tab.title = title; changed(); });
@@ -119,6 +201,7 @@ class Tabs extends EventEmitter {
       tab.url = to;
       tab.favicon = null;
       tab.pointer = null;
+      tab.history = null; // the page keeps its own history from here (see wake())
       const mark = { mark: true, text: `navigated to ${to}`, at: Date.now() };
       keep(tab.console, mark);
       keep(tab.network, mark);
@@ -159,17 +242,38 @@ class Tabs extends EventEmitter {
       return { action: 'deny' };
     });
     wc.on('context-menu', (_e, p) => this.contextMenu(tab, p));
+    wc.on('audio-state-changed', (e) => { tab.audible = !!e.audible; this.rest(tab); });
+  }
 
-    const g = this.group(group);
-    const watching = this.active()?.group === group;
-    if (!g.current) g.current = tab.id;
-    if (device) this.setDevice(tab, device); // before loading, so the first request has its user agent
-    this.win.contentView.addChildView(view);
-    if (show ?? (watching || !this.active())) this.select(tab.id);
-    else this.peek(tab);
-    if (history) wc.navigationHistory.restore(history).catch(() => {});
-    else wc.loadURL(toUrl(url || '')).catch(() => {});
-    changed();
+  // A user's tab out of sight is hidden and throttled; it stays in sight and
+  // at full speed while a Claude session works in it (any tab in a session's
+  // group, or the user's tab the Claude panel is busy in), and while it plays
+  // sound. Hidden views cannot be captured or clicked, hence the exceptions.
+  rest(tab) {
+    if (!tab.wc || tab.wc.isDestroyed()) return;
+    const you = this.group(YOU);
+    const claude = tab.group !== YOU || (you.busy > 0 && you.current === tab.id);
+    const full = claude || tab.audible;
+    const visible = full || tab.peeking || tab.id === this.activeId;
+    if (tab.throttled !== !full) tab.wc.setBackgroundThrottling(tab.throttled = !full);
+    if (tab.view.getVisible() !== visible) tab.view.setVisible(visible);
+  }
+
+  restAll() {
+    for (const tab of this.list) this.rest(tab);
+  }
+
+  // A Claude session is about to work in this tab: wake it if it sleeps, and
+  // bring it into sight if it was hidden (peeking until it has drawn a frame,
+  // so input lands; callers wait with settled()).
+  use(tab) {
+    if (!tab) return tab;
+    tab.seenAt = Date.now(); // in use counts as seen, for sleep.js
+    if (tab.asleep) return this.wake(tab);
+    if (!tab.view.getVisible()) {
+      this.peek(tab);
+      this.tuckWhenDrawn(tab);
+    }
     return tab;
   }
 
@@ -177,21 +281,27 @@ class Tabs extends EventEmitter {
   select(id) {
     const tab = this.get(id);
     if (!tab) return null;
+    const now = Date.now();
+    if (this.active()) this.active().seenAt = now; // the tab the user is leaving was seen until now
+    tab.seenAt = now;
     this.activeId = id;
+    this.wake(tab);
     this.group(tab.group).current = id;
     tab.peeking = false;
     this.win.contentView.addChildView(this.backdrop);
     this.win.contentView.addChildView(tab.view); // re-adding moves it to the top
     for (const other of this.list) if (other.peeking) this.win.contentView.addChildView(other.view);
     this.place(tab);
+    this.restAll();
     this.emit('change');
     return tab;
   }
 
   // See the note at the top of this file.
   peek(tab) {
-    if (tab.id === this.activeId || tab.wc.isDestroyed()) return;
+    if (tab.id === this.activeId || !tab.wc || tab.wc.isDestroyed()) return;
     tab.peeking = true;
+    tab.view.setVisible(true);
     this.win.contentView.addChildView(tab.view);
     this.place(tab);
     clearTimeout(tab.tuckTimer);
@@ -212,7 +322,7 @@ class Tabs extends EventEmitter {
   // fixed delay was not enough on slow machines: the tab went under before
   // drawing anything, and then clicks sent to it went nowhere.
   tuckWhenDrawn(tab) {
-    if (!tab.peeking || tab.wc.isDestroyed()) return;
+    if (!tab.peeking || !tab.wc || tab.wc.isDestroyed()) return;
     const drawn = tab.wc.executeJavaScript(
       'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))', true,
     ).catch(() => false);
@@ -221,11 +331,12 @@ class Tabs extends EventEmitter {
 
   tuck(tab) {
     clearTimeout(tab.tuckTimer);
-    if (!tab.peeking || tab.wc.isLoadingMainFrame?.()) return;
+    if (!tab.peeking || !tab.wc || tab.wc.isLoadingMainFrame?.()) return;
     tab.peeking = false;
     if (tab.id === this.activeId || tab.wc.isDestroyed()) return;
     this.win.contentView.addChildView(tab.view, 0);
     this.place(tab);
+    this.rest(tab);
   }
 
   // Point a session at one of its group's tabs. The screen follows only if the
@@ -245,8 +356,10 @@ class Tabs extends EventEmitter {
     this.emit('closing', tab); // still in the list, its page and history intact
     this.list.splice(this.list.indexOf(tab), 1);
     this.emit('leaving', tab);
-    this.win.contentView.removeChildView(tab.view);
-    tab.wc.close();
+    if (tab.view) { // a sleeping tab has no page to close
+      this.win.contentView.removeChildView(tab.view);
+      tab.wc.close();
+    }
     const g = this.group(tab.group);
     if (g && g.current === id) g.current = next?.id || null;
     const wasOnScreen = this.activeId === id;
@@ -285,6 +398,7 @@ class Tabs extends EventEmitter {
     if (from.current === id) from.current = this.in(from.id)[0]?.id || null;
     if (!to.current || id === this.activeId) to.current = id;
     if (!this.in(YOU).length) this.create('', { show: false });
+    this.restAll(); // in a session's group a tab runs at full speed; back with the user it rests
     this.emit('change');
   }
 
@@ -301,7 +415,7 @@ class Tabs extends EventEmitter {
   // emulation does not resize the viewport of an embedded view.)
   place(tab) {
     const a = this.area;
-    if (a.width < 1 || a.height < 1) return;
+    if (a.width < 1 || a.height < 1 || !tab.view) return;
     const d = tab.device;
     const peekX = a.x + a.width - 1;
     if (!d) return tab.view.setBounds(tab.peeking ? { ...a, x: peekX } : a);
@@ -339,7 +453,7 @@ class Tabs extends EventEmitter {
 
   watchNetwork() {
     const started = new Map();
-    const owner = (d) => this.list.find((t) => t.wc.id === d.webContentsId);
+    const owner = (d) => this.list.find((t) => t.wc?.id === d.webContentsId);
     const record = (d, extra) => {
       const begun = started.get(d.id);
       started.delete(d.id);
@@ -402,6 +516,7 @@ class Tabs extends EventEmitter {
     } else {
       items.push({ label: 'Take back', click: () => this.move(id, YOU) });
     }
+    this.emit('tab-menu', tab, items); // other modules add their items (sleep.js)
     if (items.length) items.push({ type: 'separator' });
     items.push({ label: 'Close tab', click: () => this.close(id) });
     Menu.buildFromTemplate(items).popup({ window: this.win });
@@ -409,6 +524,11 @@ class Tabs extends EventEmitter {
 
   // What the window chrome needs to draw the tab strip and toolbar.
   summary() {
+    // A sleeping tab answers from the history it kept.
+    const nav = (t) => t.wc?.navigationHistory || {
+      canGoBack: () => !!t.history && t.history.index > 0,
+      canGoForward: () => !!t.history && t.history.index < t.history.entries.length - 1,
+    };
     return this.list.map((t) => ({
       id: t.id,
       group: t.group,
@@ -418,9 +538,10 @@ class Tabs extends EventEmitter {
       loading: t.loading,
       active: t.id === this.activeId,
       current: this.group(t.group)?.current === t.id,
-      canGoBack: t.wc.navigationHistory.canGoBack(),
-      canGoForward: t.wc.navigationHistory.canGoForward(),
+      canGoBack: nav(t).canGoBack(),
+      canGoForward: nav(t).canGoForward(),
       device: t.device ? t.device.label || `${t.device.width}×${t.device.height}` : null,
+      asleep: !!t.asleep,
     }));
   }
 }

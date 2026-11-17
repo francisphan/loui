@@ -38,10 +38,11 @@ const host = (u) => { try { return new URL(u).host || u; } catch { return u; } }
 
 function createActions({ tabs, sessions, changed }) {
   // The tab a session works in: its group's current tab. A session's first
-  // tab is opened in the background the first time it needs one.
+  // tab is opened in the background the first time it needs one. A sleeping
+  // or resting tab is woken (see tabs.use()).
   function need(session) {
     const tab = tabs.current(session.group);
-    if (tab) return tab;
+    if (tab) return tabs.use(tab);
     if (session.group !== YOU) return tabs.create('', { group: session.group });
     throw new Error('None of your own tabs is open.');
   }
@@ -502,8 +503,11 @@ function createActions({ tabs, sessions, changed }) {
     const handler = handlers[name];
     if (!handler) throw new Error(`Unknown tool: ${name}`);
     const acts = handler.acts ? handler.acts(args) : defs.get(name).acts;
-    return sessions.during(session, handler.label(args), acts, (say) =>
-      handler.run(args, { say, session, need: () => need(session) }));
+    return sessions.during(session, handler.label(args), acts, async (say) => {
+      const current = tabs.current(session.group);
+      if (current?.asleep) await settle(tabs.use(current)); // its page is back before the tool reads it
+      return handler.run(args, { say, session, need: () => need(session) });
+    });
   }
 
   return { run, picker, describePick };

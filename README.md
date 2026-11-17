@@ -106,6 +106,16 @@ copy this repository there, run `npm install --omit=dev`, start
 - **Your tabs come back after a restart** (and after an update), with their
   history and device size. Sessions' groups do not. `Ctrl+Shift+T` reopens
   the tabs you closed, most recent first.
+- **Tabs you are not using sleep.** One of your tabs that has been out of
+  sight for 15 minutes is unloaded to free its memory, and shown dimmed; it
+  loads again, where you left it, when you open it. Restored tabs start
+  asleep. Never put to sleep: the tab on screen, tabs playing sound, asking
+  for a permission, downloading or holding unsent form input, sessions' tabs,
+  and sites you keep awake (right-click a tab). Right-click a tab and choose
+  *Sleep this tab now* to do it at once. Change the time with
+  `"sleepAfterMinutes"` in `settings.json` in the profile (0 turns it off).
+- **Background speed.** Your tabs out of sight are throttled like in any
+  browser. A session's tabs run at full speed while it works in them.
 
 The **Claude panel** in the window is different: it is your own co-driver and
 works in your tabs. It runs on your Claude Code login through the Agent SDK
