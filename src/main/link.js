@@ -101,7 +101,7 @@ function createLink({ home, version, handle, sessions, changed, guard }) {
 
   function drop(id) {
     mine.delete(id);
-    sessions.end(id);
+    sessions.end(id, 'lost');
   }
 
   function configure({ url, key, on }) {

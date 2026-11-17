@@ -10,8 +10,9 @@ const PAUSED =
   'waiting; they will say when to continue.';
 
 // prompts: the line of questions for the user (prompts.js). ended(id): told
-// whenever a session ends, even one that never got a group.
-function createSessions({ tabs, changed, feed, prompts, ended = () => {} }) {
+// whenever a session ends, even one that never got a group. activity: the
+// activity log (activity.js), told of each session and step.
+function createSessions({ tabs, changed, feed, prompts, ended = () => {}, activity = null }) {
   const live = new Map(); // id -> { id, group, label, source }
   const panel = { id: 'panel', group: YOU, label: 'Claude', source: 'panel' };
   let feedId = 0;
@@ -25,26 +26,31 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {} }) {
   }
 
   // The session for a request, created with its tab group on first sight.
-  function open({ id, label, source }) {
+  function open(request) {
+    const { id, label, source } = request;
     let s = live.get(id);
     if (!s) {
       s = { id, group: id, label: unique(label || 'Claude'), source: source || 'claude' };
       live.set(id, s);
       tabs.addGroup({ id, label: s.label, source: s.source });
+      activity?.open(s, request);
     }
     return s;
   }
 
-  function end(id) {
+  // how: why it ended, for the activity log ('ended', 'closed' by the user, 'lost').
+  function end(id, how) {
     prompts.drop(id); // its questions, including one asking whether it may come in
     ended(id);
+    activity?.end(id, how);
     if (!live.delete(id)) return;
     tabs.removeGroup(id);
   }
 
   // Runs one tool call on behalf of a session, keeping its group's status
   // current for the window. acts: the tool changes the page, so it is refused
-  // while the user has taken over.
+  // while the user has taken over. fn(say, note): say(label) improves the
+  // label; note(text) gives the activity log what was typed or run.
   async function during(session, label, acts, fn) {
     const g = tabs.group(session.group);
     if (!g) throw new Error('This session has ended and its tabs are closed.');
@@ -58,13 +64,17 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {} }) {
       feed(entry);
       changed();
     };
+    const step = activity?.step(session, label, acts);
     g.busy++;
     show();
     try {
-      return await fn((better) => { entry.text = better; show(); });
+      const out = await fn((better) => { entry.text = better; step?.label(better); show(); }, (detail) => step?.note(detail));
+      step?.done(null);
+      return out;
     } catch (e) {
       entry.failed = true;
       feed(entry);
+      step?.done(e);
       throw e;
     } finally {
       g.busy--;

@@ -32,6 +32,7 @@ const { createErrorPage } = require('./errorpage');
 const { createGuardrails } = require('./guardrails');
 const { createPasswords } = require('./passwords');
 const { createTaskManager } = require('./taskmanager');
+const { createActivity } = require('./activity');
 const { createDefaultBrowser, urlsFrom } = require('./default-browser');
 const { createReader } = require('./reader');
 const rpc = require('./rpc');
@@ -78,6 +79,7 @@ let guardrails;
 let passwords;
 let taskManager, defaultBrowser;
 let reader;
+let activity;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
 
@@ -171,9 +173,12 @@ function createWindow() {
   passwords = createPasswords({ tabs, win, home: paths.home, send, changed: pushState });
   reader = createReader({ tabs, ses, settings, save: saveSettings, changed: pushState });
   prompts = createPrompts({ changed: () => { pushState(); if (prompts.head() && !win.isFocused()) win.flashFrame(true); } });
-  consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState });
-  sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id) });
-  guardrails = createGuardrails({ ses, tabs, sessions, home: paths.home, changed: pushState });
+  activity = createActivity({
+    dir: path.join(paths.home, 'activity'), tabs, settings, save: saveSettings, changed: () => send('activity', { type: 'changed' }),
+  });
+  consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState, decided: activity.consent });
+  sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id), activity });
+  guardrails = createGuardrails({ ses, tabs, sessions, home: paths.home, changed: pushState, asked: activity.guard });
   actions = createActions({ tabs, sessions, prompts, changed: pushState, refuse: brave.refuse, guard: guardrails });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
   handle = rpc.createHandler({ run: actions.run, sessions, admit: consent.admit, extra: process.env.LOUI_TEST ? testHook : null });
@@ -266,7 +271,7 @@ const handlers = {
   // A question from a Claude session (prompts.js): value is what the user chose.
   'prompt:answer': ({ id, value }) => prompts.answer(id, value),
   'consent:revoke': (id) => consent.revoke(id),
-  'group:close': (id) => sessions.end(id),
+  'group:close': (id) => sessions.end(id, 'closed'),
   'device:menu': () => deviceMenu(),
   'relay:set': (settings) => link.configure(settings),
   'update:install': () => updater.install(),
@@ -307,7 +312,20 @@ const handlers = {
   'guard:untrust': (id) => guardrails.untrust(id),
   passwords: (request) => passwords.handle(request),
   'reader:toggle': () => reader.toggle(),
+  activity: (request) => activityRequest(request),
 };
+
+// The Sessions panel (src/ui/activity.js). Only the window chrome reaches
+// the activity log: no tool reads it.
+async function activityRequest({ do: what, id, url, days } = {}) {
+  if (what === 'list') send('activity', { type: 'list', ...(await activity.list()) });
+  else if (what === 'open') send('activity', { type: 'session', id, log: await activity.get(id) });
+  else if (what === 'delete') await activity.remove(id);
+  else if (what === 'clear') await activity.clear();
+  else if (what === 'keep') activity.keep(days);
+  // A page a session visited opens in a new tab of the user's own.
+  else if (what === 'visit' && /^https?:\/\//i.test(url || '')) tabs.create(url, { show: true });
+}
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
 // take over a group) and read the window's state. Off unless LOUI_TEST is set.
@@ -331,6 +349,7 @@ async function testHook({ ui, arg }) {
   if (passwords.probes[ui]) return passwords.probes[ui](arg);
   if (taskManager.probes[ui]) return taskManager.probes[ui](arg);
   if (reader.probes[ui]) return reader.probes[ui](arg);
+  if (activity.probes[ui]) return activity.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
@@ -437,6 +456,7 @@ function appMenu() {
         { label: 'Point at something', accelerator: 'CmdOrCtrl+Shift+C', click: handlers['pick:start'] },
         { label: 'Show or hide the Claude panel', accelerator: 'CmdOrCtrl+Shift+L', click: () => send('toggle-panel') },
         { label: 'Take over / let Claude continue', accelerator: 'CmdOrCtrl+Shift+.', click: togglePause },
+        { label: 'Claude sessions…', click: () => { win.webContents.focus(); send('show-activity'); } },
         { type: 'separator' },
         { label: 'Connection to other Claude sessions…', click: () => send('show-relay') },
       ],
@@ -472,7 +492,7 @@ function zoom(step) {
 if (!app.requestSingleInstanceLock({ urls: launched })) {
   app.quit();
 } else {
-  app.on('before-quit', () => { history?.flush(); bookmarks?.flush(); });
+  app.on('before-quit', () => { history?.flush(); bookmarks?.flush(); activity?.flush(); });
   app.on('second-instance', (_e, argv, cwd, data) => defaultBrowser?.secondInstance(argv, cwd, data));
   app.whenReady().then(() => {
     for (const [name, fn] of Object.entries(handlers)) ipcMain.on(name, (_e, arg) => fn(arg));

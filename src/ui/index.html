@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="guardrails.css">
   <link rel="stylesheet" href="passwords.css">
   <link rel="stylesheet" href="reader.css">
+  <link rel="stylesheet" href="activity.css">
 </head>
 <body>
   <header id="bar">
@@ -123,6 +124,7 @@
       <h1>Claude</h1>
       <div id="panel-tools">
         <button id="link" class="quiet" type="button" title="Connection to other Claude sessions"><span class="lamp"></span><span id="link-text"></span></button>
+        <button id="activity-open" class="quiet" type="button" title="What Claude sessions did, after they have gone">Sessions</button>
         <button id="new-chat" class="quiet" type="button">New conversation</button>
       </div>
     </div>
@@ -265,6 +267,35 @@
     <p id="passwords-note">Saved encrypted, for you alone. Claude has no way to read, fill or save them, and Claude's tabs are never filled.</p>
   </aside>
 
+  <aside id="activity" aria-label="Claude sessions" hidden>
+    <div id="activity-head">
+      <h1>Claude sessions</h1>
+      <div>
+        <button id="activity-clear" class="quiet" type="button">Clear all</button>
+        <button id="activity-close" class="quiet" type="button" aria-label="Close Claude sessions"></button>
+      </div>
+    </div>
+    <div id="activity-confirm" role="alertdialog" aria-label="Clear all sessions" hidden>
+      <p>Clear what every Claude session did, with its pictures? This can't be undone.</p>
+      <div class="row">
+        <button id="activity-confirm-no" class="quiet" type="button">Cancel</button>
+        <button id="activity-confirm-yes" class="quiet" type="button">Clear all</button>
+      </div>
+    </div>
+    <div id="activity-list"></div>
+    <div id="activity-foot">
+      <label>Keep for
+        <select id="activity-keep">
+          <option value="1">1 day</option>
+          <option value="7">7 days</option>
+          <option value="30">30 days</option>
+          <option value="0">Don't keep</option>
+        </select>
+      </label>
+      <p>Only you can see this. Claude can't read it, and text typed into password fields is never kept.</p>
+    </div>
+  </aside>
+
   <script src="ui.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
@@ -277,5 +308,6 @@
   <script src="guardrails.js"></script>
   <script src="passwords.js"></script>
   <script src="reader.js"></script>
+  <script src="activity.js"></script>
 </body>
 </html>

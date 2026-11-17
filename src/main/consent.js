@@ -23,7 +23,8 @@ const UNANSWERED =
   'The user did not answer whether this session may use their browser (they may be away). ' +
   'Tell them you are waiting, and try again later.';
 
-function createConsent({ file, prompts, changed }) {
+// decided(session, choice): told each answer, for the activity log.
+function createConsent({ file, prompts, changed, decided = () => {} }) {
   // connector id -> { name, kind, since }
   const saved = (() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')).connectors || {}; } catch { return {}; } })();
   const save = () => fs.writeFileSync(file, JSON.stringify({ connectors: saved }, null, 2), { mode: 0o600 });
@@ -53,6 +54,7 @@ function createConsent({ file, prompts, changed }) {
         }
         if (choice === 'allow' || choice === 'always') allowed.add(id);
         else if (choice === 'deny') denied.add(id);
+        decided(session, choice);
         changed();
         return choice;
       }));

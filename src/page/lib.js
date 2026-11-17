@@ -395,6 +395,7 @@
     const role = roleOf(el) || el.tagName.toLowerCase();
     const name = nameOf(el);
     const guard = guardOf(el, how);
+    const secret = el.tagName === 'INPUT' && !!fieldKind(el); // what is typed here is never kept (activity.js)
     if (scroll) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     let r = rectOf(el);
     // Restyled checkboxes and radios hide the real input; aim at its label.
@@ -407,7 +408,7 @@
     const y = clamp(r.y + r.h / 2, 1, innerHeight - 2);
     const hit = deepElementFromPoint(x, y);
     const covered = hit && !holds(el, hit) && !holds(hit, el) ? brief(hit) : null;
-    return { x, y, rect: r, role, name, covered, guard };
+    return { x, y, rect: r, role, name, covered, guard, secret };
   }
 
   // ── Claude's pointer ────────────────────────────────────────────────────
