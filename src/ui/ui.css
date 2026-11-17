@@ -128,7 +128,7 @@ body.vertical #tabrow { display: none; }
 /* A short row (a small window with the Claude panel open) has room for the marks alone: of those working, asking or paused. */
 /* Louis, at the start of the top row in either layout: part of what the
    window is dragged by. */
-#brand { flex: none; align-self: center; width: 36px; height: 36px; margin: 0 2px 0 8px; object-fit: contain; user-select: none; }
+#brand { flex: none; align-self: center; width: 28px; height: 28px; margin: 0 10px 0 14px; object-fit: contain; user-select: none; }
 #tabrow > #brand, body.vertical #navrow > #brand { -webkit-app-region: drag; }
 #tabrow { container: tabrow / inline-size; }
 @container tabrow (max-width: 640px) {
