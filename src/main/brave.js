@@ -1,9 +1,9 @@
-// Brave, the user's other browser. Some sites refuse to work in Loui: Google
-// will not sign in from a browser it considers embedded, and Loui does not
-// pretend to be another browser to get past that. Instead:
+// Brave, the user's other browser, for a site that will not work in Loui.
+// (Google's sign-in was once such a site, and on the list by default; it
+// works in Loui now that Loui says what it is there: see identity.js.)
 //
 // - "Open in Brave" (tab menu, File menu) hands the page's address to Brave.
-// - Sites on a list (accounts.google.com unless the user changes it) are sent
+// - Sites on a list (empty unless the user adds to it) are sent
 //   to Brave when one of the user's own tabs tries to open them; the tab shows
 //   a short note saying so, with a link that takes the site off the list.
 //
@@ -21,7 +21,7 @@ const { spawn } = require('child_process');
 const { shell } = require('electron');
 const { YOU } = require('./tabs');
 
-const DEFAULT_SITES = ['accounts.google.com'];
+const DEFAULT_SITES = [];
 const UNDO = 'https://loui.invalid/undo/'; // the note's link; never loaded (.invalid does not resolve)
 
 // Brave's program, in the places its installers put it, or on PATH.

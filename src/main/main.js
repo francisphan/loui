@@ -38,6 +38,7 @@ const { createBookmarks } = require('./bookmarks');
 const { createErrorPage } = require('./errorpage');
 const { createGuardrails } = require('./guardrails');
 const { createPasswords, createCipher } = require('./passwords');
+const { createIdentity, HONEST } = require('./identity');
 const { createTaskManager } = require('./taskmanager');
 const { createActivity } = require('./activity');
 const { createPip } = require('./pip');
@@ -62,8 +63,10 @@ function lockToApp(wc) {
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion'); // Windows
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
-// Sites that refuse embedded browsers key on these tokens.
-app.userAgentFallback = app.userAgentFallback.replace(/ (loui|Electron)\/\S+/gi, '');
+// Sites that sniff for these tokens serve a broken page; the few that want
+// the truth get it (identity.js).
+const fullUserAgent = app.userAgentFallback;
+app.userAgentFallback = fullUserAgent.replace(/ (loui|Electron)\/\S+/gi, '');
 
 // Appearance: 'dark' (the default), 'light', or 'system' to follow the OS.
 // It applies to the window and is what pages see as prefers-color-scheme.
@@ -88,6 +91,7 @@ let guardrails;
 let passwords;
 let taskManager, defaultBrowser;
 let reader;
+let identity;
 let activity;
 let palette;
 let pip;
@@ -197,6 +201,7 @@ function privateSession() {
     sleep.attach(ses);
     guardrails.attach(ses);
     reader.attach(ses);
+    identity.attach(ses);
   }
   privateSes = ses;
   return ses;
@@ -286,6 +291,11 @@ function start() {
   userSes = session.fromPartition('persist:loui');
   search = createSearch({ settings, save: saveSettings, changed: pushState });
   tabs = new Tabs(userSes);
+  identity = createIdentity({
+    tabs, full: fullUserAgent, plain: app.userAgentFallback,
+    hosts: process.env.LOUI_TEST && process.env.LOUI_HONEST_HOSTS ? process.env.LOUI_HONEST_HOSTS.split(',') : HONEST,
+  });
+  identity.attach(userSes);
   tabs.openWindow = openWindow;
   const first = openWindow({ blank: false });
   shields = createShields({ ses: userSes, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first
