@@ -66,7 +66,8 @@ test('History, Bookmarks, Passwords and Sessions close on Esc from anywhere in t
   await until(async () => !(await hidden('history-confirm')), 'History to open on "Clear all?"');
   assert.equal(await focused(), 'history-confirm-yes');
   await press('Escape');
-  assert.deepEqual([await hidden('history-confirm'), await hidden('history')], [true, false]);
+  await until(() => hidden('history-confirm'), 'the question to close'); // the key arrives a moment after it is sent
+  assert.equal(await hidden('history'), false, 'the panel stays');
   await press('Escape');
   await until(() => hidden('history'), 'history to close');
   await pageHasKeys();

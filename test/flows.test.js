@@ -186,7 +186,8 @@ test('closing the last private window while a session holds its tab asks first',
   // Close anyway: the window goes, and the lent tab with it.
   await b.ui('window:close', priv);
   await wait('the question again', async () => (await stateOf(priv))?.window.closing);
-  await chrome("document.getElementById('close-ask-yes').click()", priv);
+  // The window closes under the script that pressed the button, which may then never answer.
+  await chrome("document.getElementById('close-ask-yes').click()", priv).catch(() => {});
   await wait('the window to close', async () => !(await win(priv)));
   assert.ok(!(await stateOf(one)).tabs.some((t) => t.id === lent.id), 'the private tab closed with its last private window');
   await b.ui('window:close', two);

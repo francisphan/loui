@@ -246,6 +246,70 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     }
   }
 
+  // A click (or the click that puts the caret in a field) goes to whatever is
+  // at the point when it is sent, and that can change while the user is asked
+  // and the pointer glides. So: judge, ask, glide, then look again, and send
+  // the click only once what is there is nothing to ask about, or is what the
+  // user just allowed. look(): the target as it is now (throws if it is gone);
+  // judgeOf(target): what guardrails would ask about it.
+  async function approach(c, tab, look, judgeOf, saying, label) {
+    let target = await look();
+    for (let round = 0, allowed; round < 3; round++) {
+      const found = judgeOf(target);
+      await guarded(c, tab, found, target.rect);
+      if (found) allowed = found.what;
+      c.say(saying(target));
+      c.own(tab);
+      await aim(tab, target, label, true);
+      c.own(tab);
+      target = await look();
+      c.own(tab);
+      const now = judgeOf(target);
+      if (!now || now.what === allowed) return target;
+    }
+    throw new Error('The page kept changing what is under the pointer, so Loui did not click. Take a new snapshot.');
+  }
+
+  // What a script stopped from doing since the last look (lib.js: a click,
+  // submit or Enter it sent to a control that may pay, send or delete),
+  // judged like the same input from a tool. done: the script's own call is
+  // still running, so the user is asked, and what they allow is let through.
+  // Later, it stays stopped and the session is told.
+  async function held(c, tab, done = false) {
+    const r = await page(tab, 'caughtByScript', { done }).catch(() => null);
+    if (!r?.on) tab.watched = false;
+    const said = [];
+    for (const h of r?.list || []) {
+      const found = guard.judge(c.session, tab, h.info);
+      if (found && !done) {
+        said.push(`A script you ran earlier tried to ${found.what} after it returned. Loui stopped it: use click or press_key instead, so the user can be asked.`);
+        continue;
+      }
+      if (found) {
+        await guarded(c, tab, found, h.rect);
+        c.own(tab);
+        said.push(`Loui held the script's attempt to ${found.what} until the user allowed it.`);
+      }
+      await page(tab, 'release', { i: h.i }).catch(() => {});
+    }
+    return said.join('\n');
+  }
+
+  // Runs fn, which runs a script of Claude's in the page, under that watch.
+  // Resolves { out: fn's result, note: what to tell the session }.
+  async function watched(c, tab, fn) {
+    if (!guard.applies(c.session)) return { out: await fn(), note: '' };
+    await page(tab, 'watchScript', guard.hints()).catch(() => {});
+    guard.scripting(c.session);
+    tab.watched = true;
+    let out, failed = null;
+    try { out = await fn(); } catch (e) { failed = e; }
+    await sleep(100); // what the script set off without waiting for it: a timer, a form on its way
+    const note = tab.wc ? await held(c, tab, true) : '';
+    if (failed) throw failed;
+    return { out, note };
+  }
+
   // session: the reader. A pick in one of the user's own tabs can be looked at
   // but not acted on until the tab is handed over.
   function describePick(p, session) {
@@ -324,24 +388,24 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       label: () => 'clicking',
       async run({ ref, x, y, double, button }, c) {
         const tab = c.need();
-        let target, what, note = '';
+        let look, what;
         if (ref) {
-          target = check(await page(tab, 'locate', { ref }), ref);
-          what = `${target.role} "${shorten(target.name)}"`;
-          if (target.covered) note = ` Note: <${target.covered}> sits on top of it at the click point, so the click may have landed there instead.`;
+          look = async () => check(await page(tab, 'locate', { ref }), ref);
+          what = (t) => `${t.role} "${shorten(t.name)}"`;
         } else if (x != null && y != null) {
-          target = { x: x / tab.shotScale, y: y / tab.shotScale };
-          target.guard = await page(tab, 'guardAt', target).catch(() => null);
-          target.rect = { x: target.x - 60, y: target.y - 24, w: 120, h: 48 };
-          what = `the point ${Math.round(x)},${Math.round(y)}`;
+          const at = { x: x / tab.shotScale, y: y / tab.shotScale };
+          look = async () => ({
+            ...at, guard: await page(tab, 'guardAt', at).catch(() => null),
+            rect: { x: at.x - 60, y: at.y - 24, w: 120, h: 48 },
+          });
+          what = () => `the point ${Math.round(x)},${Math.round(y)}`;
         } else throw new Error('click needs a ref, or x and y.');
-        await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
-        c.say(`clicking ${what}`);
-        c.own(tab);
-        await aim(tab, target, double ? 'double-click' : 'click', true);
-        c.own(tab);
+        // What is on top of the element at the point is what the click reaches, so it is judged first.
+        const judge = (t) => guard.judge(c.session, tab, t.over) || guard.judge(c.session, tab, t.guard);
+        const target = await approach(c, tab, look, judge, (t) => `clicking ${what(t)}`, double ? 'double-click' : 'click');
+        const note = target.covered ? ` Note: <${target.covered}> sits on top of it at the click point, so the click may have landed there instead.` : '';
         mouse(tab, target, { button, double });
-        return after(c, tab, `Clicked ${what}.${note}`);
+        return after(c, tab, `Clicked ${what(target)}.${note}`);
       },
     },
 
@@ -349,15 +413,14 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       label: () => 'typing',
       async run({ ref, text: value, clear, submit }, c) {
         const tab = c.need();
-        const target = check(await page(tab, 'locate', { ref, how: 'enter' }), ref);
+        const look = async () => check(await page(tab, 'locate', { ref, how: 'enter' }), ref);
         // The activity log keeps what was typed, except into password, card
         // and one-time-code fields, where it keeps only how much.
-        if (value) c.note(target.secret ? `(${value.length} characters)` : value);
-        if (submit) await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
-        c.say(`typing into "${shorten(target.name || target.role)}"`);
-        c.own(tab);
-        await aim(tab, target, 'type', true);
-        c.own(tab);
+        const first = await look();
+        if (value) c.note(first.secret ? `(${value.length} characters)` : value);
+        // The field is clicked first, and that click reaches whatever is on top of it.
+        const judge = (t) => guard.judge(c.session, tab, t.over) || (submit ? guard.judge(c.session, tab, t.guard) : null);
+        const target = await approach(c, tab, look, judge, (t) => `typing into "${shorten(t.name || t.role)}"`, 'type');
         mouse(tab, target);
         await sleep(60);
         c.own(tab);
@@ -408,10 +471,12 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         const target = check(await page(tab, 'locate', { ref }), ref);
         await aim(tab, target, 'choose');
         c.own(tab);
-        const r = check(await page(tab, 'choose', { ref, value }), ref);
+        // A select may act as soon as it changes (its script submits a form or
+        // presses a button): that is watched like a script of Claude's own.
+        const { out: r, note } = await watched(c, tab, async () => check(await page(tab, 'choose', { ref, value }), ref));
         if (r.error === 'not-select') throw new Error(`${ref} is not a <select>. Click it instead.`);
         if (r.error === 'no-option') throw new Error(`No option "${value}". Options: ${r.options.join(' | ')}`);
-        return after(c, tab, `Chose "${r.chosen}".`);
+        return after(c, tab, `Chose "${r.chosen}".${note ? ` ${note}` : ''}`);
       },
     },
 
@@ -520,8 +585,9 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         c.note(String(code)); // the activity log keeps its first line only
         // A script can do anything a click can (form.submit(), fetch), and
         // read what is typed in the page. On a page with card or password
-        // fields it is asked about first; elsewhere what it sends is checked
-        // like any other action's (see guardrails.js).
+        // fields it is asked about first; elsewhere what it clicks or submits
+        // is held and judged like a tool's own input (watched), and what it
+        // sends is checked like any other action's (see guardrails.js).
         if (guard.applies(c.session)) {
           const fields = await page(tab, 'guardPage').catch(() => null);
           await guarded(c, tab, guard.judgeScript(c.session, tab, fields));
@@ -533,12 +599,12 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
           `(async () => { try { const v = await (async () => { ${body}\n })(); ` +
           `try { return { out: v === undefined ? 'undefined' : JSON.stringify(v, null, 1) ?? String(v) }; } ` +
           `catch { return { out: String(v) }; } } catch (e) { return { threw: String(e?.stack || e) }; } })()`;
-        const result = await tab.wc.executeJavaScript(wrap(`return (${code}\n);`), true)
+        const { out: result, note } = await watched(c, tab, () => tab.wc.executeJavaScript(wrap(`return (${code}\n);`), true)
           .catch(() => tab.wc.executeJavaScript(wrap(code), true))
-          .catch(() => { throw new Error('That code has a syntax error.'); });
+          .catch(() => { throw new Error('That code has a syntax error.'); }));
         if (result.threw) throw new Error(result.threw);
         const out = result.out;
-        return text(out.length > 20000 ? out.slice(0, 20000) + '\n… (cut off)' : out);
+        return text((note ? `${note}\n` : '') + (out.length > 20000 ? out.slice(0, 20000) + '\n… (cut off)' : out));
       },
     },
 
@@ -623,6 +689,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     },
   };
 
+  guard.reads((tab) => page(tab, 'guardPage')); // for a request whose body cannot be read
   const picker = createPicker({ tabs, page, crop, changed });
   const defs = new Map(TOOLS.map((t) => [t.name, t]));
 
@@ -646,12 +713,15 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         if (tab.group !== session.group) throw Object.assign(new Error('The user took this tab back.'), { stopped: 'taken' });
         if (acts && tabs.group(session.group)?.paused) throw Object.assign(new Error(PAUSED), { stopped: 'paused' });
       };
+      const c = { say, note: record, session, own, need: () => need(session) };
+      // What a script of an earlier call tried after it had returned (see held).
+      const late = current?.watched && current.wc ? await held(c, current).catch(() => '') : '';
       try {
-        const out = await handler.run(args, { say, note: record, session, own, need: () => need(session) });
-        const note = await stopped();
+        const out = await handler.run(args, c);
+        const note = [late, await stopped()].filter(Boolean).join('\n');
         return note ? [...text(note), ...out] : out;
       } catch (e) {
-        const note = await stopped();
+        const note = [late, await stopped()].filter(Boolean).join('\n');
         if (note) e.message += `\n${note}`;
         throw e;
       } finally {

@@ -7,12 +7,16 @@
 //     control is called, whether it submits a form, and what that form holds
 //     (card, password or one-time-code fields), or where a navigation goes. A
 //     consequential one waits for the user's answer before anything reaches
-//     the page. classify() holds the rules.
+//     the page. classify() holds the rules. A click is judged on what it will
+//     land on, and again just before it is sent; what a script of Claude's
+//     clicks or submits is held in the page and judged the same way.
 //  2. While a session is acting in a tab (and for a few seconds after), every
-//     POST, PUT or PATCH the tab makes is read for card numbers, passwords and
-//     one-time codes, whatever started it: a "Next" button whose script submits
-//     a payment form, form.submit() run by evaluate, fetch(). Such a request
-//     is held (see requests.js) until the user answers.
+//     POST, PUT, PATCH or DELETE the tab makes is read for card numbers,
+//     passwords and one-time codes, whatever started it: a "Next" button whose
+//     script submits a payment form, form.submit() run by evaluate, fetch().
+//     Such a request is held (see requests.js) until the user answers. So is
+//     the tab going to a listed site by any way but the ones in layer 1 (a
+//     script setting location, a form, a redirect), and a form a script posts.
 //
 // The prompt is a strip in the window chrome, so no page can draw it or click
 // it. It names the session, the site and the action, with a picture of the
@@ -51,11 +55,21 @@ const DEFAULT_SITES = ['paypal.com', 'checkout.stripe.com', 'mercadopago.com', '
 
 // Control names, in English and Spanish. Matched on the accessible name,
 // lowercased and without accents, only for short names: a long name is a
-// sentence about something, not a verb on a button.
-const PAY = /\b(pay|buy|purchase|place (my |your )?order|submit (my )?(payment|order)|complete (my )?(purchase|order|payment)|confirm (and pay|purchase|payment|order)|checkout|check out|transfer|donate|pagar|comprar|finalizar (la )?compra|realizar (el )?pedido|confirmar (la |el )?(compra|pago|pedido)|transferir|abonar)\b/;
-const DELETE = /\b(delete|remove (my |the |this )?account|close (my )?account|eliminar|borrar)\b/;
-const SEND = /\b(send|enviar)\b/;
+// sentence about something, not a verb on a button. Verbs that are also
+// everyday nouns (order, book, post, share) only count at the start.
+const PAY = /\b(pay|buy|purchase|place (my |your )?order|submit (my )?(payment|order)|complete (my )?(purchase|order|payment)|confirm (and pay|purchase|payment|order|booking|reservation)|checkout|check out|transfer|donate|subscribe|pagar|comprar|finalizar (la )?compra|realizar (el )?pedido|confirmar (la |el )?(compra|pago|pedido|reserva)|transferir|abonar|donar|suscribirse|suscribirme|suscribete|suscribite)\b|^(order|book|reserve|pedir|reservar|ordenar)( now| ahora| ya)?$|^(upgrade|mejorar (mi |el |tu )?plan)\b/;
+// A button may say more than six words when it starts with one of these
+// ("Pay $45.00 now with the card ending 4242").
+const PAY_START = /^(pay|buy|purchase|place (my |your )?order|donate|subscribe|pagar|comprar|abonar|donar)\b/;
+const DELETE = /\b(delete|remove (my |the |this )?account|close (my )?account|unsubscribe|cancel (my |the )?subscription|empty (the )?(trash|bin)|eliminar|borrar|darse de baja|darme de baja|cancelar (mi |la )?suscripcion|vaciar (la )?papelera)\b|^(discard|descartar)\b/;
+const SEND = /\b(send|enviar)\b|^(post|publish|share|reply|tweet|publicar|compartir|responder)\b/;
 const CONFIRM = /^(confirm|confirmar)\b/;
+// In a dialog about paying or deleting, Yes confirms as well.
+const YES = /^(yes|si)\b/;
+// A button beside a text box that Enter in the box would press (a chat's Send).
+const ENTER_SEND = /\b(send|enviar)\b|^(post|reply|comment|tweet|publicar|responder|comentar)\b/;
+// Any of them: lib.js picks out with it what a script's click may set off, to be judged here.
+const WORDS = [PAY, DELETE, SEND, CONFIRM, YES, ENTER_SEND].map((r) => r.source).join('|');
 const BUTTONS = new Set(['button', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch']);
 
 const plain = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -85,24 +99,36 @@ const listed = (sites, url) => {
 
 // What an action on an element would do, from the facts lib.js gathers
 // (guardOf): { kind, what } if it is consequential, or null.
-//   info: { role, name, submits, form: { card, password, otp }, href }
+//   info: { role, name, submits, form: { card, password, otp }, href,
+//     clickable: not a button or a link, but it takes clicks (onclick, cursor: pointer),
+//     near: the words of the dialog it is in,
+//     beside: names of the buttons next to a text box outside a form, for Enter in it }
 function classify(info, sites = []) {
   if (!info) return null;
   const name = plain(info.name);
   const said = `"${shorten((info.name || '').trim())}"`;
   const short = name.length <= 60 && name.split(' ').length <= 6;
   const button = BUTTONS.has(info.role) || info.submits;
+  const press = button || info.clickable;
   const form = info.form || {};
   if (info.submits && form.card) return { kind: 'pay', what: `submit a payment form (${said})` };
-  if (short && button && PAY.test(name)) return { kind: 'pay', what: `click ${said}` };
+  if (PAY.test(name) && (short ? press : button && PAY_START.test(name))) return { kind: 'pay', what: `click ${said}` };
   // A link named Delete can be a plain GET that deletes; a link named Buy or
   // Send normally leads to the page with the real button.
-  if (short && (button || info.role === 'link') && DELETE.test(name)) return { kind: 'delete', what: `click ${said}` };
+  if (short && (press || info.role === 'link') && DELETE.test(name)) return { kind: 'delete', what: `click ${said}` };
   if (info.submits && (form.password || form.otp)) {
     return { kind: 'sign-in', what: `submit a form with a ${form.password ? 'password' : 'one-time code'} (${said})` };
   }
-  if (short && button && SEND.test(name)) return { kind: 'send', what: `click ${said}` };
-  if (short && info.submits && CONFIRM.test(name)) return { kind: 'confirm', what: `click ${said}` };
+  if (short && press && SEND.test(name)) return { kind: 'send', what: `click ${said}` };
+  const sends = (info.beside || []).find((n) => plain(n).split(' ').length <= 6 && ENTER_SEND.test(plain(n)));
+  if (sends) return { kind: 'send', what: `press Enter in ${said} (next to "${shorten(sends.trim())}")` };
+  // Confirm on a form's own button, or in a dialog that speaks of paying or
+  // deleting (those are run by script and submit nothing).
+  const near = plain(info.near);
+  const grave = !!near && (PAY.test(near) || DELETE.test(near));
+  if (short && ((info.submits && CONFIRM.test(name)) || (press && grave && (CONFIRM.test(name) || YES.test(name))))) {
+    return { kind: 'confirm', what: `click ${said}` };
+  }
   const site = info.href && listed(sites, info.href);
   if (site) return { kind: 'site', what: `open ${hostOf(info.href)}`, site: hostOf(info.href), origin: originOf(info.href) };
   return null;
@@ -177,8 +203,17 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   function begin(session) {
     const a = acting.get(session.id) || { n: 0, until: 0 };
     a.n++;
+    a.script = false;
     acting.set(session.id, a);
   }
+  // The call in flight runs a script of Claude's in the page (evaluate,
+  // select_option): until its next call, a form the tab posts is asked about.
+  function scripting(session) {
+    const a = acting.get(session.id);
+    if (a) a.script = true;
+  }
+  // What lib.js needs to pick out the clicks of such a script that may matter.
+  const hints = () => ({ words: WORDS });
   function end(session) {
     const a = acting.get(session.id);
     if (a) { a.n = Math.max(0, a.n - 1); a.until = Date.now() + GRACE_MS; }
@@ -275,28 +310,75 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   }
 
   // Layer 2: requests a tab makes while Claude acts in it.
-  const WRITES = new Set(['POST', 'PUT', 'PATCH']);
+  const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  const MAX_READ = 2 * 1024 * 1024; // of a longer body, the first and the last half of this
+  let fieldsOf = async () => null; // the card, password and code fields on a tab's page (actions.js)
+  const reads = (fn) => { fieldsOf = fn; };
+  const inspect = (buffers) => {
+    const all = Buffer.concat(buffers);
+    const half = MAX_READ / 2;
+    const body = all.length > MAX_READ ? Buffer.concat([all.subarray(0, half), all.subarray(all.length - half)]) : all;
+    return inspectBody(body.toString('utf8'));
+  };
   const hold = (d) => {
-    if (!conf.on || !WRITES.has(d.method) || !d.uploadData?.length) return null;
+    if (!conf.on) return null;
+    const nav = d.resourceType === 'mainFrame';
+    const write = WRITES.has(d.method);
+    if (!write && !(nav && listed(conf.sites, d.url))) return null;
     const tab = tabs.list.find((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === d.webContentsId);
     const session = tab && actorOf(tab);
     if (!session || trusted.has(session.id)) return null;
     const pass = passes.get(session.id);
     if (pass && pass.tabId === tab.id && Date.now() < pass.until) return null;
-    const bytes = Buffer.concat(d.uploadData.filter((u) => u.bytes).map((u) => u.bytes));
-    const kind = inspectBody(bytes.subarray(0, 65536).toString('utf8'));
-    if (!kind || remembered(originOf(tab.url), kind)) return null;
-    const what = `send ${kind === 'pay' ? 'card details' : 'a password or code'} to ${hostOf(d.url)}`;
-    const nav = d.resourceType === 'mainFrame';
-    return picture(tab).then((image) => ask(session, tab, { kind, what }, image)).then(({ ok, p }) => {
+    const stop = (found) => picture(tab).then((image) => ask(session, tab, found, image)).then(({ ok, p }) => {
       if (ok) return null;
       const list = notes.get(session.id) || [];
-      list.push(`The page tried to ${what} on its own after your action. ${p.timedOut ? 'The user did not answer' : 'The user declined'}, so Loui stopped it.`);
+      list.push(`The page tried to ${found.what} on its own after your action. ${p.timedOut ? 'The user did not answer' : 'The user declined'}, so Loui stopped it.`);
       notes.set(session.id, list);
       // Stopping first leaves the page as it was; a cancelled navigation
       // would otherwise replace it with an error page.
       if (nav && tab.wc && !tab.wc.isDestroyed()) tab.wc.stop();
       return { cancel: true };
+    });
+    // A listed site, reached some other way than navigate or a link to it
+    // (those are asked about before they start): a script setting location,
+    // a form, a redirect. Not from one page of such a site to another.
+    const site = nav && listed(conf.sites, d.url) !== listed(conf.sites, tab.wc.getURL()) && judgeUrl(session, tab, d.url);
+    if (site) return stop(site);
+    if (!write) return null;
+    const origin = originOf(tab.url);
+    // A form posted by a script of Claude's (evaluate, select_option) sends
+    // something, whatever it holds.
+    const scripted = nav && acting.get(session.id)?.script && !remembered(origin, 'send');
+    const parts = d.uploadData || [];
+    if (!parts.length && !scripted) return null;
+    const found = (kind) => {
+      if (kind && !remembered(origin, kind)) {
+        return { kind, what: `send ${kind === 'pay' ? 'card details' : 'a password or code'} to ${hostOf(d.url)}` };
+      }
+      return scripted ? { kind: 'send', what: `submit a form to ${hostOf(d.url)}` } : null;
+    };
+    if (parts.every((u) => u.bytes)) {
+      const f = found(inspect(parts.map((u) => u.bytes)));
+      return f ? stop(f) : null;
+    }
+    // A part sent as a Blob is read from the session. A file, or a blob that
+    // cannot be read, is not: then the fields on the page decide.
+    const blob = (id) => Promise.race([
+      tab.wc.session.getBlobData(id).catch(() => null),
+      new Promise((r) => setTimeout(r, 5000, null)),
+    ]);
+    return Promise.all(parts.map((u) => u.bytes || (u.blobUUID ? blob(u.blobUUID) : null))).then(async (buffers) => {
+      let f = found(inspect(buffers.filter(Boolean)));
+      if ((!f || f.kind === 'send') && buffers.some((x) => !x)) {
+        const fields = (await fieldsOf(tab).catch(() => null)) || {};
+        const holds = fields.card ? 'card' : fields.password ? 'password' : fields.otp ? 'one-time code' : null;
+        const kind = fields.card ? 'pay' : 'sign-in';
+        if (holds && !remembered(origin, kind)) {
+          f = { kind, what: `send something Loui could not read to ${hostOf(d.url)} from a page with a ${holds} field` };
+        }
+      }
+      return f ? stop(f) : null;
     });
   };
   // Each session: the user's, and each private one (a tab of it can be handed to a session).
@@ -405,7 +487,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   }
 
   return {
-    applies, begin, end, drain, takeNotes, judge, judgeUrl, judgeScript, confirm,
+    applies, begin, end, drain, takeNotes, judge, judgeUrl, judgeScript, confirm, scripting, hints, reads,
     answer, set, addSite, removeSite, forget, untrust, show, state, attach,
   };
 }

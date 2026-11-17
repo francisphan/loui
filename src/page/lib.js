@@ -358,8 +358,21 @@
   }
   const TEXT_INPUT = /^(|text|email|password|search|tel|url|number|date|datetime-local|month|week|time)$/;
   // how: 'click' (a click, or Space on a focused control) or 'enter' (Enter in it).
+  const pointer = (el) => getComputedStyle(el).cursor === 'pointer';
   function guardOf(el, how = 'click') {
-    const t = el.closest('button,a[href],input,select,textarea,summary,[role=button],[role=link],[role=menuitem]') || el;
+    let t = el.closest('button,a[href],input,select,textarea,summary,[role=button],[role=link],[role=menuitem],[onclick]');
+    // Not a button or a link, but it takes clicks: it has an onclick, or it
+    // is the top of a cursor:pointer region (a page that is all pointer says nothing).
+    let clickable = false;
+    if (t) clickable = !roleOf(t) && t.hasAttribute('onclick');
+    else {
+      t = el;
+      if (pointer(el)) {
+        let top = el;
+        while (top.parentElement && pointer(top.parentElement)) top = top.parentElement;
+        if (top.parentElement && top !== top.ownerDocument.body) { t = top; clickable = true; }
+      }
+    }
     const role = roleOf(t) || t.tagName.toLowerCase();
     const type = (t.getAttribute('type') || '').toLowerCase();
     const form = t.form || t.closest('form');
@@ -370,9 +383,25 @@
         submits = type === 'submit' || type === 'image' || (how === 'enter' && TEXT_INPUT.test(type));
       }
     }
+    // Enter in a text box outside a form does what the page's script says,
+    // which is often what the button next to it does (a chat's Send).
+    let beside = null;
+    const box = t.tagName === 'TEXTAREA' || t.isContentEditable || (t.tagName === 'INPUT' && TEXT_INPUT.test(type));
+    if (how === 'enter' && !form && box) {
+      beside = [];
+      const body = t.ownerDocument.body;
+      for (let n = t.parentElement, up = 0; n && n !== body && up < 4; n = n.parentElement, up++) {
+        for (const b of n.querySelectorAll('button,[role=button],input[type=submit],input[type=button]')) {
+          const name = holds(t, b) ? '' : nameOf(b);
+          if (name && !beside.includes(name) && beside.length < 12) beside.push(name);
+        }
+      }
+    }
     return {
-      role, name: nameOf(t), submits, form: form ? fieldsIn(form) : {},
+      role, name: nameOf(t), submits, clickable, form: form ? fieldsIn(form) : {},
       href: t.closest('a[href]')?.href || null,
+      near: clean(t.closest('dialog,[role=dialog],[role=alertdialog],[aria-modal=true]')?.innerText, 300) || null,
+      beside,
     };
   }
   function guardAt({ x, y }) {
@@ -408,7 +437,100 @@
     const y = clamp(r.y + r.h / 2, 1, innerHeight - 2);
     const hit = deepElementFromPoint(x, y);
     const covered = hit && !holds(el, hit) && !holds(hit, el) ? brief(hit) : null;
-    return { x, y, rect: r, role, name, covered, guard, secret };
+    // A click goes to whatever is at the point, so that is judged as well
+    // (guardrails): something laid over the element, or a control inside it.
+    const over = hit && hit !== el ? guardOf(hit) : null;
+    return { x, y, rect: r, role, name, covered, guard, over, secret };
+  }
+
+  // ── what a script of Claude's sets off (evaluate, select_option) ────────
+  // While such a script runs, and for ten seconds after, a click, a submit or
+  // an Enter that script (not real input) sends to a control that may pay,
+  // send or delete is stopped before the page's handlers see it, and kept for
+  // the main process to judge. It asks the user, then lets it through
+  // (release) or leaves it stopped. Everything else passes untouched.
+  const plain = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  let watch = null; // { words, until }
+  const caught = []; // { el, type, submitter, info }
+  let taken = 0;
+  let real = false; // inside a real click or key press: what the page does about it is its own
+  let passing = false;
+  const listening = new WeakSet();
+
+  // A superset of what guardrails.js asks about; it decides.
+  const mayMatter = (info) => watch.words.test(plain(info.name)) ||
+    (info.submits && (info.form.card || info.form.password || info.form.otp)) ||
+    (info.beside || []).some((n) => watch.words.test(plain(n)));
+
+  function onScriptEvent(e) {
+    if (passing) return;
+    if (e.isTrusted && e.type !== 'submit') {
+      real = true;
+      setTimeout(() => { real = false; }, 0);
+      return;
+    }
+    if (real || !watch || Date.now() > watch.until || e.type === 'keypress') return;
+    if (e.type === 'keydown' && e.key !== 'Enter') return;
+    let el = e.composedPath()[0];
+    if (el?.nodeType !== 1) el = el?.parentElement;
+    if (!el) return;
+    let info;
+    if (e.type === 'submit') {
+      const by = e.submitter || el.querySelector('button:not([type]),button[type=submit],input[type=submit],input[type=image]');
+      info = by ? guardOf(by) : { role: 'button', name: '', submits: true, form: fieldsIn(el) };
+    } else info = guardOf(el, e.type === 'keydown' ? 'enter' : 'click');
+    if (!mayMatter(info)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    caught.push({ el, type: e.type, submitter: e.submitter || null, info });
+  }
+
+  // This window and the frames of the same site inside it.
+  function listen(win) {
+    if (!listening.has(win.document)) {
+      listening.add(win.document);
+      for (const type of ['click', 'keydown', 'keypress', 'submit']) win.addEventListener(type, onScriptEvent, true);
+    }
+    for (const f of win.document.querySelectorAll('iframe,frame')) {
+      try { if (f.contentDocument) listen(f.contentWindow); } catch {}
+    }
+  }
+
+  function watchScript({ words }) {
+    watch = { words: new RegExp(words), until: Infinity };
+    listen(window);
+    return true;
+  }
+
+  // What has been stopped since the last call. done: the script has returned;
+  // what it left running is watched for ten seconds more.
+  function caughtByScript({ done } = {}) {
+    if (done && watch) watch.until = Date.now() + 10000;
+    const list = [];
+    for (; taken < caught.length; taken++) {
+      const c = caught[taken];
+      list.push({ i: taken, info: c.info, rect: c.el.isConnected ? rectOf(c.el) : null });
+    }
+    return { list, on: !!watch && Date.now() <= watch.until };
+  }
+
+  function release({ i }) {
+    const c = caught[i];
+    if (!c?.el.isConnected) return false;
+    caught[i] = null;
+    passing = true;
+    try {
+      if (c.type === 'click') c.el.click();
+      else if (c.type === 'submit') c.el.requestSubmit(c.submitter || undefined);
+      else {
+        c.el.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true,
+        }));
+      }
+    } finally {
+      passing = false;
+    }
+    return true;
   }
 
   // ── Claude's pointer ────────────────────────────────────────────────────
@@ -703,6 +825,6 @@
 
   globalThis.__loui = {
     snapshot, locate, pointAt, overlay, pick, cancelPick, pickAt, focus, choose, scroll, calm,
-    hasText, guardAt, guardFocus, guardPage,
+    hasText, guardAt, guardFocus, guardPage, watchScript, caughtByScript, release,
   };
 })();

@@ -236,19 +236,31 @@ session is told the user declined. Ticking *Trust this session until it ends*
 stops the questions for that session.
 
 - **What is asked about:** clicking a control named like Pay, Buy, Place
-  order, Purchase, Checkout, Transfer, Send, Delete, Remove account (and
-  Pagar, Comprar, Enviar, Eliminar, Borrar, Transferir, Confirmar compra);
+  order, Purchase, Checkout, Transfer, Subscribe, Order, Book, Reserve,
+  Upgrade, Send, Post, Publish, Share, Reply, Delete, Remove account,
+  Unsubscribe, Discard, Empty trash (and Pagar, Comprar, Reservar, Suscribirse,
+  Enviar, Publicar, Compartir, Responder, Eliminar, Borrar, Descartar,
+  Transferir, Confirmar compra), whether it is a button or anything else that
+  takes clicks; Confirm or Yes in a dialog about paying or deleting;
   submitting a form that holds card, password or one-time-code fields (by a
-  click, or Enter); opening a site on your list; and `evaluate` on a page with
-  card or password fields.
+  click, or Enter); Enter in a chat box with a Send button beside it; opening
+  a site on your list; and `evaluate` on a page with card or password fields.
+  A click is judged on what it will land on (something laid over the element
+  counts), and again just before it is sent.
+- **What a script of Claude's does:** a click, submit or Enter that `evaluate`
+  sends to such a control is stopped in the page and asked about, then let
+  through if you allow it; so is what a `<select>` sets off when
+  `select_option` changes it, and a form either of them posts.
 - **What the page does by itself:** while a session acts in a tab, and for ten
-  seconds after, any POST, PUT or PATCH from that tab carrying a card number,
-  password or one-time code is held until you answer, however it started (a
-  "Next" button whose script submits a payment form, `form.submit()`, `fetch`).
+  seconds after, any POST, PUT, PATCH or DELETE from that tab carrying a card
+  number, password or one-time code is held until you answer, however it
+  started (a "Next" button whose script submits a payment form,
+  `form.submit()`, `fetch`). So is the tab going to a site on your list by a
+  script, a form or a redirect.
 - **Not caught:** a payment or deletion whose request carries none of those
   (an order placed with a saved card through an API call, a delete over
-  `fetch`) unless the control that started it is named like one; keys pressed
-  in a chat box (Enter to send); a page acting more than ten seconds after the
+  `fetch`) unless the control that started it is named like one; a control
+  with a name outside the list; a page acting more than ten seconds after the
   session's last action; WebSockets.
 - It covers every Claude session and the Claude panel (in your tabs, only while
   the panel is acting). Your own clicks are never interrupted.
