@@ -47,10 +47,19 @@ function createActions({ tabs, sessions, changed }) {
   }
 
   // Call a function from src/page/lib.js inside the tab.
-  const page = (tab, fn, arg = {}) =>
-    tab.wc.executeJavaScriptInIsolatedWorld(WORLD, [
+  // A page that has hung would otherwise hold the call (and the session) for
+  // good. Pointing is left unbounded: it waits for the user, and has its own limit.
+  const page = (tab, fn, arg = {}) => {
+    const call = tab.wc.executeJavaScriptInIsolatedWorld(WORLD, [
       { code: `${LIB}\n;__loui.${fn}(${JSON.stringify(arg)})` },
     ]);
+    if (fn === 'pick') return call;
+    let timer;
+    const late = new Promise((_, no) => {
+      timer = setTimeout(() => no(new Error('The page did not respond within 15 seconds.')), 15000);
+    });
+    return Promise.race([call, late]).finally(() => clearTimeout(timer));
+  };
 
   const check = (result, ref) => {
     if (result?.error === 'stale') throw new Error(`${ref} is no longer on the page. Take a new snapshot.`);
