@@ -30,6 +30,7 @@ const { createPrint } = require('./print');
 const { createBookmarks } = require('./bookmarks');
 const { createErrorPage } = require('./errorpage');
 const { createGuardrails } = require('./guardrails');
+const { createPasswords } = require('./passwords');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -71,6 +72,7 @@ let bookmarks;
 let errorPage;
 let prompts, consent;
 let guardrails;
+let passwords;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -108,6 +110,7 @@ const currentState = () => ({
   ...bookmarks.state(),
   tabStrip: tabStrip(),
   ...guardrails.state(),
+  ...passwords.state(),
 });
 
 // Where the tabs are: a strip along the top (the default) or a sidebar on the
@@ -157,6 +160,7 @@ function createWindow() {
   lockToApp(suggest.webContents);
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), win, tabs, ses, send, changed: pushState });
   suggest.add(bookmarks);
+  passwords = createPasswords({ tabs, win, home: paths.home, send, changed: pushState });
   prompts = createPrompts({ changed: () => { pushState(); if (prompts.head() && !win.isFocused()) win.flashFrame(true); } });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id) });
@@ -283,6 +287,7 @@ const handlers = {
   'guard:site-remove': (site) => guardrails.removeSite(site),
   'guard:forget': (which) => guardrails.forget(which),
   'guard:untrust': (id) => guardrails.untrust(id),
+  passwords: (request) => passwords.handle(request),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -304,6 +309,7 @@ async function testHook({ ui, arg }) {
   // A tool call from the Claude panel, which works in the user's own tabs.
   if (ui === 'panel') return actions.run(arg.tool, arg.args || {}, sessions.panel);
   if (bookmarks.probes[ui]) return bookmarks.probes[ui](arg);
+  if (passwords.probes[ui]) return passwords.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
@@ -352,6 +358,7 @@ function appMenu() {
         { label: 'Site permissions…', click: () => send('show-permissions') },
         { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { win.webContents.focus(); send('show-history'); } },
         ...bookmarks.menuItems.file(),
+        ...passwords.fileMenu(),
         { type: 'separator' },
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: handlers.print },
         { label: 'Save as PDF…', click: handlers['print:save-pdf'] },

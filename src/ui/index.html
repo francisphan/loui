@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="bookmarks.css">
   <link rel="stylesheet" href="guardrails.css">
+  <link rel="stylesheet" href="passwords.css">
 </head>
 <body>
   <header id="bar">
@@ -33,6 +34,7 @@
       <form id="address-form">
         <input id="address" type="text" spellcheck="false" autocomplete="off"
                placeholder="Search or enter an address" aria-label="Address">
+        <button id="key" type="button" title="Fill a saved password" aria-label="Fill a saved password" hidden></button>
         <button id="star" type="button" aria-label="Bookmark this page" hidden></button>
       </form>
       <button id="shields" class="tool" type="button" disabled>
@@ -100,6 +102,12 @@
       <label id="perm-keep-label"><input id="perm-keep" type="checkbox"> Remember for this site</label>
       <button id="perm-block" type="button">Block</button>
       <button id="perm-allow" type="button">Allow</button>
+    </div>
+    <div id="pw-offer" role="alertdialog" aria-labelledby="pw-offer-text" hidden>
+      <span id="pw-offer-text"></span>
+      <button id="pw-offer-later" class="quiet" type="button">Not now</button>
+      <button id="pw-offer-never" type="button">Never for this site</button>
+      <button id="pw-offer-save" type="button">Save</button>
     </div>
   </header>
 
@@ -240,6 +248,21 @@
     <div id="bookmarks-list"></div>
   </aside>
 
+  <aside id="passwords" aria-label="Passwords" hidden>
+    <div id="passwords-head">
+      <h1>Passwords</h1>
+      <div>
+        <button id="passwords-import" class="quiet" type="button">Import</button>
+        <button id="passwords-close" class="quiet" type="button" aria-label="Close passwords"></button>
+      </div>
+    </div>
+    <p id="passwords-off" hidden></p>
+    <input id="passwords-search" type="search" spellcheck="false" autocomplete="off"
+           placeholder="Search passwords" aria-label="Search passwords">
+    <div id="passwords-list"></div>
+    <p id="passwords-note">Saved encrypted, for you alone. Claude has no way to read, fill or save them, and Claude's tabs are never filled.</p>
+  </aside>
+
   <script src="ui.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
@@ -250,5 +273,6 @@
   <script src="bookmarks.js"></script>
   <script src="consent.js"></script>
   <script src="guardrails.js"></script>
+  <script src="passwords.js"></script>
 </body>
 </html>

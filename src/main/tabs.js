@@ -226,6 +226,7 @@ class Tabs extends EventEmitter {
       // Electron passes one details object; older builds passed positional args.
       const d = e.message !== undefined ? e
         : { level: ['debug', 'info', 'warning', 'error'][old[0]], message: old[1], lineNumber: old[2], sourceId: old[3] };
+      if (String(d.message).startsWith('\u0001loui-pw ')) return; // passwords.js's page script reporting, never kept
       keep(tab.console, {
         level: d.level, text: d.message, source: d.sourceId, line: d.lineNumber, at: Date.now(),
       });

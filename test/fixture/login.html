@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Sign in</title></head>
+<body>
+  <!-- A plain sign-in form. ?fail sends it back here, as a site does when the password is wrong. -->
+  <form id="form" method="post" action="/welcome.html">
+    <label>Email <input id="user" name="email" type="email" autocomplete="username"></label>
+    <label>Password <input id="pass" name="password" type="password" autocomplete="current-password"></label>
+    <button id="go" type="submit">Sign in</button>
+  </form>
+  <script>
+    if (location.search.includes('fail')) document.getElementById('form').action = '/login.html';
+    // Counts input events, as a page's framework would see them.
+    window.inputs = 0;
+    document.addEventListener('input', () => { window.inputs++; });
+  </script>
+</body>
+</html>
