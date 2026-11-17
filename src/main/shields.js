@@ -109,11 +109,12 @@ function createShields({ ses, tabs, home, changed }) {
   }
 
   // ── requests ──
-  const tabOf = (id) => tabs.list.find((t) => t.wc.id === id);
+  // A sleeping tab has no page (tab.wc is null) until it wakes; see tabs.js.
+  const tabOf = (id) => tabs.list.find((t) => t.wc?.id === id);
   const topOf = (d, tab) => {
     if (d.resourceType === 'mainFrame') return d.url;
     try { if (d.frame?.top?.url) return d.frame.top.url; } catch {}
-    return tab?.wc.getURL() || d.referrer || '';
+    return tab?.wc?.getURL() || d.referrer || '';
   };
 
   requestRules(ses).add((d) => {
@@ -137,6 +138,7 @@ function createShields({ ses, tabs, home, changed }) {
   // first: the page has just been parsed; the site's rules go in too.
   async function hide(tab, first) {
     const wc = tab.wc;
+    if (!wc || wc.isDestroyed()) return;
     const page = pages.get(tab.id);
     const url = wc.getURL();
     const site = siteOf(url);
@@ -178,7 +180,7 @@ function createShields({ ses, tabs, home, changed }) {
   }
 
   tabs.on('change', () => {
-    for (const tab of tabs.list) if (!hooked.has(tab.wc)) hook(tab);
+    for (const tab of tabs.list) if (tab.wc && !hooked.has(tab.wc)) hook(tab);
     for (const id of pages.keys()) if (!tabs.get(id)) pages.delete(id);
   });
 
@@ -190,7 +192,7 @@ function createShields({ ses, tabs, home, changed }) {
     fs.writeFileSync(sitesFile, JSON.stringify({ off: [...off].sort() }, null, 2));
     // The page on screen reloads, so that what was blocked loads, or the other way round.
     const tab = tabs.active();
-    if (tab && siteOf(tab.wc.getURL()) === site) tab.wc.reload();
+    if (tab?.wc && siteOf(tab.wc.getURL()) === site) tab.wc.reload();
     changed();
   }
 
