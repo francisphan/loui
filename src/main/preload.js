@@ -6,8 +6,9 @@ const SEND = new Set([
   'layout', 'tab:new', 'tab:select', 'tab:close', 'tab:menu', 'go', 'back', 'forward', 'reload',
   'devtools', 'pick:start', 'pick:cancel', 'pick:remove', 'pause', 'handoff:answer',
   'group:close', 'device:menu', 'relay:set', 'update:install', 'chat:send', 'chat:stop', 'chat:reset',
+  'find', 'find:open', 'find:close',
 ]);
-const LISTEN = new Set(['state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay']);
+const LISTEN = new Set(['state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find']);
 
 contextBridge.exposeInMainWorld('loui', {
   send(channel, arg) {

@@ -243,6 +243,37 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 #update[hidden] { display: none; }
 #point.on { background: var(--claude-wash); }
 
+/* ── find bar ────────────────────────────────────────────────────────────── */
+/* A strip under the toolbar: the page area shrinks to make room for it. */
+#find {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 0 8px;
+  background: var(--paper);
+  box-shadow: inset 0 -1px 0 var(--rule);
+}
+#find[hidden] { display: none; }
+#find-text {
+  width: 260px;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  margin-right: 6px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--water);
+  color: var(--ink);
+  font: inherit;
+  user-select: text;
+}
+#find-text::placeholder { color: var(--ink-2); }
+#find-text:focus { outline: none; border-color: var(--focus); background: var(--paper); }
+#find-count { min-width: 60px; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+#find .icon { width: 28px; height: 28px; }
+
 /* ── where the page goes ─────────────────────────────────────────────────── */
 /* The pages are native views laid over this box, on a backdrop of the same colour. */
 #stage { grid-column: 1; grid-row: 2; }
