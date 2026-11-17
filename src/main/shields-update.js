@@ -19,7 +19,8 @@ async function text(url) {
 (async () => {
   const [bodies, scripts] = await Promise.all([
     Promise.all(lists.map(text)),
-    resources === '-' ? null : text(resources),
+    // Without the stand-in scripts the lists still block; they just redirect nothing.
+    resources === '-' ? null : text(resources).catch(() => null),
   ]);
   const engine = FiltersEngine.parse(bodies.join('\n'));
   if (scripts) engine.updateResources(scripts, String(scripts.length));

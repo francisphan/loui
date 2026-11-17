@@ -6,6 +6,8 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 
+const { socketFor } = require('../src/shared/paths');
+
 const root = path.join(__dirname, '..');
 
 function serveFixture() {
@@ -31,7 +33,7 @@ async function launch(env = {}, { home: reuse, args = [] } = {}) {
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   const exited = new Promise((r) => app.once('exit', (code) => r(code))); // for a test that quits it
-  const sock = path.join(home, 'loui.sock');
+  const sock = socketFor(home);
   for (let i = 0; i < 150 && !fs.existsSync(sock); i++) await new Promise((r) => setTimeout(r, 100));
   if (!fs.existsSync(sock)) {
     app.kill();

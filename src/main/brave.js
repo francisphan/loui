@@ -23,6 +23,7 @@ const { YOU } = require('./tabs');
 
 const DEFAULT_SITES = [];
 const UNDO = 'https://loui.invalid/undo/'; // the note's link; never loaded (.invalid does not resolve)
+const SEND = 'https://loui.invalid/send/'; // the link of a note for a page that was not handed over
 
 // Brave's program, in the places its installers put it, or on PATH.
 function findBrave() {
@@ -32,7 +33,7 @@ function findBrave() {
       .map((dir) => path.join(dir, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'))
       .find((file) => fs.existsSync(file)) || null;
   }
-  for (const dir of (env.PATH || '').split(path.delimiter).filter(Boolean)) {
+  for (const dir of (env.PATH || '').split(path.delimiter).filter((d) => d && path.isAbsolute(d))) {
     for (const name of ['brave-browser', 'brave']) {
       try {
         fs.accessSync(path.join(dir, name), fs.constants.X_OK);
@@ -135,12 +136,16 @@ function createBrave({ tabs, settings, save, changed }) {
 
   // ── the user's tabs and sessions' tabs ──────────────────────────────────
   const undo = new Map(); // nonce -> { tabId, site, url }: the note's link
+  const send = new WeakMap(); // tab -> { nonce, url }: the link of its "Not opened" note
 
   function divert(tab, url, site) {
     // Only the user, in their own tab, sends a page to Brave; a page that keeps
-    // trying is handed over once every few seconds at most.
+    // trying is handed over once every few seconds at most. And only when the
+    // user had a hand in it: they acted in the tab just now, or the address
+    // came from Loui (the address bar, a bookmark), not from a page going
+    // there by itself. A private tab's address never leaves by itself.
     const yours = tab.group === YOU && !(tabs.group(YOU).busy > 0);
-    const handOff = yours && Date.now() - lastHandOff > 3000;
+    const handOff = yours && !tab.private && tabs.recent(tab) && Date.now() - lastHandOff > 3000;
     let page;
     if (handOff) {
       lastHandOff = Date.now();
@@ -157,13 +162,18 @@ function createBrave({ tabs, settings, save, changed }) {
         link: { href: UNDO + nonce, text: `Open ${site} in Loui from now on` },
       });
     } else {
+      // The user can still send it there, with the note's link.
+      const nonce = yours ? crypto.randomBytes(12).toString('hex') : null;
+      if (nonce) send.set(tab, { nonce, url });
       page = note({
         title: 'Not opened',
         lines: [
-          [yours ? `${site} opens in ${name()}, and Loui only sends it there when you open it yourself.`
-            : `${site} opens in the user's other browser, so Loui doesn't open it in Claude's tabs.`],
+          [!yours ? `${site} opens in the user's other browser, so Loui doesn't open it in Claude's tabs.`
+            : tab.private ? `${site} is on your list of sites that open in ${name()}, and Loui does not send a private window's pages there by itself.`
+              : `${site} opens in ${name()}, and Loui only sends it there when you open it yourself.`],
           [url, 'where'],
         ],
+        link: nonce && { href: SEND + nonce, text: `Open it in ${name()}` },
       });
     }
     notes.get(tab).set(page, url);
@@ -185,6 +195,13 @@ function createBrave({ tabs, settings, save, changed }) {
     // The note's link, followed in the tab Loui left it in. A page linking
     // here itself has no nonce Loui gave out, so it changes nothing.
     wc.on('will-navigate', (e) => {
+      if (e.url.startsWith(SEND)) {
+        e.preventDefault();
+        const s = send.get(tab);
+        if (!s || s.nonce !== e.url.slice(SEND.length) || tab.group !== YOU || !wc.getURL().startsWith('data:')) return;
+        send.delete(tab);
+        return void open(s.url);
+      }
       if (!e.url.startsWith(UNDO)) return;
       e.preventDefault();
       const u = undo.get(e.url.slice(UNDO.length));

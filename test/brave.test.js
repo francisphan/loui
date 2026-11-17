@@ -90,6 +90,34 @@ test("a page can't take a site off the list by imitating the note's link", async
   assert.ok((await sites()).includes('localhost'));
 });
 
+test('a page that goes to a listed site by itself is not handed over; the note offers to', async () => {
+  await visit(`${b.base}/second.html`);
+  await sleep(5200); // nobody typed or clicked for a while
+  const before = (await opened()).length;
+  await b.ui('tab:eval', `location.href = ${JSON.stringify(listed + '?by-itself')}`);
+  await until(async () => (await onScreen()).title === 'Not opened', 'the note');
+  assert.match(await b.ui('tab:eval', 'document.body.innerText'), /only sends it there when you open it yourself/);
+  assert.equal((await opened()).length, before);
+  // The user can still send it on, with the note's link.
+  await b.ui('tab:eval', "document.querySelector('a').click()");
+  await until(async () => (await opened()).includes(listed + '?by-itself'), 'the hand-over');
+});
+
+test('a private window never hands a page over by itself', async () => {
+  const before = (await opened()).length;
+  const priv = await b.ui('window:new', { private: true });
+  await b.ui('in-window', { window: priv, ui: 'go', arg: listed + '?private' });
+  const tab = await until(async () => {
+    const t = (await b.ui('in-window', { window: priv, ui: 'state' })).tabs.find((x) => x.active);
+    return t?.title === 'Not opened' && t;
+  }, 'the note');
+  assert.match(await b.ui('tab:js', { id: tab.id, code: 'document.body.innerText' }), /does not send a private window's pages there by itself/);
+  assert.equal((await opened()).length, before);
+  await b.ui('tab:js', { id: tab.id, code: "document.querySelector('a').click()" });
+  await until(async () => (await opened()).includes(listed + '?private'), 'the hand-over the user asked for');
+  await b.ui('in-window', { window: priv, ui: 'window:close' });
+});
+
 test("a Claude session can't open a listed site or make Loui open Brave", async () => {
   const before = (await opened()).length;
   const s = b.as('brave-s', 'Claude Code');

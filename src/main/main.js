@@ -435,7 +435,7 @@ let serving = false;
 function serve() {
   if (serving) return;
   serving = true;
-  rpc.serve(paths.socketPath, handle, sessions);
+  if (process.env.LOUI_TEST || settings.localSocket === true) rpc.serve(paths.socketPath, handle, sessions);
   link.connect();
 }
 const handlers = {

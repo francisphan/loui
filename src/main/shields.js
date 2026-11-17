@@ -29,7 +29,18 @@ const { Menu, utilityProcess } = require('electron');
 const { FiltersEngine, Request, adsAndTrackingLists } = require('@ghostery/adblocker');
 const { requestRules } = require('./requests');
 
-const RESOURCES = 'https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin/resources.json';
+// The stand-in scripts are served into pages, so they come from the release
+// of the engine that is installed, never from a branch that can change.
+// '-' (no stand-ins: such requests are just blocked) if the version cannot be read.
+const RESOURCES = (() => {
+  try {
+    const { version } = require('@ghostery/adblocker/package.json');
+    if (!/^\d+\.\d+\.\d+$/.test(version)) return '-';
+    return `https://raw.githubusercontent.com/ghostery/adblocker/v${version}/packages/adblocker/assets/ublock-origin/resources.json`;
+  } catch {
+    return '-';
+  }
+})();
 const MAX_AGE = 4 * 24 * 3600e3; // lists older than this are downloaded again
 const RETRY = 3600e3; // after a failed download
 const WORLD = 4813; // isolated world for looking at the page (actions.js uses 4812)
@@ -255,4 +266,4 @@ function createShields({ ses, tabs, home, changed }) {
   return { state, set, menu, attach, forgetPrivate: () => offPrivate.clear() };
 }
 
-module.exports = { createShields };
+module.exports = { createShields, RESOURCES };

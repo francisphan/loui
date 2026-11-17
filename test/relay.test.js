@@ -12,6 +12,8 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const { start } = require('../relay/server');
 const { launch } = require('./drive');
+const { spawn } = require('child_process');
+const { socketFor } = require('../src/shared/paths');
 
 let relay, b, home;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -465,6 +467,44 @@ test('Loui dials again when a relay it is connected to goes silent', async () =>
     await other.close();
     for (const ws of silent.clients) ws.terminate();
     silent.close();
+  }
+});
+
+test('the local control socket is only served to the tests, or when a setting turns it on', async () => {
+  // Loui as it runs day to day (no LOUI_TEST). It dials the relay right after
+  // the point where it would open the socket, so a stand-in relay hears when.
+  const standIn = new WebSocket.Server({ port: 0, host: '127.0.0.1' });
+  await new Promise((resolve) => standIn.on('listening', resolve));
+  let dialled = 0;
+  standIn.on('connection', () => dialled++);
+  const run = async (settings) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
+    if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings));
+    const before = dialled;
+    const app = spawn(require('electron'), [path.join(__dirname, '..'), '--no-sandbox'], {
+      env: {
+        ...process.env, LOUI_HOME: dir, LOUI_TEST: '', LOUI_RELAY_URL: `http://127.0.0.1:${standIn.address().port}`, LOUI_RELAY_KEY: 'k',
+        LOUI_SHIELDS_LISTS: 'http://127.0.0.1:1/none', // nothing to download
+      },
+      stdio: 'ignore',
+    });
+    try {
+      await until(() => dialled > before, 'Loui to start', 20000);
+      await sleep(300);
+      return fs.existsSync(socketFor(dir));
+    } finally {
+      const exited = new Promise((resolve) => app.once('exit', resolve));
+      app.kill('SIGKILL');
+      await exited;
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+    }
+  };
+  try {
+    assert.equal(await run(null), false, 'no socket in a normal run');
+    assert.equal(await run({ localSocket: true }), true, 'served when the setting is on');
+  } finally {
+    for (const ws of standIn.clients) ws.terminate();
+    standIn.close();
   }
 });
 

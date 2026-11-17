@@ -113,6 +113,42 @@ test('a download from a Claude session\'s tab is saved too, marked with the sess
   s.end();
 });
 
+test('a page that starts downloads by itself gets one; the rest are blocked until the user says so', async () => {
+  await b.ui('go', b.base + '/second.html');
+  const tab = await (async () => {
+    for (let i = 0; i < 100; i++) {
+      const t = (await b.state()).tabs.find((x) => x.active);
+      if (t.url === b.base + '/second.html' && !t.loading) return t;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.fail('the page never loaded');
+  })();
+  const start = (name, acted = false) => b.ui('tab:js', {
+    id: tab.id, acted,
+    code: `{ const a = document.createElement('a'); a.href = ${JSON.stringify(`${url}/file/${name}`)}; document.body.append(a); a.click(); a.remove(); }`,
+  });
+  // Well after the address was entered, with nobody at the keys: the page's first goes through.
+  await new Promise((r) => setTimeout(r, 5200));
+  await start('first.txt');
+  await finished('first.txt');
+  await start('pushed-1.bin');
+  await start('pushed-2.bin');
+  const blocked = await waitFor('pushed-1.bin', (d) => d.state === 'blocked', 'was listed as blocked');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!(await listed()).some((d) => d.name === 'pushed-2.bin'), 'one row for the page, however often it tries');
+  assert.ok(!fs.existsSync(path.join(files, 'pushed-1.bin')) && !fs.existsSync(path.join(files, 'pushed-2.bin')));
+
+  // A click in the page counts.
+  await start('clicked.txt', true);
+  await finished('clicked.txt');
+
+  // "Download anyway" fetches the blocked one.
+  await b.ui('download:act', { id: blocked.id, action: 'allow' });
+  await finished('pushed-1.bin');
+  assert.ok(fs.existsSync(path.join(files, 'pushed-1.bin')));
+  assert.ok(!(await listed()).some((d) => d.state === 'blocked'));
+});
+
 test('finished downloads can be cleared from the list, and the files stay', async () => {
   const before = await listed();
   assert.ok(before.length >= 4);

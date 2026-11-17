@@ -27,7 +27,8 @@ async function claudeLauncher() {
     return (launcher = {});
   } catch {}
   const exe = process.platform === 'win32' ? 'claude.exe' : 'claude';
-  const dirs = [...(process.env.PATH || '').split(path.delimiter), path.join(os.homedir(), '.local', 'bin')];
+  // Empty and relative PATH entries would mean the directory Loui runs in.
+  const dirs = [...(process.env.PATH || '').split(path.delimiter).filter((d) => d && path.isAbsolute(d)), path.join(os.homedir(), '.local', 'bin')];
   const found = dirs.map((d) => path.join(d, exe)).find((p) => fs.existsSync(p));
   if (found) return (launcher = { pathToClaudeCodeExecutable: found });
   const inWsl = process.platform === 'win32' && (await wslClaude());
@@ -40,7 +41,7 @@ async function claudeLauncher() {
       // PATH is the one the user's shell gave, so a claude installed through
       // npm finds its node.
       const pass = Object.keys(env).filter((k) => /^(CLAUDE_|MCP_)/.test(k));
-      return spawn('wsl.exe', ['-e', 'env', `PATH=${inWsl.path}`, inWsl.claude, ...args], {
+      return spawn(WSL, ['-e', 'env', `PATH=${inWsl.path}`, inWsl.claude, ...args], {
         cwd, signal, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...Object.fromEntries(pass.map((k) => [k, env[k]])), WSLENV: pass.join(':') },
       });
@@ -48,13 +49,16 @@ async function claudeLauncher() {
   });
 }
 
+// By its full path: a bare name is looked for in the directory Loui runs in first.
+const WSL = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wsl.exe');
+
 // Claude Code inside the default WSL distribution: { claude, path }, or null.
 // Asks an interactive login shell, which reads the user's profile and rc
 // files (where nvm and the like set PATH). type -P gives the program's path
 // even when an alias of the same name exists. Runs without blocking the browser.
 async function wslClaude() {
   try {
-    const { stdout } = await execFileAsync('wsl.exe', [
+    const { stdout } = await execFileAsync(WSL, [
       '-e', 'bash', '-lic', 'printf "\\n@@%s\\n@@%s\\n" "$(type -P claude)" "$PATH"',
     ], { encoding: 'utf8', timeout: 30000, windowsHide: true });
     const [claude, PATH] = stdout.split('\n').filter((l) => l.startsWith('@@')).map((l) => l.slice(2).trim());
