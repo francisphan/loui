@@ -142,7 +142,11 @@ test('a pinned tab is small, goes first, and Ctrl+W leaves it open', async () =>
   await b.ui('tab:pin', { id: last.id, on: true });
   const after = await until(mine, (l) => l[0].id === last.id && l[0].pinned);
   pinnedId = last.id;
-  const width = await chrome(`document.querySelector('.tab[data-id="${last.id}"]').getBoundingClientRect().width`);
+  // The main process knows it is pinned before the strip has redrawn it.
+  const width = await until(
+    () => chrome(`document.querySelector('.tab[data-id="${last.id}"]').getBoundingClientRect().width`),
+    (w) => w < 50,
+  );
   const wide = await chrome(`document.querySelector('.tab[data-id="${after[1].id}"]').getBoundingClientRect().width`);
   assert.ok(width < 50 && wide > width * 2, `pinned ${width}px, others ${wide}px`);
   assert.equal(await chrome(`!!document.querySelector('.tab[data-id="${last.id}"] .title')`), false, 'icon only');
