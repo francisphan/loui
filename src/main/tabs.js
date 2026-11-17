@@ -198,6 +198,15 @@ class Tabs extends EventEmitter {
     tab.tuckTimer = setTimeout(() => this.tuck(tab), 8000); // a page that never finishes loading
   }
 
+  // Resolves once the tab is not peeking (it has settled in its place), or
+  // after 4 s. Input is sent only then: moving a view while a click is on its
+  // way can lose the click.
+  async settled(tab) {
+    for (let waited = 0; tab.peeking && waited < 4000; waited += 25) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+
   // Tucks a peeking tab away once its page has drawn a frame while in sight
   // (two animation frames have passed), or after 3 s if it never does. A
   // fixed delay was not enough on slow machines: the tab went under before

@@ -115,6 +115,7 @@ function createActions({ tabs, sessions, changed }) {
   };
 
   async function aim(tab, target, label, press) {
+    await tabs.settled(tab);
     tab.pointer = await page(tab, 'pointAt', {
       x: target.x, y: target.y, rect: target.rect, label, press, from: tab.pointer,
     }).catch(() => tab.pointer);
@@ -285,6 +286,7 @@ function createActions({ tabs, sessions, changed }) {
       label: (a) => `pressing ${a.key}`,
       async run({ key: chord }, c) {
         const tab = c.need();
+        await tabs.settled(tab);
         key(tab, chord);
         return after(c, tab, `Pressed ${chord}.`);
       },
