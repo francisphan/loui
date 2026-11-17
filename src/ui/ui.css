@@ -62,9 +62,13 @@
 }
 
 html, body { height: 100%; margin: 0; }
+/* The main window alone has the top row, which spans it above everything
+   else. This stylesheet is shared with the suggestion list, the palette,
+   Settings, the task manager and the small session window: none of those
+   may be pushed down by it. */
+body:has(#tabrow) { padding-top: var(--top-h); }
 body {
   box-sizing: border-box;
-  padding-top: var(--top-h); /* the top row, which spans the window above everything else */
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr);

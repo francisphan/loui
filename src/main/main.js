@@ -67,6 +67,10 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Sites that sniff for these tokens serve a broken page; the few that want
 // the truth get it (identity.js).
+// Windows groups a program's windows on the taskbar, and with its pinned
+// shortcut, by this id: it must be the one the installer gave the shortcut
+// (build.appId in package.json), or the windows show as separate buttons.
+if (process.platform === 'win32') app.setAppUserModelId('io.github.francisphan.loui');
 const fullUserAgent = app.userAgentFallback;
 app.userAgentFallback = fullUserAgent.replace(/ (loui|Electron)\/\S+/gi, '');
 

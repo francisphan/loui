@@ -31,3 +31,22 @@ test('every page closes the elements it opens', () => {
     }
   }
 });
+
+// ui.css is shared by the main window and Loui's small pages (the suggestion
+// list, the palette, Settings, the task manager, the session window). Room
+// for the main window's top row must not be given to all of them: it once
+// pushed the suggestion list out of its own view.
+test('only the main window makes room for the top row', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../src/ui/ui.css'), 'utf8');
+  const plain = [...css.matchAll(/(^|\})\s*body\s*\{([^}]*)\}/g)].map((m) => m[2]).join('\n');
+  assert.doesNotMatch(plain, /padding-top/, 'no top padding on every body');
+  assert.match(css, /body:has\(#tabrow\)\s*\{\s*padding-top: var\(--top-h\)/);
+});
+
+// Windows groups a program's windows on the taskbar, and with its pinned
+// shortcut, by an id that must be the one the installer gives the shortcut.
+test('the app tells Windows the id its shortcut has', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../src/main/main.js'), 'utf8');
+  const { build } = require('../package.json');
+  assert.ok(main.includes(`app.setAppUserModelId('${build.appId}')`), build.appId);
+});
