@@ -3,7 +3,15 @@
 // electron-builder only uses wine to run the freshly built NSIS stub so that it
 // writes out its uninstaller. Its own UninstallerReader extracts the same file
 // without running any Windows code, so do that instead.
+//
+// The extracted uninstaller carries a checksum that does not match the file
+// it ends up in, and Windows NSIS refuses to run it: every uninstall, and so
+// every update, failed with "Loui cannot be closed". So the checksum is
+// recomputed here, the way NSIS checks it: CRC32 over the file from byte 512
+// up to the stored value.
+const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { UninstallerReader } = require('app-builder-lib/out/targets/nsis/nsisUtil');
 
 const installer = process.argv[2];
@@ -12,7 +20,29 @@ if (!installer || !installer.endsWith('.exe')) {
   process.exit(1);
 }
 const out = path.join(path.dirname(installer), `${path.basename(installer, 'exe')}__uninstaller.exe`);
-UninstallerReader.exec(installer, out).catch((e) => {
+
+// Where the stored checksum is: at the end of the data that follows the NSIS
+// first header, which sits on a 512-byte boundary.
+function crcPosition(b) {
+  const sig = Buffer.from('efbeadde4e756c6c736f6674496e7374', 'hex');
+  for (let i = b.indexOf(sig); i >= 0; i = b.indexOf(sig, i + 1)) {
+    const header = i - 4;
+    if (header % 512) continue;
+    if (b.readUInt32LE(header) & 4) throw new Error('the uninstaller has no checksum (NO_CRC)');
+    return header + b.readUInt32LE(header + 24) - 4;
+  }
+  throw new Error('no NSIS header found');
+}
+const crc = (b, at) => zlib.crc32(b.subarray(512, at)) >>> 0;
+
+UninstallerReader.exec(installer, out).then(() => {
+  const b = fs.readFileSync(out);
+  const at = crcPosition(b);
+  b.writeUInt32LE(crc(b, at), at);
+  fs.writeFileSync(out, b);
+  const check = fs.readFileSync(out);
+  if (check.readUInt32LE(at) !== crc(check, at)) throw new Error('checksum did not stick');
+}).catch((e) => {
   console.error('nowine:', e.message);
   process.exit(1);
 });
