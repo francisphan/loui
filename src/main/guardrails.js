@@ -151,7 +151,8 @@ function inspectBody(body) {
   return null;
 }
 
-function createGuardrails({ ses, tabs, sessions, home, changed }) {
+// asked(session, {what, site, ok, timedOut}): each answer, for the activity log.
+function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {} }) {
   const file = path.join(home, 'guardrails.json');
   const kept = (() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { return {}; } })();
   const conf = {
@@ -234,6 +235,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed }) {
     pending.push(p);
     changed();
     return done.then((ok) => {
+      asked(session, { what: found.what, site, ok, timedOut: p.timedOut });
       // What the allowed action sets off is not asked about again.
       if (ok) passes.set(session.id, { tabId: tab.id, until: acting.get(session.id)?.n ? Infinity : Date.now() + 3000 });
       return { ok, p };

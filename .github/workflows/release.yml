@@ -35,6 +35,8 @@ jobs:
           fi
 
       - run: npm ci
+      # Fetch Electron now, so the first test file doesn't pay for the download.
+      - run: node -e "console.log(require('electron'))"
 
       - name: Test
         run: npm test

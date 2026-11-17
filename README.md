@@ -192,6 +192,26 @@ stops the questions for that session.
 - *File › Settings* turns it off, edits the list of sites, and forgets
   remembered answers. They are kept in `guardrails.json` in the profile.
 
+## What sessions did
+
+When a session ends its tab group closes, but Loui keeps a log of what it did.
+*Sessions* in the Claude panel (or *Claude › Claude sessions…*) lists recent
+sessions with when, how long, how many steps and how they ended (ended, you
+closed it, connection lost, cut short when Loui closed, not let in). Opening
+one shows each step in the words the panel used, the page it was on, whether
+it failed, and a small picture of the tab after each step that acted on the
+page; clicking a page opens it in a new tab of yours. Guardrails questions and
+your answer to "Let … use Loui?" are steps too. The Claude panel's own steps go
+to one *Claude panel* entry per day.
+
+- Kept in `activity/` in the profile (one JSON per session, pictures beside
+  it) for 7 days by default; the panel's *Keep for* changes that
+  (`activityDays` in `settings.json`, 0 keeps nothing). At most 200 MB in all
+  (`activityMaxMB`), oldest first. *Clear all*, or delete one session.
+- Text typed into password, card and one-time-code fields is stored only as
+  its length; other typed text up to 200 characters, and only a script's first
+  line. No tool reads the log: only the window does.
+
 ## Tools
 
 `navigate`, `history`, `tabs`, `snapshot`, `read_article`, `click`, `type`, `press_key`,
@@ -414,6 +434,7 @@ src/main/tabs.js      views, tab groups, console and network history, device siz
 src/main/sessions.js  sessions and their groups, take over, hand-over
 src/main/prompts.js   sessions' questions to the user, one at a time in the tab row
 src/main/consent.js   asking before a new session first uses the browser (consent.json)
+src/main/activity.js  the activity log: what each session did, kept after it ends (activity/)
 src/main/restore.js   your tabs across restarts (tabs.json), reopening closed tabs
 src/main/actions.js   what each tool does
 src/main/link.js      the connection out to the relay

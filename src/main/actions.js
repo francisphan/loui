@@ -316,6 +316,9 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       async run({ ref, text: value, clear, submit }, c) {
         const tab = c.need();
         const target = check(await page(tab, 'locate', { ref, how: 'enter' }), ref);
+        // The activity log keeps what was typed, except into password, card
+        // and one-time-code fields, where it keeps only how much.
+        if (value) c.note(target.secret ? `(${value.length} characters)` : value);
         if (submit) await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
         c.say(`typing into "${shorten(target.name || target.role)}"`);
         await aim(tab, target, 'type', true);
@@ -468,6 +471,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       label: () => 'running a script',
       async run({ code }, c) {
         const tab = c.need();
+        c.note(String(code)); // the activity log keeps its first line only
         // A script can do anything a click can (form.submit(), fetch), and
         // read what is typed in the page. On a page with card or password
         // fields it is asked about first; elsewhere what it sends is checked
@@ -572,7 +576,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     const handler = handlers[name];
     if (!handler) throw new Error(`Unknown tool: ${name}`);
     const acts = handler.acts ? handler.acts(args) : defs.get(name).acts;
-    return sessions.during(session, handler.label(args), acts, async (say) => {
+    return sessions.during(session, handler.label(args), acts, async (say, record = () => {}) => {
       const current = tabs.current(session.group);
       if (current?.asleep) await settle(tabs.use(current)); // its page is back before the tool reads it
       // While the tool runs, requests its tab makes are checked (guardrails.js);
@@ -580,7 +584,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       guard.begin(session);
       const stopped = async () => { await guard.drain(session); return guard.takeNotes(session).join('\n'); };
       try {
-        const out = await handler.run(args, { say, session, need: () => need(session) });
+        const out = await handler.run(args, { say, note: record, session, need: () => need(session) });
         const note = await stopped();
         return note ? [...text(note), ...out] : out;
       } catch (e) {
