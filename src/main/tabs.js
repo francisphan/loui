@@ -655,7 +655,8 @@ class Tabs extends EventEmitter {
 
   tuck(tab) {
     clearTimeout(tab.tuckTimer);
-    if (!tab.peeking || !tab.wc || tab.wc.isLoadingMainFrame?.()) return;
+    // A tab closed while it peeked still has its timer: its page is gone, and asking it anything throws.
+    if (!tab.peeking || !tab.wc || tab.wc.isDestroyed() || tab.wc.isLoadingMainFrame?.()) return;
     tab.peeking = false;
     if (this.onScreen(tab) || tab.wc.isDestroyed() || !this.list.includes(tab)) return;
     tab.window.win.contentView.addChildView(tab.view, 0);

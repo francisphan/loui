@@ -280,3 +280,214 @@ test('the user\'s own actions are never interrupted', async () => {
   await wait('the order to go through', async () => (await b.state()).tabs.find((x) => x.id === mine.id).title === 'Done');
   await noPrompt();
 });
+
+// ── gaps found by the audit ────────────────────────────────────────────────
+test('controls that are not plain short-named buttons are classified too', () => {
+  const button = (name, more = {}) => classify({ role: 'button', name, submits: false, form: {}, ...more });
+  // Something that takes clicks without being a button.
+  assert.equal(classify({ role: 'div', name: 'Pay now', clickable: true, form: {} })?.kind, 'pay');
+  assert.equal(classify({ role: 'div', name: 'Pay now', form: {} }), null, 'plain text is not a control');
+  // A long name that starts with a pay verb.
+  assert.equal(button('Pay $1,234.56 now with the card ending 4242')?.kind, 'pay');
+  assert.equal(button('Learn how to pay less for the things you buy every single day'), null);
+  // Confirm, in a dialog about paying or deleting.
+  assert.equal(button('Confirm', { near: 'Delete 3 files? This cannot be undone.' })?.kind, 'confirm');
+  assert.equal(button('Sí', { near: '¿Eliminar la cuenta?' })?.kind, 'confirm');
+  assert.equal(button('Confirm', { near: 'Choose a language' }), null);
+  assert.equal(button('Cancel', { near: 'Delete 3 files?' }), null);
+  for (const name of ['Subscribe', 'Order now', 'Book now', 'Reserve', 'Upgrade to Pro', 'Suscribirse', 'Suscribite', 'Reservar', 'Pedir ahora']) {
+    assert.equal(button(name)?.kind, 'pay', name);
+  }
+  for (const name of ['Post', 'Post comment', 'Publish', 'Share', 'Reply', 'Publicar', 'Compartir', 'Responder']) {
+    assert.equal(button(name)?.kind, 'send', name);
+  }
+  for (const name of ['Unsubscribe', 'Discard', 'Discard draft', 'Empty trash', 'Cancel subscription', 'Darse de baja', 'Descartar', 'Vaciar papelera']) {
+    assert.equal(button(name)?.kind, 'delete', name);
+  }
+  for (const name of ['Order history', 'Sort order', 'Bookmark', 'Book reviews', 'New post', 'View post', 'Shared with me', 'Replies',
+    'Subscriptions', 'Ordenar por precio', 'Reservas', 'Yes', 'OK', 'Continue']) {
+    assert.equal(button(name), null, name);
+  }
+  // Enter in a chat box, next to a Send button.
+  const box = (beside) => classify({ role: 'textbox', name: 'Message', submits: false, form: {}, beside });
+  assert.equal(box(['Attach', 'Send message'])?.kind, 'send');
+  assert.equal(box(['Enviar'])?.kind, 'send');
+  assert.equal(box(['Bold', 'Italic', 'Share']), null);
+  assert.equal(box(null), null);
+});
+
+const promptAfter = (g) => wait('another guardrail prompt', async () => {
+  const now = (await b.state()).guard;
+  return now && now.id !== g.id && now;
+});
+const js = async (group, code) => b.ui('tab:js', { id: (await tabOf(group)).id, code });
+
+test('a click is judged where it lands, not only on the element named', async () => {
+  const s = b.as('g-cover', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  const clicking = s.text('click', { ref: ref(page, 'link "Next page"') });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Delete"', 'the invisible button on top of the link');
+  await answer(g, 'block');
+  await assert.rejects(clicking, /declined/);
+  assert.equal(await read('g-cover'), 'nothing yet');
+  s.end();
+});
+
+test('a click is judged again if the page changed while the user was asked', async () => {
+  const s = b.as('g-moved', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  const clicking = s.text('click', { ref: ref(page, 'button "Send" [') });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Send"');
+  // While the question is open the page moves another control under the point.
+  await js('g-moved', `(() => { const d = document.getElementById('cover'), r = document.getElementById('send').getBoundingClientRect();
+    document.body.appendChild(d);
+    d.style.cssText = 'position:fixed;opacity:0;left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + r.height + 'px'; })()`);
+  await answer(g, 'once');
+  const again = await promptAfter(g);
+  assert.equal(again.what, 'click "Delete"');
+  await answer(again, 'block');
+  await assert.rejects(clicking, /declined/);
+  assert.equal(await read('g-moved'), 'nothing yet');
+
+  // And if the target is gone by then, the click fails instead of landing on what took its place.
+  const next = await s.text('snapshot');
+  const buying = s.text('click', { ref: ref(next, 'button "Buy now"') });
+  const q = await promptAfter(again);
+  await js('g-moved', "document.getElementById('buy').remove()");
+  await answer(q, 'once');
+  await assert.rejects(buying, /no longer on the page/);
+  assert.equal(await read('g-moved'), 'nothing yet');
+  s.end();
+});
+
+test('a click a script makes on a consequential control is held and asked about', async () => {
+  const s = b.as('g-script', 'Claude Code');
+  await s.text('navigate', { url: `${b.base}/guard2.html` });
+  // A harmless one runs at once, as before.
+  assert.equal(await s.text('evaluate', { code: "(document.getElementById('next').click(), document.getElementById('out').textContent)" }), '"next"');
+  await noPrompt();
+
+  const running = s.text('evaluate', { code: "(document.getElementById('buy').click(), 'ran')" });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Buy now"');
+  assert.equal(await read('g-script'), 'next', 'the click did not reach the page');
+  await answer(g, 'block');
+  await assert.rejects(running, /declined/);
+  assert.equal(await read('g-script'), 'next');
+
+  const allowed = s.text('evaluate', { code: "(document.getElementById('buy').click(), 'ran')" });
+  await answer(await promptAfter(g), 'once');
+  assert.match(await allowed, /Loui held the script's attempt to click "Buy now" until the user allowed it\.\n"ran"/);
+  assert.equal(await read('g-script'), 'bought', 'and then it went through');
+
+  // One left for later is stopped, and the session is told with its next call.
+  await js('g-script', "document.getElementById('out').textContent = 'reset'");
+  assert.equal(await s.text('evaluate', { code: "(setTimeout(() => document.getElementById('buy').click(), 300), 1)" }), '1');
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(await read('g-script'), 'reset');
+  assert.match(await s.text('snapshot'), /A script you ran earlier tried to click "Buy now" after it returned\. Loui stopped it/);
+  await noPrompt();
+  s.end();
+});
+
+test('a form a script submits, and a select that acts when changed, are asked about', async () => {
+  const s = b.as('g-auto', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  const choosing = s.text('select_option', { ref: ref(page, 'select "Plan"'), value: 'Pro' });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Buy now"');
+  await answer(g, 'block');
+  await assert.rejects(choosing, /declined/);
+  assert.equal(await read('g-auto'), 'nothing yet');
+
+  // form.submit() fires no event: it is caught when the page is posted.
+  const running = s.text('evaluate', { code: "document.getElementById('msg').submit()" });
+  const q = await promptAfter(g);
+  assert.equal(q.what, `submit a form to ${site}`);
+  await answer(q, 'block');
+  assert.match(await running, /The page tried to submit a form to .* The user declined, so Loui stopped it/);
+  assert.match((await tabOf('g-auto')).url, /guard2\.html$/);
+  s.end();
+});
+
+test('controls that are not buttons, long names, dialogs and other verbs are asked about', async () => {
+  const s = b.as('g-names', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  let last = { id: 0 };
+  for (const [start, what] of [
+    ['clickable "Pay now"', 'click "Pay now"'],
+    ['clickable "Comprar"', 'click "Comprar"'],
+    ['button "Pay $1,234.56', 'click "Pay $1,234.56 now with the card ending …"'],
+    ['button "Post"', 'click "Post"'],
+    ['button "Confirm"', 'click "Confirm"'],
+  ]) {
+    const clicking = s.text('click', { ref: ref(page, start) });
+    last = await promptAfter(last);
+    assert.equal(last.what, what);
+    await answer(last, 'block');
+    await assert.rejects(clicking, /declined/);
+  }
+  assert.equal(await read('g-names'), 'nothing yet');
+  s.end();
+});
+
+test('Enter in a chat box next to a Send button is asked about; in a plain text area it is not', async () => {
+  const s = b.as('g-chat', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  const typing = s.text('type', { ref: ref(page, 'textbox "Message"'), text: 'hello', submit: true });
+  const g = await prompt();
+  assert.equal(g.what, 'press Enter in "Message" (next to "Send message")');
+  assert.equal(g.kind, 'send');
+  await answer(g, 'block');
+  await assert.rejects(typing, /declined/);
+  await s.text('type', { ref: ref(page, 'textbox "Message"'), text: 'hello' });
+  await noPrompt();
+  const pressing = s.text('press_key', { key: 'Enter' });
+  await answer(await promptAfter(g), 'block');
+  await assert.rejects(pressing, /declined/);
+  assert.equal(await read('g-chat'), 'nothing yet');
+  await s.text('type', { ref: ref(page, 'textbox "Notes"'), text: 'a line', submit: true });
+  await noPrompt();
+  s.end();
+});
+
+test('request bodies sent as a blob, with DELETE, or past the first 64 KB are read', async () => {
+  const s = b.as('g-body', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  let last = { id: 0 };
+  for (const name of ['Save', 'Refresh', 'Load more']) {
+    const clicking = s.text('click', { ref: ref(page, `button "${name}"`) });
+    last = await promptAfter(last);
+    assert.equal(last.what, `send card details to ${site}`, name);
+    await answer(last, 'block');
+    assert.match(await clicking, /The user declined, so Loui stopped it/);
+    assert.equal(await wait('the request to fail', async () => (await read('g-body')) === 'request stopped' && 'ok'), 'ok');
+    await js('g-body', "document.getElementById('out').textContent = 'nothing yet'");
+  }
+  s.end();
+});
+
+test('a listed site is asked about however the page gets there', async () => {
+  const s = b.as('g-ways', 'Claude Code');
+  await b.ui('guard:site-add', 'localhost');
+  const other = b.base.replace('127.0.0.1', 'localhost');
+  const page = await s.text('navigate', { url: `${b.base}/guard2.html` });
+  // A button whose script sets location.
+  const clicking = s.text('click', { ref: ref(page, 'button "Open wallet"') });
+  const g = await prompt();
+  assert.equal(g.kind, 'site');
+  assert.equal(g.what, `open ${new URL(other).host}`);
+  await answer(g, 'block');
+  assert.match(await clicking, /The page tried to open localhost:\d+ on its own after your action\. The user declined, so Loui stopped it/);
+  assert.match((await tabOf('g-ways')).url, /guard2\.html$/);
+  // A form that goes there; allowed, it does.
+  await js('g-ways', `document.getElementById('wallet').action = '${other}/second.html'`);
+  const submitting = s.text('click', { ref: ref(page, 'button "Wallet"') });
+  await answer(await promptAfter(g), 'once');
+  await submitting;
+  assert.match((await tabOf('g-ways')).url, /^http:\/\/localhost:\d+\/second\.html/);
+  await b.ui('guard:site-remove', 'localhost');
+  s.end();
+});

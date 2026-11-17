@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Guard 2</title></head>
+<body>
+  <p id="out">nothing yet</p>
+  <!-- An invisible button laid over a link. -->
+  <div style="position:relative; display:inline-block">
+    <a href="/second.html">Next page</a>
+    <button id="cover" style="position:absolute; inset:0; opacity:0" onclick="out.textContent = 'deleted'">Delete</button>
+  </div>
+  <button id="send" onclick="out.textContent = 'sent'">Send</button>
+  <button id="next" onclick="out.textContent = 'next'">Next</button>
+  <button id="buy" onclick="out.textContent = 'bought'">Buy now</button>
+  <!-- Controls that are not buttons, or not named like the short ones. -->
+  <div id="paydiv" onclick="out.textContent = 'paid'">Pay now</div>
+  <span id="comprar" style="cursor:pointer">Comprar</span>
+  <button onclick="out.textContent = 'paid by card'">Pay $1,234.56 now with the card ending 4242</button>
+  <form onsubmit="out.textContent = 'posted'; return false">
+    <label>Comment <input name="c"></label>
+    <button>Post</button>
+  </form>
+  <div role="dialog" aria-label="Sure?">
+    <p>Delete 3 files? This cannot be undone.</p>
+    <button type="button" onclick="out.textContent = 'confirmed'">Confirm</button>
+    <button type="button">Cancel</button>
+  </div>
+  <!-- A chat box: Enter sends, with no form. -->
+  <div class="chat">
+    <div id="box" contenteditable="true" aria-label="Message" style="border:1px solid; min-height:1.5em"
+      onkeydown="if (event.key === 'Enter') { event.preventDefault(); out.textContent = 'chat sent'; }"></div>
+    <button aria-label="Send message" onclick="out.textContent = 'chat sent'">&gt;</button>
+  </div>
+  <div><textarea aria-label="Notes"></textarea></div>
+  <!-- What scripts set off. -->
+  <select id="auto" aria-label="Plan" onchange="document.getElementById('buy').click()"><option>Free</option><option>Pro</option></select>
+  <form method="post" action="/done.html" id="msg"><input name="m" value="hi"></form>
+  <!-- Request bodies that are not plain bytes. -->
+  <button onclick="send('POST', new Blob([card]))">Save</button>
+  <button onclick="send('DELETE', card)">Refresh</button>
+  <button onclick="send('POST', 'pad=' + 'x'.repeat(70000) + '&cardnumber=4242424242424242&cvc=123')">Load more</button>
+  <!-- Ways to a site other than a link. -->
+  <button onclick="location = location.href.replace('127.0.0.1', 'localhost').replace('guard2', 'second')">Open wallet</button>
+  <form id="wallet" action="/second.html"><button>Wallet</button></form>
+  <script>
+    const card = JSON.stringify({ card: { number: '4242424242424242', cvc: '123' } });
+    function send(method, body) {
+      fetch('/done.html', { method, body })
+        .then(() => { out.textContent = 'request sent'; }, () => { out.textContent = 'request stopped'; });
+    }
+    document.getElementById('comprar').addEventListener('click', () => { out.textContent = 'comprado'; });
+  </script>
+</body></html>
