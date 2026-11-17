@@ -938,12 +938,14 @@ class Tabs extends EventEmitter {
   groupMenu(groupId) {
     const g = this.group(groupId);
     if (!g || g.id === YOU || !g.window) return;
-    Menu.buildFromTemplate([
+    const items = [
       ...this.groupMoveItems(groupId),
       // ── End session (main.js passes it to the window, which asks first as the × does) ──
       { type: 'separator' },
       { label: 'End session', click: () => this.emit('end-session', g.id) },
-    ]).popup({ window: g.window.win });
+    ];
+    this.emit('group-menu', g, items); // main.js adds "Take over" / "Let Claude continue"
+    Menu.buildFromTemplate(items).popup({ window: g.window.win });
   }
 
   // What the window chrome needs to draw the tab strip and toolbar: the tabs

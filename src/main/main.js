@@ -394,6 +394,11 @@ function start() {
   tabs.on('change', pushState);
   tabs.on('focus', pushState); // questions follow the window the user is in
   tabs.on('end-session', (id) => handlers['group:end'](id)); // "End session" in a group's menu
+  // A session's group is paused and let go on from its menu, whichever tab is on screen.
+  tabs.on('group-menu', (g, items) => items.unshift(
+    { label: g.paused ? 'Let Claude continue' : 'Take over', click: () => handlers.pause({ group: g.id, on: !g.paused }) },
+    { type: 'separator' },
+  ));
   tabs.on('point', (tab, point) => actions.picker.at(tab, point));
   // A window left without tabs (its last one moved away) closes.
   tabs.on('empty', (w) => setImmediate(() => { if (!w.win.isDestroyed()) w.win.close(); }));
@@ -556,6 +561,13 @@ async function testHook({ ui, arg }) {
   if (ui === 'group:to-window') { tabs.groupToWindow(arg.group, windowById(arg.window)); return 'ok'; }
   if (ui === 'to-new-window') { tabs.emit('to-new-window', { tab: tabs.get(arg.id), group: arg.group }); return 'ok'; }
   if (suggest.probes[ui]) return suggest.probes[ui](arg);
+  // The items of a session group's right-click menu; with click set, chooses the one so named.
+  if (ui === 'group:menu-items') {
+    const items = [];
+    tabs.emit('group-menu', tabs.group(arg.group), items);
+    if (arg.click) items.find((i) => i.label === arg.click)?.click();
+    return items.map((i) => i.label).filter(Boolean);
+  }
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
   // Runs a script in any tab's page, which the tools only allow in a session's own tabs.
   // acted: as if the user had just clicked or typed in the tab (a page may then open a tab).

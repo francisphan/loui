@@ -35,7 +35,7 @@
   --claude-wash: #F7E4F0;
   --on-claude: #FFFFFF;
   --danger: #A8281F;
-  --panel-w: 372px;
+  --panel-w: min(372px, 40vw); /* a narrow window keeps room for the toolbar */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -80,7 +80,9 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
   height: 38px;
   padding: 0 8px;
 }
-#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; }
+/* When even the smallest tabs do not fit, the strip scrolls (the wheel moves
+   it, and the tab on screen is brought into sight); nothing overprints. */
+#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow: auto hidden; scrollbar-width: none; }
 
 /* A Claude session's tab group: its name, then its tabs, tied together by a
    magenta line along the top. */
@@ -96,16 +98,23 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 .group-tag {
   display: flex;
   align-items: center;
-  flex: none;
+  gap: 3px;
+  flex: 0 1 auto; /* the name gives way along with the tabs */
+  min-width: 92px;
   height: 31px;
   padding: 0 2px 0 9px;
   color: var(--claude);
   font-size: 12.5px;
   font-weight: 650;
 }
-.group-name { max-width: 190px; overflow: hidden; padding: 2px 3px; border: 0; border-radius: 4px; background: none; white-space: nowrap; text-overflow: ellipsis; }
+.group-name { flex: 0 1 auto; min-width: 0; max-width: 190px; overflow: hidden; padding: 2px 3px; border: 0; border-radius: 4px; background: none; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
 .group.busy .group-name { font-style: italic; }
-.group.paused .group-name { color: var(--ink-2); text-decoration: line-through; }
+.group.paused .group-name { color: var(--ink-2); }
+/* What the session is doing, seen from any tab: a pulsing dot while it works,
+   a pause sign once the user has taken over. */
+.group-mark { flex: none; box-sizing: border-box; }
+.group-mark.working { width: 8px; height: 8px; border-radius: 50%; background: var(--claude); animation: breathe 1.4s ease-in-out infinite; }
+.group-mark.paused { width: 8px; height: 9px; border: solid var(--ink); border-width: 0 2.5px; }
 .group-tag .close { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; opacity: 0; }
 .group-tag:hover .close, .group-tag .close:focus-visible { opacity: 1; }
 .group-tag .close:hover { background: var(--claude-wash); }
@@ -128,12 +137,14 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 }
 .tab:hover { background: color-mix(in srgb, var(--paper) 50%, transparent); }
 .tab.active { background: var(--paper); color: var(--ink); }
-.tab img, .tab .dot { flex: none; width: 14px; height: 14px; }
+.tab img, .tab .dot, .tab .letter { flex: none; width: 14px; height: 14px; }
+/* A page without an icon: its site's first letter on a small tile. */
+.tab .letter { display: grid; place-items: center; border-radius: 3px; background: var(--rule); color: var(--ink); font-size: 10px; font-weight: 700; line-height: 1; }
 .tab .dot { box-sizing: border-box; border: 1.5px solid var(--rule); border-radius: 50%; scale: .7; }
 .tab.loading .dot { border-color: var(--rule); border-top-color: var(--focus); scale: 1; animation: turn .8s linear infinite; }
 .tab .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* A sleeping tab: its page is unloaded until it is opened. */
-.tab.asleep img, .tab.asleep .dot, .tab.asleep .title { opacity: .5; }
+.tab.asleep img, .tab.asleep .dot, .tab.asleep .letter, .tab.asleep .title { opacity: .65; }
 .tab.asleep img { filter: grayscale(1); }
 .tab .close {
   flex: none;
@@ -149,7 +160,21 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 }
 .tab:hover .close, .tab.active .close, .tab .close:focus-visible { opacity: 1; }
 .tab .close:hover { background: var(--shoal); }
+/* A tab squeezed small has no room for its close button, which would otherwise
+   lie over the next tab; the tab on screen stays wide enough to keep its own. */
+.tab { container-type: inline-size; }
+.tab.active:not(.pinned) { min-width: 62px; }
+@container (max-width: 61px) { .tab .close { display: none; } }
 #newtab { align-self: center; margin-top: 4px; }
+/* Along the top a group's name and tabs sit in the strip itself, so that each
+   gives way down to its own smallest size and no further (a group squeezed as
+   one box let them overprint). The magenta line runs across them unbroken. */
+#tabrow .group { display: contents; }
+#tabrow .group > * { box-shadow: inset 0 2px 0 var(--claude); }
+#tabrow .group > .group-tag { margin-left: 6px; border-radius: 7px 0 0 0; }
+#tabrow .group > .tab { margin-left: -2px; border-radius: 0; }
+#tabrow .group > .tab:last-child { border-radius: 0 7px 0 0; }
+#tabrow .group.drop-into > * { background: var(--claude-wash); }
 
 /* The user's tabs, pinned ones first. Along the top these wrappers do not
    draw; they only mark where a dragged tab can land (see ui.js). */
@@ -203,7 +228,7 @@ body.vertical #newtab { display: none; }
 /* Its toggle sits in the tab row above it, which along the top holds the tabs. */
 #sidebar-toggle { align-self: center; margin: 4px 0 0 -2px; }
 #sidebar-toggle[hidden] { display: none; }
-#sidebar #tabs { flex-direction: column; align-items: stretch; gap: 1px; }
+#sidebar #tabs { flex-direction: column; align-items: stretch; gap: 1px; overflow: visible; }
 #sidebar .pins {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
@@ -240,11 +265,10 @@ body.vertical #newtab { display: none; }
   border-radius: 0 7px 7px 0;
   box-shadow: inset 2px 0 0 var(--claude);
 }
-#sidebar .group-tag { gap: 6px; height: 28px; padding: 0 0 0 6px; }
-#sidebar .group-name { flex: 0 1 auto; min-width: 0; }
+#sidebar .group-tag { gap: 6px; min-width: 0; height: 28px; padding: 0 0 0 6px; }
 #sidebar .group-status {
   display: block;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -253,7 +277,8 @@ body.vertical #newtab { display: none; }
   font-weight: 400;
 }
 #sidebar .group.busy .group-status { font-style: italic; } /* in motion */
-#sidebar .group.paused .group-status { color: var(--ink-2); }
+#sidebar .group.paused .group-status { flex: none; color: var(--ink); } /* "Paused" stays whole; the name takes the ellipsis */
+#sidebar .group-tag .close { margin-left: auto; }
 /* In a list the drop bar runs across, between rows; the pinned icons still flow in rows. */
 #sidebar .tab.drop-before::after, #sidebar .tab.drop-after::after { inset: auto 6px; width: auto; height: 2px; }
 #sidebar .tab.drop-before::after { top: -2px; }
@@ -263,7 +288,8 @@ body.vertical #newtab { display: none; }
 #sidebar .pins .tab.drop-after::after { right: -3px; }
 body.sidebar-collapsed:not(.sidebar-peek) #sidebar .tab,
 body.sidebar-collapsed:not(.sidebar-peek) .side-new { justify-content: center; padding: 0; }
-body.sidebar-collapsed:not(.sidebar-peek) #sidebar :is(.tab .title, .tab .close, .side-new .title, .group-tag) { display: none; }
+body.sidebar-collapsed:not(.sidebar-peek) #sidebar :is(.tab .title, .tab .close, .side-new .title, .group-name, .group-status, .group-tag .close, .group-tag:not(:has(.group-mark))) { display: none; }
+body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group-tag { justify-content: center; height: 14px; padding: 0; }
 body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; border-radius: 0 0 7px 7px; box-shadow: inset 0 2px 0 var(--claude); }
 
 /* Who is driving. Sits in the spare end of the tab row so that it can come
@@ -273,8 +299,9 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
   align-items: center;
   gap: 8px;
   align-self: center;
-  flex: none; /* tabs give way before the status does */
-  max-width: 50%;
+  flex: 0 1000 auto; /* its label gives way first, then the tabs; the state and the button stay */
+  min-width: min-content;
+  max-width: min(100%, max(50%, 300px));
   height: 26px;
   margin: 4px 0 0 auto;
   padding: 0 3px 0 11px;
@@ -284,7 +311,13 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
   font-size: 13px;
 }
 #helm[hidden] { display: none; }
-#helm-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+#helm.asking { flex-shrink: 0; } /* a question is shown whole; the tabs give way to it */
+#helm-state { flex: none; font-weight: 700; white-space: nowrap; }
+#helm-state:empty { display: none; }
+/* The text may break anywhere and shows one line of it, which lets the helm give
+   way down to its state, its buttons and, in a window with room, a start of the text. */
+#helm-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; min-width: clamp(0px, 10vw - 72px, 96px); overflow: hidden; overflow-wrap: anywhere; font-weight: 500; }
+#helm button { white-space: nowrap; }
 #helm.moving #helm-text { font-style: italic; }
 #helm-no { flex: none; height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-weight: 600; }
 #helm-pip { flex: none; height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-weight: 600; }
@@ -377,6 +410,15 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 #shields:has(#shields-count:empty) { padding-right: 8px; }
 #shields.on { color: var(--focus); }
 #shields:disabled { opacity: .35; background: none; color: var(--ink-2); }
+/* A narrow toolbar (a small window with the Claude panel open) keeps the
+   address field usable: what the menus and shortcuts also reach goes first. */
+#navrow { container: navrow / inline-size; }
+@container navrow (max-width: 620px) {
+  #point span:not(.glyph) { display: none; }
+  #point { padding-right: 8px; }
+}
+@container navrow (max-width: 520px) { #device, #devtools { display: none; } }
+@container navrow (max-width: 440px) { #history-toggle { display: none; } }
 
 /* ── find bar ────────────────────────────────────────────────────────────── */
 /* A strip under the toolbar: the page area shrinks to make room for it. */
@@ -690,7 +732,7 @@ body.panel-closed #panel { display: none; }
 @keyframes turn { to { rotate: 1turn; } }
 @keyframes breathe { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) {
-  .tab.loading .dot, .reply.waiting::after { animation: none; }
+  .tab.loading .dot, .reply.waiting::after, .group-mark.working { animation: none; }
   #navrow { transition: none; }
   .download .bar span { transition: none; }
 }
