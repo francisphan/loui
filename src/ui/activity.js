@@ -85,6 +85,15 @@
     ended: 'ended', closed: 'you closed it', lost: 'connection lost',
     quit: 'cut short when Loui closed', refused: 'not let in',
   };
+  // A session still connected is "open" unless it is doing something or the
+  // user has taken over. Its group in this window is read from the window's
+  // state, which is newer than the list; one in another window from the list.
+  const LIVE = { working: 'working now', paused: 'paused', open: 'open' };
+  const statusOf = (s) => {
+    const g = state.groups.find((x) => x.id === s.session);
+    return g ? (g.paused ? 'paused' : g.busy ? 'working' : 'open') : s.status || 'open';
+  };
+  const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', unanswered: 'You did not answer, so it was stopped' };
   const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
   // "2:14 PM · 3 min · 12 steps, 1 failed · ended"
   function facts(s) {
@@ -92,7 +101,7 @@
     if (s.end) parts.push(length(s.end - s.start));
     parts.push(plural(s.steps, 'step') + (s.failed ? `, ${s.failed} failed` : ''));
     const node = el('span', 'facts', parts.join(' · '));
-    const how = s.live ? 'working now' : ENDED[s.ended];
+    const how = s.live ? LIVE[statusOf(s)] : ENDED[s.ended];
     if (how) node.append(' · ', el('span', s.live ? 'activity-live' : s.ended === 'ended' ? '' : 'activity-bad', how));
     return node;
   }
@@ -109,8 +118,35 @@
     return b;
   }
 
+  // What can be done with a session that is still connected: see its tabs,
+  // take over or hand back, and end it (asked twice: its tabs close for good).
+  let ending = null; // the session whose row asks "End session?"
+  function controls(s) {
+    const box = el('div', 'activity-controls');
+    const button = (label, onclick, cls = 'quiet') => {
+      const b = el('button', cls, label);
+      b.type = 'button';
+      b.onclick = onclick;
+      box.append(b);
+    };
+    const redraw = () => drawn && drawList(drawn);
+    if (ending === s.session) {
+      box.append(el('span', 'sure', 'End session? Its tabs close.'));
+      button('Cancel', () => { ending = null; redraw(); });
+      button('End session', () => { ending = null; loui.send('group:close', s.session); }, 'quiet danger');
+      return box;
+    }
+    const paused = statusOf(s) === 'paused';
+    button('Show tabs', () => ask({ do: 'show', id: s.session }));
+    button(paused ? 'Let Claude continue' : 'Take over', () => loui.send('pause', { group: s.session, on: !paused }));
+    button('End session', () => { ending = s.session; redraw(); });
+    return box;
+  }
+
   // ── the list ────────────────────────────────────────────────────────────
+  let drawn = null; // the list as last received, redrawn when a session's status changes
   function drawList({ items, keepDays }) {
+    drawn = { items, keepDays };
     $('activity-keep').value = String(keepDays);
     $('activity-clear').hidden = false;
     $('activity-clear').disabled = !items.length;
@@ -126,6 +162,7 @@
       open.append(el('span', 'name', nameOf(s)), facts(s));
       open.onclick = () => { view(s.id); ask({ do: 'open', id: s.id }); };
       row.append(open, small('trash', s.unreadable ? 'Delete it' : `Delete what ${s.label} did`, () => ask({ do: 'delete', id: s.id })));
+      if (s.live && s.status) row.append(controls(s));
       nodes.push(row);
     }
     if (!nodes.length) {
@@ -149,7 +186,8 @@
     del.onclick = () => { ask({ do: 'delete', id: log.id }); back(); };
     tools.append(all, del);
     const s = {
-      ...log, steps: log.steps.filter((x) => x.kind === 'tool').length, failed: log.steps.filter((x) => x.error).length,
+      ...log, steps: log.steps.filter((x) => x.kind === 'tool').length,
+      failed: log.steps.filter((x) => x.error && x.kind === 'tool' && !x.stopped).length,
     };
     head.append(tools, el('span', 'activity-session-name', nameOf(log)), facts(s));
     const nodes = [head];
@@ -157,7 +195,8 @@
       const row = el('div', `activity-step step-${step.kind}`);
       row.append(el('span', 'time', time(step.at)), el('span', 'what', step.label));
       if (step.detail) row.append(el('span', 'detail', `“${step.detail}”`));
-      if (step.error && step.kind === 'tool') row.append(el('span', 'error', step.error));
+      if (step.stopped && step.kind === 'tool') row.append(el('span', 'detail', STOPPED[step.stopped] || 'Stopped'));
+      else if (step.error && step.kind === 'tool') row.append(el('span', 'error', step.error));
       if (step.url && /^https?:/i.test(step.url)) {
         // The page's title opens it in a new tab of the user's; so does its picture.
         const page = el('div', 'page');
@@ -182,6 +221,15 @@
     if (!log.steps.length) nodes.push(el('p', 'none', 'It did nothing in Loui.'));
     list.replaceChildren(...nodes);
   }
+
+  // Working, paused or open changes with the window's state, not with the log.
+  let words = '';
+  loui.on('state', () => {
+    if (!isOpen() || viewing || !drawn) return;
+    const now = drawn.items.filter((s) => s.live).map((s) => s.session + statusOf(s)).join();
+    if (now !== words) drawList(drawn);
+    words = now;
+  });
 
   loui.on('activity', (m) => {
     if (m.type === 'changed') {

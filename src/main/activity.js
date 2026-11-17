@@ -119,7 +119,9 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
     id: d.id, label: d.label, source: d.source, connector: d.connector || null,
     start: d.start, end: d.end, ended: d.ended,
     steps: d.steps.filter((s) => s.kind === 'tool').length,
-    failed: d.steps.filter((s) => s.error).length,
+    // Not what the user stopped (blocked, paused), nor a question they declined.
+    failed: d.steps.filter((s) => s.error && s.kind === 'tool' && !s.stopped).length,
+    session: d.session,
   });
   const lastTime = (d) => d.steps.reduce((t, s) => Math.max(t, s.at + (s.ms || 0)), d.start);
 
@@ -239,6 +241,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
       done(error) {
         s.ms = Date.now() - s.at;
         if (error) s.error = clip(String(error.message || error).split('\n')[0], 300);
+        if (error?.stopped) s.stopped = String(error.stopped).slice(0, 16); // by the user: not counted as failed
         const tab = tabs.current(session.group);
         if (tab && !isPrivate(tab)) {
           s.url = tab.url;
@@ -320,7 +323,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
     const log = session.source === 'panel' ? live.get('panel') : live.get(session.id);
     if (!log || log.off) return;
     const answer = ok ? 'you allowed it' : timedOut ? 'no answer, so it was stopped' : 'you blocked it';
-    log.data.steps.push({ kind: 'guard', at: Date.now(), label: `Asked before it would ${what} on ${site}: ${answer}`, error: ok ? undefined : answer });
+    log.data.steps.push({ kind: 'guard', at: Date.now(), label: `Asked before it would ${what} on ${site}: ${answer}`, error: ok ? undefined : answer, stopped: ok ? undefined : timedOut ? 'unanswered' : 'blocked' });
     dirty(log);
   }
 

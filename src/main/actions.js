@@ -37,6 +37,8 @@ function parseKey(chord) {
 
 const shorten = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const host = (u) => { try { return new URL(u).host || u; } catch { return u; } };
+// The host and path, so two pages of one site read differently; never the query, which can hold secrets.
+const place = (u) => { try { const { host, pathname } = new URL(u); return host ? host + pathname.replace(/\/$/, '') : u; } catch { return u; } };
 
 // refuse(url): why sessions may not open an address (see brave.js), or null.
 // guard: guardrails.js, which asks the user before consequential actions.
@@ -228,7 +230,12 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         image = img.resize({ width: Math.round(width * k), height: Math.round(height * k) }).toDataURL();
       }
     }
-    await guard.confirm(c.session, tab, found, image);
+    // Once answered the step is named for what it does, not for the wait.
+    try {
+      await guard.confirm(c.session, tab, found, image);
+    } finally {
+      c.say(found.what);
+    }
   }
 
   // session: the reader. A pick in one of the user's own tabs can be looked at
@@ -255,7 +262,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
   // name -> { label(args): what Claude is doing, shown to the user; run(args) }
   const handlers = {
     navigate: {
-      label: (a) => `opening ${shorten(host(toUrl(a.url)))}`,
+      label: (a) => `opening ${shorten(place(toUrl(a.url)))}`,
       async run({ url, new_tab }, c) {
         const to = toUrl(url);
         if (!/^(https?:|about:blank$)/i.test(to)) {
@@ -592,7 +599,10 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
           begin(item) {
             if (tabs.get(tab.id) !== tab || !tab.wc) return prompts.answer(item.id, null); // closed while waiting
             tabs.select(tab.id);
-            picker.start(tab, message).then((found) => prompts.answer(item.id, found), () => prompts.answer(item.id, null));
+            // Set aside for another question (prompts.next), this showing's pointing answers nothing.
+            const turn = item.turn;
+            const done = (found) => { if (item.turn === turn) prompts.answer(item.id, found); };
+            picker.start(tab, message).then(done, () => done(null));
           },
           stop: () => picker.cancel(),
         });

@@ -102,6 +102,78 @@ test('what is typed into a password field is not kept; other typed text is', asy
   s.end();
 });
 
+test('what the user blocked or paused is told apart from what failed, in the feed and in the count', async () => {
+  const feedOf = (id) => chrome(`[...document.querySelectorAll('#feed .did')]
+    .filter((n) => n.dataset.session === ${JSON.stringify(id)}).map((n) => n.className.replace(' live', '') + ': ' + n.textContent)`);
+  const s = b.as('a5', 'Careful');
+  const page = await s.text('navigate', { url: b.base + '/guard.html' });
+  const ref = refOf(page, /button "Delete" \[(e\d+)\]/);
+  const clicking = s.text('click', { ref });
+  const g = await until(async () => (await b.state()).guard, 'the guardrail question');
+  await b.ui('guard:answer', { id: g.id, choice: 'block' });
+  await assert.rejects(clicking, /The user declined/);
+  await b.ui('pause', { group: 'a5', on: true });
+  await assert.rejects(s.text('click', { ref }), /paused you/);
+  await assert.rejects(s.text('click', { ref }), /paused you/); // said once in the feed, however often it tries
+  await b.ui('pause', { group: 'a5', on: false });
+  await assert.rejects(s.text('click', { ref: 'e9999' }), /no longer on the page/);
+  await s.text('navigate', { url: b.base + '/second.html' });
+  await s.text('history', { action: 'sideways' }); // a step with no label draws nothing
+  const where = new URL(b.base).host;
+  const lines = await until(async () => { const l = await feedOf('a5'); return l.length >= 5 && l; }, 'the steps in the feed');
+  assert.deepEqual(lines, [
+    `did: Opening ${where}/guard.html`,
+    'did stopped: You blocked this: click "Delete"',
+    'did stopped: Paused by you: clicking',
+    "did failed: Clicking (didn't work: e9999 is no longer on the page. Take a new snapshot.)",
+    `did: Opening ${where}/second.html`,
+  ]);
+  const item = await until(async () => (await list()).find((x) => x.label === 'Careful' && x.steps >= 6 && x), 'the log');
+  assert.equal(item.failed, 1, 'only the click that went wrong');
+  const log = await logOf('Careful');
+  assert.deepEqual(log.steps.filter((x) => x.stopped).map((x) => `${x.kind} ${x.stopped}`), ['tool blocked', 'guard blocked', 'tool paused']);
+  s.end();
+  await until(async () => (await feedOf('a5')).at(-1) === 'did ended: Session ended', 'the line that says it ended');
+});
+
+test('the Sessions panel says whether a live session is working, paused or open, and can show, pause and end it', async () => {
+  const s = b.as('a6', 'Idle');
+  await s.text('navigate', { url: b.base + '/second.html' });
+  await chrome("document.getElementById('activity-open').click()");
+  const row = (code) => chrome(`(() => {
+    const row = [...document.querySelectorAll('#activity-list .activity-row')].find((r) => r.querySelector('.name').textContent === 'Idle');
+    const says = (word) => !!row && row.querySelector('.facts').textContent.endsWith(' · ' + word);
+    const press = (label) => [...row.querySelectorAll('.activity-controls button')].find((x) => x.textContent === label).click();
+    return ${code};
+  })()`);
+  await until(() => row("says('open')"), 'a connected, idle session to read "open"');
+  assert.equal(await chrome(`[...document.querySelectorAll('#activity-list .activity-row')]
+    .find((r) => r.querySelector('.name').textContent === 'Careful').querySelector('.activity-controls') === null`), true, 'none for one that ended');
+
+  await row("press('Show tabs')");
+  await until(async () => (await b.state()).tabs.find((t) => t.active)?.group === 'a6', "the session's tab on screen");
+  await row("press('Take over')");
+  await until(() => row("says('paused')"), '"paused"');
+  assert.equal((await b.state()).groups.find((g) => g.id === 'a6').paused, true);
+  await row("press('Let Claude continue')");
+  await until(() => row("says('open')"), '"open" again');
+  const pick = s.text('ask_user_to_pick', { message: 'Which?' });
+  await until(() => row("says('working now')"), '"working now" while it is doing something');
+  await b.ui('pick:cancel');
+  await pick;
+
+  await row("press('End session')");
+  assert.match(await row("row.querySelector('.activity-controls .sure').textContent"), /End session\?/);
+  await row("press('Cancel')");
+  assert.ok((await b.state()).groups.some((g) => g.id === 'a6'), 'asking does not end it');
+  await row("press('End session')");
+  await row("press('End session')");
+  await until(async () => !(await b.state()).groups.some((g) => g.id === 'a6'), 'the session to end');
+  await until(async () => (await list()).find((x) => x.label === 'Idle')?.ended === 'closed', 'the log to say so');
+  await until(() => row("says('you closed it') && !row.querySelector('.activity-controls')"), 'the row to say so');
+  await chrome("document.getElementById('activity-close').click()");
+});
+
 test("a session's tools cannot reach the log", async () => {
   const names = TOOLS.map((t) => t.name);
   assert.ok(!names.some((n) => /activit|sessions/i.test(n)), `no tool reads it: ${names.join(', ')}`);

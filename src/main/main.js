@@ -393,6 +393,7 @@ function start() {
 
   tabs.on('change', pushState);
   tabs.on('focus', pushState); // questions follow the window the user is in
+  tabs.on('end-session', (id) => handlers['group:end'](id)); // "End session" in a group's menu
   tabs.on('point', (tab, point) => actions.picker.at(tab, point));
   // A window left without tabs (its last one moved away) closes.
   tabs.on('empty', (w) => setImmediate(() => { if (!w.win.isDestroyed()) w.win.close(); }));
@@ -453,8 +454,11 @@ const handlers = {
   'handoff:answer': (yes) => sessions.answer(!!yes),
   // A question from a Claude session (prompts.js): value is what the user chose.
   'prompt:answer': ({ id, value }) => prompts.answer(id, value),
+  'prompt:next': () => prompts.next(), // "N more" in the helm: the next waiting question
   'consent:revoke': (id) => consent.revoke(id),
   'group:close': (id) => sessions.end(id, 'closed'),
+  // "End session" in a group's menu: its window's chrome ends it, asking first where the × would.
+  'group:end': (id) => { const w = tabs.group(id)?.window; if (w) tabs.as(w, () => send('group:end', id)); },
   'pip:open': (id) => pip.open(id), // watch a session in a small window
   'device:menu': () => deviceMenu(),
   'relay:set': (settings) => link.configure(settings),
@@ -505,8 +509,24 @@ async function activityRequest({ do: what, id, url, days, have } = {}) {
   // The answer goes to the window that asked, which an await would forget (tabs.as()).
   const w = tabs.window();
   const reply = (payload) => tabs.as(w, () => send('activity', payload));
-  if (what === 'list') reply({ type: 'list', ...(await activity.list()) });
-  else if (what === 'open') reply({ type: 'session', id, log: await activity.get(id, have) });
+  // A session still connected: working, paused by the user, or just open.
+  const status = (s) => {
+    const g = s?.live && tabs.group(s.session);
+    if (g) s.status = g.paused ? 'paused' : g.busy > 0 ? 'working' : 'open';
+    return s;
+  };
+  if (what === 'list') {
+    const got = await activity.list();
+    got.items.forEach(status);
+    reply({ type: 'list', ...got });
+  } else if (what === 'open') reply({ type: 'session', id, log: status(await activity.get(id, have)) });
+  // "Show tabs" on a live session (id: the session's): its current tab, in the window its group is in.
+  else if (what === 'show') {
+    const g = id !== YOU && tabs.group(id);
+    const tab = g && (tabs.get(g.current) || tabs.in(id)[0]);
+    if (!tab) return;
+    tabs.reveal(tab.id);
+  }
   else if (what === 'delete') await activity.remove(id);
   else if (what === 'clear') await activity.clear();
   else if (what === 'keep') activity.keep(days);

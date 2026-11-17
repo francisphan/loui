@@ -188,7 +188,15 @@ function drawTabs() {
     close.title = `Close ${g.label}'s tabs`;
     close.setAttribute('aria-label', close.title);
     setIcon(close, 'close');
-    close.onclick = () => loui.send('group:close', g.id);
+    close.onclick = () => endGroup(g.id);
+    // Asked to end a session that is working or has several tabs: the × asks first.
+    if (ending?.id === g.id) {
+      close.className = 'close sure';
+      close.textContent = 'End session?';
+      close.title = `End ${g.label} and close its ${tabs.length === 1 ? 'tab' : `${tabs.length} tabs`}. This can't be undone. Esc cancels.`;
+      close.setAttribute('aria-label', close.title);
+      close.onkeydown = (e) => { if (e.key === 'Escape') endGroup(null); };
+    }
     const tag = el('div', 'group-tag');
     tag.title = name.title;
     tag.draggable = true;
@@ -200,6 +208,23 @@ function drawTabs() {
   }
   $('tabs').replaceChildren(...nodes);
 }
+
+// Ending a session closes all its tabs and cannot be undone, so for one that
+// is working or has more than one tab the × on its tag (and "End session" in
+// its menu) first turns into "End session?", for a few seconds; pressing that
+// ends it. id null: never mind.
+let ending = null; // { id, timer } while a group's tag asks
+function endGroup(id) {
+  const g = groupOf(id);
+  const sure = ending?.id === id;
+  clearTimeout(ending?.timer);
+  ending = null;
+  if (g && (sure || !(g.busy || state.tabs.filter((t) => t.group === id).length > 1))) loui.send('group:close', id);
+  else if (g) ending = { id, timer: setTimeout(() => endGroup(null), 5000) };
+  drawTabs();
+  $('tabs').querySelector('.group-tag .close.sure')?.focus();
+}
+loui.on('group:end', endGroup);
 
 // ── dragging tabs ───────────────────────────────────────────────────────────
 // Within a group a dragged tab is reordered. The user's tab dropped on a
@@ -392,11 +417,15 @@ function drawHelm() {
       ? 'Sessions signed in with the relay key, such as Claude Code on your machines, will not be asked again. Revoke in File › Settings.'
       : `New sessions from the ${always.name} connector will not be asked again. Revoke in File › Settings.`;
   }
-  // Questions waiting behind the one on show, named in the tooltip.
+  // Questions waiting behind the one on show, named in the tooltip. Pressing
+  // the count shows the next one (the one on show goes to the back of the
+  // line), so any of them can be answered first.
   const more = state.waiting.length + (prompt && !asked ? 1 : 0);
   $('helm-more').hidden = !more;
   $('helm-more').textContent = `${more} more`;
-  $('helm-more').title = `Also waiting: ${[...(asked ? [] : prompt ? [prompt.who] : []), ...state.waiting].join(', ')}`;
+  $('helm-more').title = `Also waiting: ${[...(asked ? [] : prompt ? [prompt.who] : []), ...state.waiting].join(', ')}. Show the next question.`;
+  // While the user is pointing for themselves the question is behind that: stopping it shows it.
+  $('helm-more').onclick = () => loui.send(asked ? 'prompt:next' : 'pick:cancel');
   // A new question takes a moment to become answerable, so that a click meant
   // for something else as it appears cannot answer it.
   const shown = asked ? prompt.id : null;
@@ -582,7 +611,20 @@ function markdown(target, source) {
 // each run of which is headed by the session's name.
 const steps = new Map();
 let liveStep = null;
+// A step the user stopped is not one that failed.
+const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', unanswered: 'You did not answer, so it was stopped' };
+const ENDED = { closed: 'You ended this session', lost: 'Session ended: connection lost' };
 loui.on('feed', (entry) => {
+  if (entry.type === 'ended') {
+    // The last line of a session's steps: its tab group has closed.
+    const last = feed.lastElementChild;
+    if (!(last?.classList.contains('did') && last.dataset.session === entry.session)) add(el('div', 'from', entry.who));
+    add(el('div', 'did ended', ENDED[entry.how] || 'Session ended')).dataset.session = entry.session;
+    liveStep?.classList.remove('live');
+    reply = null;
+    return;
+  }
+  if (!entry.text?.trim()) return; // nothing to say: no empty bullet
   let node = steps.get(entry.id);
   if (!node) {
     const last = feed.lastElementChild;
@@ -598,8 +640,10 @@ loui.on('feed', (entry) => {
     reply = null; // text after a step starts a new paragraph block
   }
   const text = entry.text.charAt(0).toUpperCase() + entry.text.slice(1);
-  node.querySelector('.what').textContent = entry.failed ? `${text} (didn't work)` : text;
+  node.querySelector('.what').textContent = entry.stopped ? `${STOPPED[entry.stopped] || 'Stopped'}: ${entry.text}`
+    : entry.failed ? `${text} (didn't work${entry.why ? `: ${entry.why}` : ''})` : text;
   node.classList.toggle('failed', !!entry.failed);
+  node.classList.toggle('stopped', !!entry.stopped);
 });
 
 let reply = null; // { node, text } for the reply being streamed

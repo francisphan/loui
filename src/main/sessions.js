@@ -45,8 +45,10 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {}, activi
     prompts.drop(id); // its questions, including one asking whether it may come in
     ended(id);
     activity?.end(id, how);
+    const s = live.get(id);
     if (!live.delete(id)) return;
     tabs.removeGroup(id);
+    feed({ type: 'ended', id: ++feedId, session: id, who: s.label, how }); // the last line of its steps in the Claude panel
   }
 
   // Runs one tool call on behalf of a session, keeping its group's status
@@ -56,14 +58,22 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {}, activi
   async function during(session, label, acts, fn) {
     const g = tabs.group(session.group);
     if (!g) throw new Error('This session has ended and its tabs are closed.');
-    if (acts && g.paused) throw new Error(PAUSED);
-    const entry = {
-      type: 'action', id: ++feedId, session: session.id,
-      who: session === panel ? null : session.label, text: label,
-    };
+    const who = session === panel ? null : session.label;
+    if (acts && g.paused) {
+      // Said once each time the user takes over, however often the session tries.
+      const e = Object.assign(new Error(PAUSED), { stopped: 'paused' });
+      if (!g.toldPaused && label) {
+        g.toldPaused = true;
+        feed({ type: 'action', id: ++feedId, session: session.id, who, text: label, stopped: 'paused' });
+        activity?.step(session, label, false)?.done(e);
+      }
+      throw e;
+    }
+    if (!g.paused) g.toldPaused = false;
+    const entry = { type: 'action', id: ++feedId, session: session.id, who, text: label };
     const show = () => {
-      g.status = entry.text;
-      feed(entry);
+      g.status = entry.text || 'working';
+      if (entry.text) feed(entry); // a step with nothing to say is not drawn
       changed();
     };
     const step = activity?.step(session, label, acts);
@@ -74,8 +84,14 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {}, activi
       step?.done(null);
       return out;
     } catch (e) {
-      entry.failed = true;
-      feed(entry);
+      // Stopped by the user (e.stopped: 'blocked', 'unanswered', 'paused') is
+      // not a failure; a failure says why, in the error's first line.
+      if (e?.stopped) entry.stopped = e.stopped;
+      else {
+        entry.failed = true;
+        entry.why = String(e?.message || e).split('\n')[0].slice(0, 160);
+      }
+      if (entry.text) feed(entry);
       step?.done(e);
       throw e;
     } finally {
