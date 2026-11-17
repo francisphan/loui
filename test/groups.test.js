@@ -157,16 +157,26 @@ test('the × on a session with several tabs asks before ending it; one idle tab 
   await s.text('navigate', { url: b.base });
   await s.text('navigate', { url: b.base + '/second.html', new_tab: true });
   const x = `document.querySelector('.group[data-group="e1"] .group-tag .close')`;
-  await chrome(`${x}.click()`);
+  await chrome(`${x}.focus(); ${x}.click()`); // a click puts the keyboard on the ×
   assert.equal(await chrome(`${x}.textContent`), 'End session?');
   assert.match(await chrome(`${x}.title`), /close its 2 tabs/);
   assert.ok((await groups()).includes('e1'), 'one click does not end it');
+  // Nor does a second click straight after: the question came up under the pointer.
+  await chrome(`${x}.click()`);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok((await groups()).includes('e1'), 'two clicks in a row do not end it');
+  assert.equal(await chrome(`${x}.textContent`), 'End session?');
+  // The name is still there beside the question, and the question has the keyboard.
+  assert.ok(await chrome(`document.querySelector('.group[data-group="e1"] .group-name').getBoundingClientRect().width`) >= 30);
+  assert.equal(await chrome(`document.activeElement === ${x}`), true);
   await chrome(`${x}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
   assert.equal(await chrome(`${x}.textContent`), '', 'Esc puts the × back');
+  assert.equal(await chrome(`document.activeElement === ${x}`), true, 'and the keyboard where it was');
   // "End session" in the group's menu asks the same way; pressing the question ends it.
   await b.ui('group:end', 'e1');
   for (let i = 0; i < 30 && (await chrome(`${x}.textContent`)) !== 'End session?'; i++) await new Promise((r) => setTimeout(r, 100));
   assert.ok((await groups()).includes('e1'));
+  await new Promise((r) => setTimeout(r, 600)); // the question takes an answer once it has been there a moment
   await chrome(`${x}.click()`);
   await gone('e1');
 

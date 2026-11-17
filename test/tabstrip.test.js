@@ -184,7 +184,7 @@ test('vertical tabs: the same tabs and groups in a sidebar, and the page makes r
   assert.equal(await chrome(`document.getElementById('tabs').parentElement.id`), 'sidebar');
   assert.deepEqual(await drawn(), strip, 'the same tabs and groups, in the same order');
   const labels = await chrome(`[...document.querySelectorAll('#sidebar .group-name')].map((n) => n.textContent)`);
-  assert.deepEqual(labels, ['Claude Code · tabs']);
+  assert.deepEqual(labels, ['Code · tabs']); // without the "Claude" every session starts with
 
   // A session's page still renders and takes clicks, placed in the smaller area.
   const page = await a.text('navigate', { url: b.base });
@@ -204,6 +204,9 @@ test('vertical tabs: the same tabs and groups in a sidebar, and the page makes r
   const narrow = await until(stage, (s) => s.x < 80);
   assert.ok(narrow.width > side.width + 150);
   assert.equal(await chrome(`getComputedStyle(document.querySelector('#sidebar .yours .tab .title')).display`), 'none');
+  // The icons sit in one column, the tab on screen's too.
+  const lefts = await chrome(`[...document.querySelectorAll('#sidebar .yours .tab > :first-child')].map((n) => Math.round(n.getBoundingClientRect().left))`);
+  assert.ok(lefts.length > 2 && lefts.every((x) => x === lefts[0]), `icons at ${lefts}`);
 });
 
 test('the tab layout and the pinned tabs are remembered after a restart', async () => {
@@ -277,13 +280,41 @@ test('several sessions in a strip short of room: names and tabs give way, and no
   for (const [, left, right] of names) assert.ok(right - left >= 40, `a name keeps ${right - left}px`);
   // The helm keeps its state and its button whole, inside the pill.
   inOrder(await boxes('#helm > *'), (await boxes('#helm'))[0]);
+  // What tells the sessions apart is what is shown: the name without "Claude", whole in the tooltip.
+  const shown = await chrome(`[...document.querySelectorAll('#tabs .group-name')].map((n) => [n.textContent, n.title])`);
+  assert.deepEqual(shown.map(([text]) => text), ['Code · release notes for the autumn update', 'Desktop · quarterly research', 'Code · agent-b migration']);
+  assert.match(shown[1][1], /^Claude Desktop · quarterly research/);
+});
+
+test('short of room, a tag is as narrow as its name and a small tab leaves its title the room of its close button', async () => {
+  const brief = b.as('s4', 'A');
+  await brief.text('navigate', { url: b.base + '/second.html?4' });
+  const tag = (id) => until(() => boxes(`#tabs .group[data-group="${id}"] .group-tag`), (l) => l.length === 1).then(([[, left, right]]) => right - left);
+  assert.ok(await tag('s4') < 60, `the tag of a session called "A" is ${await tag('s4')}px wide`);
+  assert.ok(await tag('s2') <= 105, `a long name's tag gives way to ${await tag('s2')}px`);
+  // Tabs not on screen, squeezed under 120px: no room kept for a close button that is not shown.
+  const tabs = await chrome(`[...document.querySelectorAll('#tabs .tab:not(.pinned)')].map((t) => [t.classList.contains('active'),
+    Math.round(t.getBoundingClientRect().width), getComputedStyle(t.querySelector('.close')).display, Math.round(t.querySelector('.title').getBoundingClientRect().width)])`);
+  const small = tabs.filter(([active, width]) => !active && width < 120);
+  assert.ok(small.length > 3, 'the strip is short of room');
+  for (const [, width, display, title] of small) {
+    assert.equal(display, 'none');
+    assert.ok(title >= width - 50, `a ${width}px tab shows ${title}px of its title`);
+  }
+  assert.notEqual(tabs.find(([active]) => active)[2], 'none', 'the tab on screen keeps its own');
+  brief.end();
+  await until(() => b.state(), (s) => !s.groups.some((g) => g.id === 's4'));
 });
 
 test('the helm says the state first, then who, then the button', async () => {
-  await until(helmSays, (h) => h[0] === 'Claude\'s tab'); // once its last step has had its moment
+  const idle = await until(helmSays, (h) => h[0] === 'Idle'); // once its last step has had its moment
+  assert.match(idle[1], /^Code · release notes/); // as on its tag: without "Claude"
+  assert.match(await chrome(`document.getElementById('helm-text').title`), /^Claude Code · release notes/);
+  // With room in the window, the name keeps a good start of itself rather than giving way first.
+  assert.ok(await chrome(`document.getElementById('helm-text').getBoundingClientRect().width`) >= 150);
   await b.ui('pause', { group: 's1', on: true });
   const paused = await until(helmSays, (h) => h[0] === 'Paused');
-  assert.match(paused[1], /^Claude Code · release notes/);
+  assert.match(paused[1], /^Code · release notes/);
   assert.equal(paused[paused.length - 1], 'Let Claude continue');
   // The state is shown whole however long the session's name is.
   assert.equal(await chrome(`(() => { const n = document.getElementById('helm-state'); return n.scrollWidth <= n.clientWidth; })()`), true);
@@ -329,10 +360,119 @@ test('a session at work or paused shows on its group from any tab, and its menu 
   await until(() => mark('s3'), (m) => m === null);
 });
 
-test('a tab without an icon shows its site\'s first letter', async () => {
+test('a session waiting on the user is marked as asking, not working, and its question reads state first', async () => {
+  const [own] = await mine();
+  await b.ui('tab:select', own.id);
+  const mark = (id) => chrome(`(() => { const m = document.querySelector('#tabs .group[data-group="${id}"] .group-mark'); return m ? [m.className, m.textContent, m.getAttribute('aria-label')] : null; })()`);
+  // One asks for the tab on screen, another asks him to point: both wait on him.
+  const handoff = s2.text('request_tab', {}).catch((e) => e.message);
+  await until(helmSays, (h) => h[0] === 'Asks for this tab');
+  const pick = s3.text('ask_user_to_pick', { message: 'Which button submits the order?' }).catch((e) => e.message);
+  await until(() => mark('s3'), (m) => m?.[0] === 'group-mark asking');
+  assert.deepEqual(await mark('s2'), ['group-mark asking', '?', 'Asking']);
+  assert.equal(await mark('s1'), null);
+  assert.equal((await b.state()).groups.find((g) => g.id === 's3').asking, true);
+  // A short name fills the helm: no blank kept inside it.
+  const [said, room] = await chrome(`(() => { const n = document.getElementById('helm-text'); const r = document.createRange(); r.selectNodeContents(n);
+    return [n.textContent, n.getBoundingClientRect().width - r.getBoundingClientRect().width]; })()`);
+  assert.equal(said, 'Desktop · quarterly research');
+  assert.ok(room < 3, `${room}px of blank after the name`);
+  await until(() => chrome(`document.getElementById('helm-no').disabled`), (d) => d === false);
+  await chrome(`document.getElementById('helm-no').click()`);
+  await handoff;
+  await until(() => mark('s2'), (m) => m === null || m[0] !== 'group-mark asking');
+  // The pointing question: state, then who, then the message, with no full stop after its question mark.
+  const asks = await until(helmSays, (h) => h[0] === 'Asks you to point');
+  assert.equal(asks[1], 'Code · agent-b migration: Which button submits the order? Esc cancels.');
+  await b.ui('pick:cancel');
+  await pick;
+  await until(() => mark('s3'), (m) => m === null || m[0] !== 'group-mark asking');
+  await b.ui('tab:select', own.id);
+});
+
+test('a tab without an icon shows a letter: its site\'s name\'s, or its title\'s on a tile tinted by port for a local page', async () => {
   await b.ui('tab:new', b.base + '/second.html?letter');
   const t = await until(() => b.state().then((s) => s.tabs.find((x) => x.active)), (x) => x && !x.loading && x.url.includes('letter'));
-  assert.equal(await chrome(`document.querySelector('.tab[data-id="${t.id}"] .letter')?.textContent ?? null`), '1'); // 127.0.0.1
+  const tile = await chrome(`(() => { const n = document.querySelector('.tab[data-id="${t.id}"] .letter'); return n && [n.textContent, n.className]; })()`);
+  assert.equal(tile[0], t.title[0].toUpperCase()); // not "1" for 127.0.0.1
+  assert.match(tile[1], /^letter hue-[0-4]$/);
+  const letter = (title, url) => chrome(`(() => { const n = letterOf(${JSON.stringify({ title, url })}); return n.textContent + n.className.replace('letter', ''); })()`);
+  assert.equal(await letter('Sign in', 'https://accounts.google.com/signin'), 'G');
+  assert.equal(await letter('News', 'https://www.bbc.co.uk/news'), 'B');
+  assert.equal(await letter('Diario', 'https://tienda.clarin.com.ar/'), 'C');
+  assert.equal(await letter('Docs', 'https://docs.github.io/x'), 'G');
+  assert.equal(await letter('Wiki', 'http://intranet/'), 'I');
+  assert.equal(await letter('Pung', 'http://localhost:5173/'), 'P hue-0');
+  assert.equal(await letter('Loui relay', 'http://127.0.0.1:7332/'), 'L hue-3');
+  assert.equal(await letter('Router', 'http://192.168.1.1/'), 'R');
+  assert.equal(await letter('http://localhost:8000/', 'http://localhost:8000/'), 'L hue-1');
+  assert.equal(await letter('Notes', ''), 'N');
+});
+
+test('the address field follows the tab on screen while it has the keyboard, unless something was typed', async () => {
+  const [first, second] = (await mine()).filter((x) => !x.pinned && x.url);
+  const field = () => chrome(`(() => { const a = document.getElementById('address'); return [a.value, a.selectionStart, a.selectionEnd, document.activeElement === a]; })()`);
+  await b.ui('tab:select', first.id);
+  await until(field, ([value]) => value === first.url);
+  await chrome(`document.getElementById('address').focus()`); // Ctrl+L
+  await b.ui('tab:select', second.id);
+  // The new tab's address, selected: Enter would not load the old one here.
+  await until(field, ([value]) => value === second.url);
+  assert.deepEqual(await field(), [second.url, 0, second.url.length, true]);
+  // What he has typed stays, whichever tab comes on screen.
+  await chrome(`(() => { const a = document.getElementById('address'); a.value = 'half an addr'; a.dispatchEvent(new InputEvent('input', { bubbles: true })); })()`);
+  await b.ui('tab:select', first.id);
+  await until(() => b.state(), (s) => s.tabs.find((x) => x.active)?.id === first.id);
+  await pause(200);
+  assert.equal((await field())[0], 'half an addr');
+  await chrome(`document.getElementById('address').blur()`);
+  await b.ui('tab:select', second.id);
+  await until(field, ([value]) => value === second.url);
+});
+
+test('a strip with more tabs than it shows says so: faded edges, buttons that page, and sessions kept in sight', async () => {
+  const before = ids(await mine());
+  for (let i = 0; i < 24; i++) await b.ui('tab:new', `${b.base}/plain.html?${i}`);
+  const [own] = await mine();
+  await b.ui('tab:select', own.id);
+  await b.ui('pause', { group: 's1', on: true });
+  const strip = () => chrome(`(() => { const t = document.getElementById('tabs'); const shown = (id) => !document.getElementById(id).hidden;
+    return { left: t.scrollLeft, over: t.scrollWidth - t.clientWidth, cls: t.className, back: shown('tabs-back'), on: shown('tabs-on'),
+      strays: [...document.querySelectorAll('#strays .stray')].map((n) => [n.dataset.group, n.querySelector('.stray-name').textContent, n.querySelector('.group-mark')?.className ?? null]) }; })()`);
+  // On his own first tab: the sessions are off to the right, and each keeps a small tag after the strip.
+  const start = await until(strip, (s) => s.over > 200 && s.left === 0 && s.strays.length === 3 && !s.strays.some(([, , m]) => m === 'group-mark working'));
+  assert.deepEqual([start.back, start.on, start.cls], [false, true, 'more-after']);
+  assert.deepEqual(start.strays, [['s1', 'Code · release notes for the autumn update', 'group-mark paused'], ['s2', 'Desktop · quarterly research', null], ['s3', 'Code · agent-b migration', null]]);
+  const [row] = await boxes('#tabrow');
+  inOrder(await boxes('#tabs, #strays, #newtab'), row);
+  assert.equal(await chrome(`document.getElementById('tabs-on').tabIndex`), 0, 'reached with the keyboard');
+  // A session at work shows on its small tag too.
+  const working = s2.text('wait_for', { text: 'never there', timeout: 1500 }).catch(() => {});
+  await until(strip, (s) => s.strays[1]?.[2] === 'group-mark working');
+  await working;
+  // The button at the faded edge scrolls a page; the strip then stays where he put it when the window's state changes.
+  await chrome(`document.getElementById('tabs-on').click()`);
+  const paged = await until(strip, (s) => s.left > 200 && s.back);
+  assert.match(paged.cls, /more-before/);
+  await b.ui('pause', { group: 's1', on: false });
+  await until(() => b.state(), (s) => !s.groups.find((g) => g.id === 's1').paused);
+  await pause(300);
+  assert.equal((await strip()).left, paged.left, 'not pulled back to the tab on screen');
+  await chrome(`document.getElementById('tabs-back').click()`);
+  await until(strip, (s) => s.left === 0 && !s.back);
+  // A small tag brings its group into sight, and is then no longer needed.
+  await chrome(`document.querySelector('#strays .stray[data-group="s2"]').click()`);
+  const [box] = await boxes('#tabs');
+  const [tag] = await until(() => boxes('#tabs .group[data-group="s2"] .group-tag'), ([t]) => t && t[1] >= box[1] && t[2] <= box[2]);
+  assert.ok(tag);
+  assert.ok(!(await strip()).strays.some(([id]) => id === 's2'));
+  assert.equal(await chrome(`document.activeElement.className`), 'group-name');
+  // Another tab on screen: the strip follows it again.
+  const last = (await mine()).at(-1);
+  await b.ui('tab:select', last.id);
+  await until(() => boxes('#tabs .tab.active'), ([a]) => a && a[1] >= box[1] - 1 && a[2] <= box[2] + 1);
+  for (const t of await mine()) if (!before.includes(t.id)) await b.ui('tab:close', t.id);
+  await until(strip, (s) => s.over <= 0 && !s.on && !s.back && s.strays.length === 0 && s.cls === '');
 });
 
 test('at the smallest window, with the Claude panel open, the toolbar holds and the address field stays usable', async () => {

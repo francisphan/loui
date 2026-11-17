@@ -157,8 +157,13 @@ const currentState = (w = tabs.window()) => {
     tabs: tabs.summary(w),
     aimed: w.aim?.id ?? null, // a sleeping tab Ctrl+Tab is passing over (see cycle())
     working: tabs.groups.filter((g) => g.busy > 0).length, // in every window: "Restart to update" asks first
+    // The Claude panel is at work only in the window that holds the tab it is
+    // acting on: the others, a private window above all, show nothing of it.
+    // asking: the session has a question for the user, in whichever window it shows.
     groups: tabs.groups.filter((g) => g.id === YOU || g.window === w).map((g) => ({
-      id: g.id, label: g.label, source: g.source, busy: g.busy > 0, status: g.status, paused: g.paused,
+      id: g.id, label: g.label, source: g.source, status: g.status, paused: g.paused,
+      busy: g.busy > 0 && (g.id !== YOU || tabs.current(YOU)?.window === w),
+      asking: g.id !== YOU && prompts.asking(g.id),
     })),
     asking: asks ? sessions.asking() : null,
     ...(asks ? prompts.state() : { prompt: null, waiting: [] }),
@@ -604,7 +609,7 @@ async function activityRequest({ do: what, id, url, days, have } = {}) {
   // A session still connected: working, paused by the user, or just open.
   const status = (s) => {
     const g = s?.live && tabs.group(s.session);
-    if (g) s.status = g.paused ? 'paused' : g.busy > 0 ? 'working' : 'open';
+    if (g) s.status = g.paused ? 'paused' : prompts.asking(g.id) ? 'asking' : g.busy > 0 ? 'working' : 'open';
     return s;
   };
   if (what === 'list') {

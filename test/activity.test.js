@@ -136,7 +136,7 @@ test('what the user blocked or paused is told apart from what failed, in the fee
   await until(async () => (await feedOf('a5')).at(-1) === 'did ended: Session ended', 'the line that says it ended');
 });
 
-test('the Sessions panel says whether a live session is working, paused or open, and can show, pause and end it', async () => {
+test('the Sessions panel says whether a live session is working, paused, asking or idle, and can show, pause and end it', async () => {
   const s = b.as('a6', 'Idle');
   await s.text('navigate', { url: b.base + '/second.html' });
   await chrome("document.getElementById('activity-open').click()");
@@ -146,7 +146,7 @@ test('the Sessions panel says whether a live session is working, paused or open,
     const press = (label) => [...row.querySelectorAll('.activity-controls button')].find((x) => x.textContent === label).click();
     return ${code};
   })()`);
-  await until(() => row("says('open')"), 'a connected, idle session to read "open"');
+  await until(() => row("says('idle')"), 'a connected, idle session to read "idle"');
   assert.equal(await chrome(`[...document.querySelectorAll('#activity-list .activity-row')]
     .find((r) => r.querySelector('.name').textContent === 'Careful').querySelector('.activity-controls') === null`), true, 'none for one that ended');
 
@@ -156,9 +156,13 @@ test('the Sessions panel says whether a live session is working, paused or open,
   await until(() => row("says('paused')"), '"paused"');
   assert.equal((await b.state()).groups.find((g) => g.id === 'a6').paused, true);
   await row("press('Let Claude continue')");
-  await until(() => row("says('open')"), '"open" again');
+  await until(() => row("says('idle')"), '"idle" again');
+  const busy = s.text('wait_for', { text: 'never there', timeout: 1500 }).catch(() => {});
+  await until(() => row("says('working')"), '"working" while it is doing something');
+  await busy;
+  // Waiting on the user is not working: the helm's word for it.
   const pick = s.text('ask_user_to_pick', { message: 'Which?' });
-  await until(() => row("says('working now')"), '"working now" while it is doing something');
+  await until(() => row("says('asking')"), '"asking" while it has a question for the user');
   await b.ui('pick:cancel');
   await pick;
 
@@ -170,7 +174,7 @@ test('the Sessions panel says whether a live session is working, paused or open,
   await row("press('End session')");
   await until(async () => !(await b.state()).groups.some((g) => g.id === 'a6'), 'the session to end');
   await until(async () => (await list()).find((x) => x.label === 'Idle')?.ended === 'closed', 'the log to say so');
-  await until(() => row("says('you closed it') && !row.querySelector('.activity-controls')"), 'the row to say so');
+  await until(() => row("says('you ended it') && !row.querySelector('.activity-controls')"), 'the row to say so');
   await chrome("document.getElementById('activity-close').click()");
 });
 

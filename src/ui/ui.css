@@ -84,7 +84,32 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 }
 /* When even the smallest tabs do not fit, the strip scrolls (the wheel moves
    it, and the tab on screen is brought into sight); nothing overprints. */
-#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow: auto hidden; scrollbar-width: none; }
+#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow: auto hidden; scrollbar-width: none; scroll-padding-inline: 26px; }
+/* An edge with tabs beyond it fades, and has a button there that scrolls a
+   page that way. The button lies over the faded edge, so that it comes and
+   goes without moving the tabs. */
+#tabs.more-before, #tabs.more-after { mask-image: linear-gradient(to right, var(--lead, #000) 12px, #000 46px, #000 calc(100% - 46px), var(--trail, #000) calc(100% - 12px)); }
+#tabs.more-before { --lead: transparent; }
+#tabs.more-after { --trail: transparent; }
+.tabs-page { flex: none; align-self: center; position: relative; z-index: 1; display: grid; place-items: center; width: 22px; height: 24px; margin-top: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--ink-2); }
+.tabs-page[hidden] { display: none; }
+.tabs-page:hover { background: var(--shoal); color: var(--ink); }
+#tabs-back { margin-right: -24px; } /* its width and the row's gap */
+#tabs-on { margin-left: -24px; }
+/* Sessions whose tags are scrolled out of sight: each keeps a small tag here,
+   after the strip, with its state on it. */
+#strays { display: flex; align-items: center; gap: 3px; flex: none; align-self: center; max-width: 30%; overflow: hidden; margin: 4px 0 0 4px; }
+#strays:empty { display: none; }
+.stray { display: flex; align-items: center; flex: none; gap: 4px; max-width: 96px; height: 22px; padding: 0 8px; border: 0; border-radius: 11px; background: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--claude) 50%, transparent); color: var(--claude); font-size: 12px; font-weight: 650; }
+.stray:hover { background: var(--claude-wash); }
+.stray.paused { color: var(--ink-2); }
+.stray-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A short row (a small window with the Claude panel open) has room for the marks alone: of those working, asking or paused. */
+#tabrow { container: tabrow / inline-size; }
+@container tabrow (max-width: 640px) {
+  .stray { padding: 0 7px; }
+  .stray-name, .stray:not(:has(.group-mark)) { display: none; }
+}
 
 /* A Claude session's tab group: its name, then its tabs, tied together by a
    magenta line along the top. */
@@ -102,7 +127,8 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
   align-items: center;
   gap: 3px;
   flex: 0 1 auto; /* the name gives way along with the tabs */
-  min-width: 92px;
+  box-sizing: border-box;
+  min-width: min-content; /* until drawTabs() has measured it: as narrow as the name allows, down to a start of a long one */
   height: 31px;
   padding: 0 2px 0 9px;
   color: var(--claude);
@@ -117,6 +143,8 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 .group-mark { flex: none; box-sizing: border-box; }
 .group-mark.working { width: 8px; height: 8px; border-radius: 50%; background: var(--claude); animation: breathe 1.4s ease-in-out infinite; }
 .group-mark.paused { width: 8px; height: 9px; border: solid var(--ink); border-width: 0 2.5px; }
+/* Waiting on the user, which is not working: a question mark in the session's colour. */
+.group-mark.asking { color: var(--claude); font-size: 14px; font-style: normal; font-weight: 800; line-height: 1; }
 .group-tag .close { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; opacity: 0; }
 .group-tag:hover .close, .group-tag .close:focus-visible { opacity: 1; }
 .group-tag .close:hover { background: var(--claude-wash); }
@@ -146,6 +174,12 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 .tab img, .tab .dot, .tab .letter { flex: none; width: 14px; height: 14px; }
 /* A page without an icon: its site's first letter on a small tile. */
 .tab .letter { display: grid; place-items: center; border-radius: 3px; background: var(--rule); color: var(--ink); font-size: 10px; font-weight: 700; line-height: 1; }
+/* A page on this machine: its tile is tinted by its port (never magenta, which is Claude's). */
+.tab .letter.hue-0 { background: var(--focus); color: var(--paper); }
+.tab .letter.hue-1 { background: var(--ink-2); color: var(--paper); }
+.tab .letter.hue-2 { background: color-mix(in srgb, var(--danger) 35%, var(--paper)); }
+.tab .letter.hue-3 { background: var(--shoal); box-shadow: inset 0 0 0 1px var(--focus); }
+.tab .letter.hue-4 { background: var(--ink); color: var(--paper); }
 .tab .dot { box-sizing: border-box; border: 1.5px solid var(--rule); border-radius: 50%; scale: .7; }
 .tab.loading .dot { border-color: var(--rule); border-top-color: var(--focus); scale: 1; animation: turn .8s linear infinite; }
 .tab .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -172,7 +206,12 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
    lie over the next tab; the tab on screen stays wide enough to keep its own. */
 .tab { container-type: inline-size; }
 .tab.active:not(.pinned) { min-width: 62px; }
-@container (max-width: 61px) { .tab .close { display: none; } }
+/* (A container's width is its content's: the tab's less its 15px of padding.) */
+@container (max-width: 46px) { .tab .close { display: none; } }
+/* Nor does a tab that is not on screen keep room for one it does not show:
+   under 120px wide the room is the title's, and the tab closes from its menu
+   or with the middle button. */
+@container (max-width: 104px) { .tab:not(.active) .close { display: none; } }
 #newtab { align-self: center; margin-top: 4px; }
 /* Along the top a group's name and tabs sit in the strip itself, so that each
    gives way down to its own smallest size and no further (a group squeezed as
@@ -247,7 +286,7 @@ body.vertical #newtab { display: none; }
 }
 #sidebar .pins:empty { display: none; }
 #sidebar .yours { display: flex; flex-direction: column; gap: 1px; }
-#sidebar .tab { width: auto; height: 32px; border-radius: 7px; padding: 0 4px 0 10px; }
+#sidebar .tab { width: auto; min-width: 0; height: 32px; border-radius: 7px; padding: 0 4px 0 10px; }
 #sidebar .tab.pinned { height: 34px; padding: 0; background: color-mix(in srgb, var(--paper) 45%, transparent); }
 #sidebar .tab.pinned.active { background: var(--paper); }
 .side-new {
@@ -324,7 +363,7 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
 #helm-state:empty { display: none; }
 /* The text may break anywhere and shows one line of it, which lets the helm give
    way down to its state, its buttons and, in a window with room, a start of the text. */
-#helm-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; min-width: clamp(0px, 10vw - 72px, 96px); overflow: hidden; overflow-wrap: anywhere; font-weight: 500; }
+#helm-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; min-width: min(var(--full, 0px), clamp(0px, 25vw - 150px, 160px)); overflow: hidden; overflow-wrap: anywhere; font-weight: 500; }
 #helm button { white-space: nowrap; }
 #helm.moving #helm-text { font-style: italic; }
 #helm-no { flex: none; height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-weight: 600; }

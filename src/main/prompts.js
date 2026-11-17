@@ -83,6 +83,8 @@ function createPrompts({ changed }) {
       for (const item of line.filter((x) => x.session.id === sessionId)) withdraw(item);
     },
     head: () => line[0] || null,
+    // Whether a session's tab group has a question in the line, on show or waiting.
+    asking: (group) => line.some((x) => x.session.group === group),
     // For the window: the question on show, and who else is waiting.
     state() {
       const head = line[0];
