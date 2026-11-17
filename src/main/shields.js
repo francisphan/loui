@@ -111,8 +111,14 @@ function createShields({ ses, tabs, home, changed }) {
   // ── requests ──
   // A sleeping tab has no page (tab.wc is null) until it wakes; see tabs.js.
   const tabOf = (id) => tabs.list.find((t) => t.wc?.id === id);
+  // The page a request belongs to. Shields records each page's address when
+  // its navigation starts, before any of its requests: asking the tab instead
+  // can still answer about:blank for a tab that has only just been opened,
+  // which made a site's "Shields off" miss its first requests.
   const topOf = (d, tab) => {
     if (d.resourceType === 'mainFrame') return d.url;
+    const known = tab && pages.get(tab.id)?.url;
+    if (known && /^https?:/.test(known)) return known;
     try { if (d.frame?.top?.url) return d.frame.top.url; } catch {}
     return tab?.wc?.getURL() || d.referrer || '';
   };
@@ -162,15 +168,19 @@ function createShields({ ses, tabs, home, changed }) {
   // A new page starts its count, and its hiding rules, from nothing. This is
   // done when the navigation starts: by the time it is reported as done, the
   // new page's first requests may already have been blocked.
-  const newPage = () => ({ blocked: 0, seen: { classes: new Set(), ids: new Set(), hrefs: new Set() } });
+  const newPage = (url) => ({ url, blocked: 0, seen: { classes: new Set(), ids: new Set(), hrefs: new Set() } });
   function hook(tab) {
     hooked.add(tab.wc);
     const wc = tab.wc;
-    pages.set(tab.id, newPage());
+    pages.set(tab.id, newPage(wc.getURL()));
     wc.on('did-start-navigation', (e) => {
       if (!e.isMainFrame || e.isSameDocument) return;
-      pages.set(tab.id, newPage());
+      pages.set(tab.id, newPage(e.url));
       later();
+    });
+    wc.on('did-redirect-navigation', (e) => {
+      const page = pages.get(tab.id);
+      if (e.isMainFrame && page) page.url = e.url;
     });
     wc.on('dom-ready', () => hide(tab, true));
     wc.on('did-finish-load', () => {
@@ -179,6 +189,8 @@ function createShields({ ses, tabs, home, changed }) {
     });
   }
 
+  // Hooked as soon as a tab (or a woken tab's new page) exists, before it loads.
+  tabs.on('created', (tab) => { if (tab.wc && !hooked.has(tab.wc)) hook(tab); });
   tabs.on('change', () => {
     for (const tab of tabs.list) if (tab.wc && !hooked.has(tab.wc)) hook(tab);
     for (const id of pages.keys()) if (!tabs.get(id)) pages.delete(id);
