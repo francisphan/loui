@@ -47,6 +47,7 @@ const { createDefaultBrowser, urlsFrom } = require('./default-browser');
 const { createReader } = require('./reader');
 const { createPalette } = require('./palette');
 const { createSettingsWindow } = require('./settings-window');
+const { createStartPage } = require('./startpage');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -120,6 +121,7 @@ let activity;
 let palette;
 let pip;
 let settingsWindow;
+let startPage;
 let userSes;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
@@ -259,6 +261,7 @@ function privateSession() {
   errorPage.attach(ses);
   certs.attach(ses);
   reader.attach(ses);
+  startPage.attach(ses, { private: true });
   identity.attach(ses);
   privateSes = ses;
   return ses;
@@ -391,6 +394,12 @@ function start() {
   lockToApp(suggest.webContents);
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), tabs, ses: userSes, send, broadcast, changed: pushState });
   suggest.add(bookmarks);
+  startPage = createStartPage({
+    tabs, ses: userSes, settings, save: saveSettings, changed: pushState, history, bookmarks,
+    sessions: () => tabs.groups.filter((g) => g.id !== YOU).length,
+    showSessions: (w) => tabs.as(w, () => { w.win.webContents.focus(); send('show-activity'); }),
+    openSettings: () => settingsWindow.open('general'),
+  });
   passwords = createPasswords({ tabs, home: paths.home, send, changed: pushState, settings, saveSettings });
   prompts = createPrompts({
     changed: () => {
@@ -483,7 +492,7 @@ function start() {
     settings, save: saveSettings, tabs, home: paths.home, lockToApp, setTheme, setTabStrip, tabStrip,
     refreshMenu: () => Menu.setApplicationMenu(appMenu()),
     search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-    guardrails, activity, reader, updater, defaultBrowser,
+    guardrails, activity, reader, updater, defaultBrowser, startPage,
   });
 
   tabs.on('change', pushState);
@@ -760,6 +769,7 @@ async function testHook({ ui, arg }) {
   if (passwords.probes[ui]) return passwords.probes[ui](arg);
   if (taskManager.probes[ui]) return taskManager.probes[ui](arg);
   if (reader.probes[ui]) return reader.probes[ui](arg);
+  if (startPage.probes[ui]) return startPage.probes[ui](arg);
   if (activity.probes[ui]) return activity.probes[ui](arg);
   if (palette.probes[ui]) return palette.probes[ui](arg);
   if (pip.probes[ui]) return pip.probes[ui](arg);

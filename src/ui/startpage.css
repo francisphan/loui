@@ -1,0 +1,121 @@
+/* Loui's start page (src/main/startpage.js): what a new tab opens with. The
+   same chart palette as the window chrome (ui.css): water behind, paper for
+   what can be pressed, ink for words. A private window's is tinted indigo, as
+   its chrome is. Nothing here moves but the colour under the pointer. */
+:root {
+  color-scheme: light dark;
+  --water: #E6EDEF; --paper: #FBFCFC; --ink: #14242C; --ink-2: #55676F;
+  --rule: #C6D2D7; --shoal: #D3E5EA; --focus: #2B7A93;
+}
+:root.private { --water: #DDDBEB; --paper: #F3F2F9; --rule: #C4C0DA; --shoal: #D2CFE6; --focus: #4B3F8F; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --water: #101B22; --paper: #1A2832; --ink: #E3EBEE; --ink-2: #93A6AF;
+    --rule: #2B3E4A; --shoal: #23404D; --focus: #7CC4DA;
+  }
+  :root.private { --water: #17152A; --paper: #221F3A; --rule: #37335A; --shoal: #2E2A4E; --focus: #B4AAF2; }
+}
+
+html { background: var(--water); color: var(--ink); }
+body {
+  box-sizing: border-box;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font: 14px/1.4 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  cursor: default;
+}
+main { flex: 1; width: 100%; max-width: 640px; padding-top: clamp(24px, 9vh, 96px); }
+a { color: inherit; text-decoration: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.brand { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0 0 26px; user-select: none; }
+.brand img { display: block; width: 96px; height: 96px; }
+.brand h1 { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -.01em; line-height: 1.1; }
+.brand .private { padding: 2px 10px; border-radius: 10px; background: var(--focus); color: var(--water); font-size: 12.5px; font-weight: 650; }
+
+form { margin: 0 auto; max-width: 560px; }
+input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 46px;
+  padding: 0 20px;
+  border: 1px solid var(--rule);
+  border-radius: 23px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+input::placeholder { color: var(--ink-2); }
+input:hover { border-color: var(--ink-2); }
+input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+
+section { margin-top: 34px; }
+h2 { margin: 0 0 8px 6px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+ul { margin: 0; padding: 0; list-style: none; }
+
+/* Most visited: four to a row, each a letter on a tile with the site under it. */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.tiles li { position: relative; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 14px 8px 11px; border-radius: 10px; }
+.tile:hover, .tiles li:focus-within .tile { background: var(--paper); }
+.letter {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 11px;
+  background: var(--shoal); color: var(--ink); font-size: 20px; font-weight: 650; line-height: 1;
+}
+.name { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); font-size: 13px; }
+.tile:hover .name { color: var(--ink); }
+/* Takes a site off the page: shown when the pointer or the keyboard is on its tile. */
+.hide {
+  position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 20px; height: 20px;
+  border-radius: 50%; color: var(--ink-2); font-size: 15px; line-height: 1; opacity: 0;
+}
+.tiles li:hover .hide, .hide:focus-visible { opacity: 1; }
+.hide:hover { background: var(--shoal); color: var(--ink); }
+
+/* The bookmarks bar's bookmarks, while the bar itself is hidden. */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: flex; align-items: center; gap: 7px; max-width: 200px; height: 30px; box-sizing: border-box; padding: 0 12px 0 9px;
+  border: 1px solid var(--rule); border-radius: 15px; background: var(--paper); font-size: 13px;
+}
+.chip:hover { border-color: var(--ink-2); }
+.chip img, .chip .letter { flex: none; width: 16px; height: 16px; border-radius: 4px; font-size: 10px; }
+.chip span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* The weather and the news, which Loui fetched: side by side, stacked when narrow. */
+.widgets { display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 1fr); gap: 0 18px; align-items: start; }
+.widgets.one { grid-template-columns: minmax(0, 1fr); }
+.card { box-sizing: border-box; margin: 0; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); }
+.card p { margin: 0; }
+.quiet { color: var(--ink-2); font-size: 13px; }
+a.quiet { text-decoration: underline; text-underline-offset: 2px; }
+a.quiet:hover { color: var(--ink); }
+.place { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); font-size: 13px; }
+.now { margin: 2px 0 0; font-size: 40px; font-weight: 600; line-height: 1.15; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.now span { margin-left: 2px; color: var(--ink-2); font-size: 16px; font-weight: 500; letter-spacing: 0; vertical-align: 14px; }
+.sky { font-weight: 600; }
+.range { margin-top: 2px; color: var(--ink-2); font-size: 13px; }
+ul.card { padding: 6px; }
+.news a { display: block; padding: 7px 10px; border-radius: 7px; }
+.news a:hover { background: var(--shoal); }
+.headline { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; line-height: 1.3; text-wrap: pretty; }
+.meta { display: block; margin-top: 1px; color: var(--ink-2); font-size: 12.5px; }
+
+.about { max-width: 520px; margin: 26px auto 0; color: var(--ink-2); text-align: center; text-wrap: balance; }
+
+footer { padding: 28px 0 20px; color: var(--ink-2); font-size: 12.5px; text-align: center; }
+footer a { text-decoration: underline; text-underline-offset: 2px; }
+footer a:hover { color: var(--ink); }
+
+@media (max-width: 520px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .widgets { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tile, .hide, .chip, .news a, input { transition: background-color .12s ease, border-color .12s ease, opacity .12s ease; }
+}

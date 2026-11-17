@@ -68,7 +68,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     if (session.group !== YOU) return tabs.create('', { group: session.group });
     const window = tabs.current(YOU)?.window || tabs.normalWindow();
     if (!window || window.private) throw new Error('None of your own windows is open.');
-    return tabs.create('', { group: YOU, window });
+    return tabs.create('about:blank', { group: YOU, window }); // blank, as a session's: not the user's start page
   }
 
   // Call a function from src/page/lib.js inside the tab.

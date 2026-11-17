@@ -49,6 +49,11 @@ const { requestRules } = require('./requests');
 const { searchFor, searchName } = require('./search');
 
 const YOU = 'you';
+// Loui's start page (startpage.js), which the user's new tabs open with. To
+// the window it is a new tab: no address, "New tab" as its title.
+const START = 'loui-start://tab';
+const onStart = (url) => /^loui-start:/i.test(url || '');
+const blank = (url) => !url || url === 'about:blank' || onStart(url);
 const LOG_LIMIT = 500;
 const ICON_BYTES = 150 * 1024; // the most a page's icon may weigh
 const ICON_MS = 5000; // and the longest fetching it may take
@@ -261,6 +266,9 @@ class Tabs extends EventEmitter {
   // session's tabs open in its group's window.
   create(url, { group = YOU, show, device, history, asleep = false, pinned = false, window } = {}) {
     const w = group === YOU ? (window || this.window()) : this.windowFor(group);
+    // A new tab of the user's, given no address, opens with what Settings says
+    // (startpage.js). A session's new tab is blank.
+    if (!url && !history && group === YOU) url = this.newTab?.() || '';
     const tab = {
       id: ++this.seq, view: null, wc: null, group, lent: false, title: '', url: '', favicon: null,
       loading: false, console: [], network: [], pointer: null, device: null, shotScale: 1,
@@ -803,6 +811,7 @@ class Tabs extends EventEmitter {
       tab.home = null;
       if (!dest) return this.close(id); // a private tab whose private windows have all closed
     }
+    if (from.id === YOU) this.unstart(tab);
     const left = tab.window;
     // What the tab logged for whoever had it is not the next one's to read.
     tab.console = [];
@@ -819,6 +828,33 @@ class Tabs extends EventEmitter {
     this.showOther(left); // the blank tab that took a handed-over last tab's place goes on screen
     this.restAll(); // in a session's group a tab runs at full speed; back with the user it rests
     this.emit('change');
+  }
+
+  // A tab on Loui's start page stops being the user's own (handed to a
+  // session): the page lists the sites the user visits, which are not a
+  // session's to read. Its page is thrown away and a blank one made in its
+  // place, there and then: navigating it away would take a moment, in which a
+  // session could read it. The start page goes from the tab's history too.
+  unstart(tab) {
+    const nav = tab.wc && !tab.wc.isDestroyed() ? tab.wc.navigationHistory : null;
+    const entries = nav ? nav.getAllEntries() : tab.history?.entries || [];
+    const index = nav ? nav.getActiveIndex() : tab.history?.index || 0;
+    if (!onStart(tab.url) && !onStart(entries[index]?.url) && !onStart(tab.wc?.getURL())) return;
+    const history = entries.length
+      ? { entries: entries.map((e) => (onStart(e.url) ? { url: 'about:blank', title: '' } : e)), index } : null;
+    tab.url = 'about:blank';
+    tab.title = '';
+    tab.favicon = tab.icon = tab.iconUrl = null;
+    tab.history = history;
+    if (!tab.wc) return; // asleep: it wakes on the blank page
+    const shown = this.onScreen(tab);
+    this.emit('leaving', tab);
+    clearTimeout(tab.tuckTimer);
+    tab.peeking = false;
+    tab.window.win.contentView.removeChildView(tab.view);
+    if (!tab.wc.isDestroyed()) tab.wc.close();
+    tab.view = tab.wc = null;
+    this.open(tab, shown, { url: 'about:blank', history });
   }
 
   // Keeps each group's tabs together, in the order of the groups, with the
@@ -1157,8 +1193,8 @@ class Tabs extends EventEmitter {
     return this.list.filter((t) => !w || t.window === w).map((t) => ({
       id: t.id,
       group: t.group,
-      title: t.title || (t.url && t.url !== 'about:blank' ? t.url : 'New tab'),
-      url: t.url === 'about:blank' ? '' : t.url,
+      title: t.title || (blank(t.url) ? 'New tab' : t.url),
+      url: blank(t.url) ? '' : t.url,
       favicon: t.favicon,
       loading: t.loading,
       active: this.onScreen(t),
@@ -1175,4 +1211,4 @@ class Tabs extends EventEmitter {
   }
 }
 
-module.exports = { Tabs, PRESETS, toUrl, YOU };
+module.exports = { Tabs, PRESETS, toUrl, YOU, START, onStart };

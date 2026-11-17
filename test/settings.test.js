@@ -104,7 +104,12 @@ test('each section lists its settings', async () => {
   assert.deepEqual(sections.map((s) => s.title),
     ['General', 'Tabs', 'Search', 'Privacy and security', 'Passwords', 'Claude', 'Reading', 'About']);
   const of = (title) => sections.find((s) => s.title === title).settings;
-  assert.deepEqual(of('General'), ['Appearance', 'When Loui starts', 'Open Loui when I sign in', 'Default browser', 'Downloads folder', 'Ask where to save each file']);
+  assert.deepEqual(of('General'), [
+    'Appearance', 'When Loui starts', 'Open Loui when I sign in', 'Default browser',
+    'New tabs open with', 'New tab address', 'Show the sites you visit most', 'Sites taken off the start page',
+    'Show the weather', 'Your place', 'Temperature in', 'Show news headlines', 'News feeds',
+    'Downloads folder', 'Ask where to save each file',
+  ]);
   assert.deepEqual(of('Tabs'), ['Vertical tabs', 'Show the bookmarks bar', 'Put tabs to sleep after', 'Sites that are never put to sleep']);
   assert.deepEqual(of('Search'), ['Search engine', 'Search address']);
   assert.deepEqual(of('Privacy and security'), ['Sites with Shields off', 'Filter lists', 'Pop-ups', 'Site permissions', 'Sites that open in your other browser', 'Private windows']);

@@ -389,6 +389,78 @@ const SECTIONS = [
         ],
       },
       {
+        title: 'Start page', rows: [
+          choice({
+            id: 'new-tab', label: 'New tabs open with',
+            help: 'What a new tab or a new window shows: Loui\'s start page, a blank page, or an address of your choice.',
+            options: () => [['start', 'The start page'], ['blank', 'A blank page'], ['address', 'This address']],
+            get: (s) => s.general.start.choice,
+            set: (v) => {
+              if (v === 'address') setTimeout(() => document.getElementById('set-new-tab-address').focus());
+              return ['new-tab', { choice: v }];
+            },
+          }),
+          entry({
+            id: 'new-tab-address', label: 'New tab address',
+            help: 'The page a new tab opens. Until one is given, new tabs open the start page.',
+            placeholder: 'https://example.com',
+            shown: (s) => s.general.start.choice === 'address',
+            wrong: (v) => (v && !/\s/.test(v) ? null : 'Enter the address of a page.'),
+            refused: 'That is not an address Loui can open.',
+            get: (s) => s.general.start.address,
+            set: (v) => ['new-tab', { address: v }],
+          }),
+          toggle({
+            id: 'start-tiles', label: 'Show the sites you visit most',
+            help: 'Up to eight sites from your history, on the start page. Never shown in a private window.',
+            get: (s) => s.general.start.tiles, set: (on) => ['start:part', { part: 'startTiles', on }],
+          }),
+          info({
+            id: 'start-hidden', label: 'Sites taken off the start page',
+            help: 'A site you removed from Most visited stays off it until you bring them back.',
+            shown: (s) => s.general.start.hidden > 0,
+            value: (s) => (s.general.start.hidden === 1 ? '1 site' : `${s.general.start.hidden} sites`),
+            buttons: [{ id: 'start-unhide', label: 'Show them again', act: ['start:unhide'] }],
+          }),
+          toggle({
+            id: 'start-weather', label: 'Show the weather',
+            help: 'The temperature and today\'s high and low for your place, from Open-Meteo. Loui fetches it, at most every half hour.',
+            get: (s) => s.general.start.weather, set: (on) => ['start:part', { part: 'startWeather', on }],
+          }),
+          entry({
+            id: 'weather-place', label: 'Your place',
+            help: 'A town or city, for the weather. Loui looks it up once; it never asks where this computer is.',
+            placeholder: 'Mendoza',
+            shown: (s) => s.general.start.weather,
+            refused: 'No place by that name was found.',
+            get: (s) => s.general.start.place,
+            set: (v) => ['start:place', v],
+          }),
+          choice({
+            id: 'weather-units', label: 'Temperature in',
+            help: 'Degrees Fahrenheit or Celsius.',
+            shown: (s) => s.general.start.weather,
+            options: () => [['f', 'Fahrenheit'], ['c', 'Celsius']],
+            get: (s) => s.general.start.units, set: (v) => ['start:units', v],
+          }),
+          toggle({
+            id: 'start-news', label: 'Show news headlines',
+            help: 'A few headlines from the feeds below. Loui fetches them, at most every quarter of an hour.',
+            get: (s) => s.general.start.news, set: (on) => ['start:part', { part: 'startNews', on }],
+          }),
+          list({
+            id: 'news-feeds', label: 'News feeds',
+            help: 'RSS or Atom feeds the headlines come from.',
+            shown: (s) => s.general.start.news,
+            empty: 'None: no headlines are shown.',
+            items: (s) => s.general.start.feeds.map((url) => ({
+              text: url, button: 'Remove', aria: `Remove the feed ${url}`, act: ['start:feed-remove', url],
+            })),
+            add: { placeholder: 'https://example.com/feed.xml', aria: 'Feed address', act: (v) => ['start:feed-add', v], refused: 'That is already listed, or is not a web address.' },
+          }),
+        ],
+      },
+      {
         title: 'Downloads', rows: [
           info({
             id: 'downloads-folder', label: 'Downloads folder',

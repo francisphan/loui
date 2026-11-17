@@ -39,7 +39,7 @@ function hostOf(input) {
 function createSettingsWindow({
   settings, save, tabs, home, lockToApp, setTheme, setTabStrip, tabStrip, refreshMenu,
   search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-  guardrails, activity, reader, updater, defaultBrowser,
+  guardrails, activity, reader, updater, defaultBrowser, startPage,
 }) {
   let win = null;
   let sent = ''; // what the page was last sent, as text
@@ -61,6 +61,7 @@ function createSettingsWindow({
       general: {
         theme: nativeTheme.themeSource,
         startup: settings.startup === 'new' ? 'new' : 'restore',
+        start: startPage.prefs(),
         login: canLogin ? { on: login } : null,
         defaultBrowser: browser,
         downloads: downloads.prefs(),
@@ -118,6 +119,7 @@ function createSettingsWindow({
   const acts = {
     theme: (theme) => { if (['dark', 'light', 'system'].includes(theme)) setTheme(theme); },
     startup: (choice) => { settings.startup = choice === 'new' ? 'new' : 'restore'; save(); },
+    ...startPage.acts, // new-tab, start:…
     login: (on) => {
       if (!canLogin) return;
       app.setLoginItemSettings({ openAtLogin: !!on });

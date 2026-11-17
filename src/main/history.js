@@ -135,6 +135,22 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
     return out;
   }
 
+  // For the start page: the sites visited most, most visited first, as
+  // { host, url (the site's front page), visits }. hidden: hosts to leave out.
+  function top(limit = 8, hidden = []) {
+    const sites = new Map();
+    for (const e of entries.values()) {
+      let u;
+      try { u = new URL(e.url); } catch { continue; }
+      const s = sites.get(u.host) || { host: u.host, url: u.origin + '/', visits: 0, last: 0 };
+      s.visits += e.visits;
+      s.last = Math.max(s.last, e.last);
+      sites.set(u.host, s);
+    }
+    return [...sites.values()].filter((s) => !hidden.includes(s.host))
+      .sort((a, b) => b.visits - a.visits || b.last - a.last).slice(0, limit);
+  }
+
   function remove(url) {
     if (entries.delete(url)) save();
   }
@@ -144,7 +160,7 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
     save();
   }
 
-  return { visit, suggest, list, remove, clear, flush };
+  return { visit, suggest, list, top, remove, clear, flush };
 }
 
 module.exports = { createHistory };
