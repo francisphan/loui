@@ -104,7 +104,7 @@ function uninstallEntry() {
     + 'if ($e) { ConvertTo-Json @($e) -Compress } else { \'[]\' }');
   return JSON.parse(out);
 }
-const regValue = (key, name = '(default)') => ps(`$k = Get-Item -LiteralPath ${quote('Registry::' + key)} -ErrorAction SilentlyContinue; if ($k) { $k.GetValue(${name === '(default)' ? "''" : quote(name)}) }`);
+const regValue = (key, name = '(default)') => ps(`$k = Get-Item -LiteralPath ${quote('Registry::' + key)} -ErrorAction SilentlyContinue; if ($k) { $k.GetValue(${name === '(default)' ? "''" : quote(name)}) }; exit 0`);
 const running = () => ps("@(Get-Process -Name 'Loui' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like " + quote(installDir + '\\*') + ' }).Count') | 0;
 const fileVersion = (file) => ps(`(Get-Item -LiteralPath ${quote(file)}).VersionInfo.ProductVersion`);
 
@@ -453,6 +453,10 @@ step('"Restart to update" installs it and opens Loui again, on the same profile,
   console.log(`# updated and running again ${Math.round((Date.now() - started) / 1000)} s after "Restart to update"`);
   const s = await again.state();
   assert.equal(s.update.current, next, 'the new version is running');
+  // Which environment it was started with: this test's (its updater is still pointed at the
+  // server above, now closed, and fails) or the desktop's (it asks GitHub, and is up to date).
+  const checked = await until('its first check for updates', async () => { const u = (await again.state()).update; return ['failed', 'latest', 'ready'].includes(u.status) && u; }, 40000);
+  console.log(`# the updated Loui's own check for updates: ${checked.status}${checked.error ? ` (${checked.error.split('\n')[0]})` : ''}`);
   const back = await until('the tabs to come back', async () => { const l = await mine(again); return l.length === tabs.length && l; });
   assert.deepEqual(back.map((t) => t.url), tabs);
   assert.equal(await again.ui('passwords:reveal-now', (await again.ui('passwords:list')).items[0].id), PASSWORD, 'and its saved password still decrypts');
