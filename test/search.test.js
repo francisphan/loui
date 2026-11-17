@@ -70,7 +70,7 @@ test('File › Settings shows the engines, the choice, and the sites that open i
     engines: ['Brave Search', 'DuckDuckGo', 'Google', 'Kagi', 'Custom address'],
     chosen: 'custom',
     custom: `${b.base}/second.html?q=%s`,
-    sites: ['accounts.google.com'],
+    sites: [],
   });
   await b.ui('chrome:eval', 'showSettings(false)');
 });
