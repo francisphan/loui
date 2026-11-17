@@ -58,6 +58,11 @@
       <p id="downloads-empty">Files you download show up here.</p>
       <ul id="downloads-list"></ul>
     </section>
+    <div id="perm-ask" role="alertdialog" aria-labelledby="perm-text" hidden>
+      <span id="perm-text"></span>
+      <label id="perm-keep-label"><input id="perm-keep" type="checkbox"> Remember for this site</label>
+      <button id="perm-block" type="button">Block</button>
+      <button id="perm-allow" type="button">Allow</button>
   </header>
 
   <main id="stage"></main>
@@ -86,6 +91,13 @@
         <button id="relay-save" type="submit">Save and connect</button>
       </div>
     </form>
+    <section id="perms" aria-labelledby="perms-title" hidden>
+      <h2 id="perms-title">Site permissions</h2>
+      <p>Choices you asked Loui to remember. Tabs in a Claude session's group are always refused, whatever is here.</p>
+      <ul id="perms-list"></ul>
+      <p id="perms-none">No remembered choices yet.</p>
+      <div class="row"><button id="perms-close" class="quiet" type="button">Close</button></div>
+    </section>
     <div id="feed">
       <div id="empty">
         <p>Ask about the page you're on, or say what to do in it. You'll see every click as it happens, and you can take over whenever you like.</p>
@@ -109,5 +121,6 @@
   <script src="ui.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
+  <script src="permissions.js"></script>
 </body>
 </html>

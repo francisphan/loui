@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Asking</title></head>
+<body><h1>Asking page</h1>
+<script>
+// Asks for what the query names (?camera,geolocation&7) as soon as it loads, and
+// puts the answers in the title, followed by the visit's number if given:
+// "camera=allowed geolocation=blocked (7)".
+const ways = {
+  camera: () => navigator.mediaDevices.getUserMedia({ video: true }),
+  microphone: () => navigator.mediaDevices.getUserMedia({ audio: true }),
+  both: () => navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+  screen: () => navigator.mediaDevices.getDisplayMedia({ video: true }),
+  notifications: () => Notification.requestPermission()
+    .then((r) => { if (r !== 'granted') throw Object.assign(new Error(r), { name: 'NotAllowedError' }); }),
+  // Only "denied" means the permission was refused; xvfb has no position to give.
+  geolocation: () => new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok,
+    (e) => (e.code === 1 ? no(Object.assign(new Error(), { name: 'NotAllowedError' })) : ok()), { timeout: 5000 })),
+};
+function ask(kind) {
+  return ways[kind]().then((s) => { s?.getTracks?.().forEach((t) => t.stop()); return 'allowed'; },
+    (e) => (e.name === 'NotAllowedError' ? 'blocked' : e.name));
+}
+async function askAll(kinds) {
+  const answers = await Promise.all(kinds.map(ask));
+  const visit = location.search.split('&')[1];
+  document.title = kinds.map((k, i) => `${k}=${answers[i]}`).join(' ') + (visit ? ` (${visit})` : '');
+  return document.title;
+}
+const wanted = location.search.slice(1).split('&')[0].split(',').filter((k) => ways[k]);
+if (wanted.length) askAll(wanted);
+</script>
+</body></html>
