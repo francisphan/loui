@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const SEND = new Set([
   'layout', 'tab:new', 'tab:select', 'tab:close', 'tab:menu', 'tab:move', 'tab:pin', 'tabs:layout', 'go', 'back', 'forward', 'reload',
-  'tab:detach', 'group:detach', 'group:menu', 'window:new', 'window:close',
+  'tab:detach', 'group:detach', 'group:menu', 'window:new', 'window:close', 'menu:show',
   'devtools', 'pick:start', 'pick:cancel', 'pick:remove', 'pause', 'handoff:answer',
   'group:close', 'device:menu', 'relay:set', 'update:install', 'chat:send', 'chat:stop', 'chat:reset',
   'find', 'find:open', 'find:close',
@@ -27,7 +27,7 @@ const LISTEN = new Set([
   'bookmarks', 'passwords',
   'activity', 'show-activity',
   'group:end',
-  'tab:ask-close', 'update:ask',
+  'tab:ask-close', 'update:ask', 'show-menu',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {

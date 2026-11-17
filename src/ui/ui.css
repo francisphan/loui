@@ -37,6 +37,12 @@
   --danger: #A8281F;
   --amber: #A66300;
   --panel-w: min(372px, 40vw); /* a narrow window keeps room for the toolbar */
+  /* The window has no title bar: Loui's top row is the top of the window, and
+     the system draws its window buttons over the right end of it (the Window
+     Controls Overlay). --wco is the room they take there: 138px on Windows 11,
+     until the window says what it is. --top-h is the height of that row. */
+  --wco: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
+  --top-h: max(40px, env(titlebar-area-height, 0px));
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -57,6 +63,8 @@
 
 html, body { height: 100%; margin: 0; }
 body {
+  box-sizing: border-box;
+  padding-top: var(--top-h); /* the top row, which spans the window above everything else */
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr);
@@ -75,36 +83,53 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 /* ── top bar ─────────────────────────────────────────────────────────────── */
 #bar { grid-column: 1; grid-row: 1; min-width: 0; }
 
+/* The top row: the tab strip or, with the tabs in the sidebar, the toolbar.
+   It spans the whole window, over the panel too, and its empty part is what
+   the window is dragged by (and maximized by, with a double click). It stops
+   short of the window buttons, with a gap that is always free to drag by. */
+#tabrow, body.vertical #navrow {
+  position: fixed;
+  inset: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--top-h);
+  padding-right: calc(var(--wco) + 40px);
+  -webkit-app-region: drag;
+}
+#tabrow > *, body.vertical #navrow > * { -webkit-app-region: no-drag; }
+body.vertical { --top-h: max(44px, env(titlebar-area-height, 0px)); }
+body.vertical #tabrow { display: none; }
 #tabrow {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 38px;
-  padding: 0 8px;
 }
 /* When even the smallest tabs do not fit, the strip scrolls (the wheel moves
    it, and the tab on screen is brought into sight); nothing overprints. */
-#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow: auto hidden; scrollbar-width: none; scroll-padding-inline: 26px; }
+#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; padding: 0 8px; overflow: auto hidden; scrollbar-width: none; scroll-padding-inline: 26px; }
 /* An edge with tabs beyond it fades, and has a button there that scrolls a
    page that way. The button lies over the faded edge, so that it comes and
    goes without moving the tabs. */
 #tabs.more-before, #tabs.more-after { mask-image: linear-gradient(to right, var(--lead, #000) 12px, #000 46px, #000 calc(100% - 46px), var(--trail, #000) calc(100% - 12px)); }
 #tabs.more-before { --lead: transparent; }
 #tabs.more-after { --trail: transparent; }
-.tabs-page { flex: none; align-self: center; position: relative; z-index: 1; display: grid; place-items: center; width: 22px; height: 24px; margin-top: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--ink-2); }
+.tabs-page { flex: none; align-self: center; position: relative; z-index: 1; display: grid; place-items: center; width: 22px; height: 24px; margin-top: 5px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--ink-2); }
 .tabs-page[hidden] { display: none; }
 .tabs-page:hover { background: var(--shoal); color: var(--ink); }
-#tabs-back { margin-right: -24px; } /* its width and the row's gap */
-#tabs-on { margin-left: -24px; }
+#tabs-back { margin: 5px -32px 0 8px; } /* over the strip's start: its width, the row's gap and the strip's padding */
+#tabs-on { margin: 5px 8px 0 -32px; }
 /* Sessions whose tags are scrolled out of sight: each keeps a small tag here,
    after the strip, with its state on it. */
-#strays { display: flex; align-items: center; gap: 3px; flex: none; align-self: center; max-width: 30%; overflow: hidden; margin: 4px 0 0 4px; }
+#strays { display: flex; align-items: center; gap: 3px; flex: none; align-self: center; max-width: 30%; overflow: hidden; margin: 5px 4px 0 0; }
 #strays:empty { display: none; }
 .stray { display: flex; align-items: center; flex: none; gap: 4px; max-width: 96px; height: 22px; padding: 0 8px; border: 0; border-radius: 11px; background: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--claude) 50%, transparent); color: var(--claude); font-size: 12px; font-weight: 650; }
 .stray:hover { background: var(--claude-wash); }
 .stray.paused { color: var(--ink-2); }
 .stray-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* A short row (a small window with the Claude panel open) has room for the marks alone: of those working, asking or paused. */
+/* Louis, at the start of the top row in either layout: part of what the
+   window is dragged by. */
+#brand { flex: none; align-self: center; width: 36px; height: 36px; margin: 0 2px 0 8px; object-fit: contain; user-select: none; }
+#tabrow > #brand, body.vertical #navrow > #brand { -webkit-app-region: drag; }
 #tabrow { container: tabrow / inline-size; }
 @container tabrow (max-width: 640px) {
   .stray { padding: 0 7px; }
@@ -129,7 +154,7 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
   flex: 0 1 auto; /* the name gives way along with the tabs */
   box-sizing: border-box;
   min-width: min-content; /* until drawTabs() has measured it: as narrow as the name allows, down to a start of a long one */
-  height: 31px;
+  height: 33px;
   padding: 0 2px 0 9px;
   color: var(--claude);
   font-size: 12.5px;
@@ -157,11 +182,11 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
   flex: 0 1 auto;
   width: 210px;
   min-width: 40px;
-  height: 31px;
+  height: 33px;
   box-sizing: border-box;
   position: relative; /* for the drop bar */
   padding: 0 5px 0 10px;
-  border-radius: 7px 7px 0 0;
+  border-radius: 8px 8px 0 0;
   color: var(--ink-2);
   font-size: 13px;
 }
@@ -171,6 +196,18 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 /* "Close tab?": the × of a session's tab asking, after Ctrl+W. */
 .tab .close.sure { display: grid; width: auto; padding: 0 7px; opacity: 1; background: var(--danger); color: var(--paper); font-size: 12px; font-weight: 650; white-space: nowrap; }
 .tab.active { background: var(--paper); color: var(--ink); }
+/* Along the top, the tab on screen runs into the toolbar below it: its foot
+   curves out into the row on either side. */
+#tabrow .tab.active::before {
+  content: '';
+  position: absolute;
+  inset: auto -8px 0;
+  height: 8px;
+  background:
+    radial-gradient(circle at 0 0, transparent 7.5px, var(--paper) 8px) left / 8px 8px no-repeat,
+    radial-gradient(circle at 100% 0, transparent 7.5px, var(--paper) 8px) right / 8px 8px no-repeat;
+  pointer-events: none;
+}
 .tab img, .tab .dot, .tab .letter { flex: none; width: 14px; height: 14px; }
 /* A page without an icon: its site's first letter on a small tile. */
 .tab .letter { display: grid; place-items: center; border-radius: 3px; background: var(--rule); color: var(--ink); font-size: 10px; font-weight: 700; line-height: 1; }
@@ -212,15 +249,15 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
    under 120px wide the room is the title's, and the tab closes from its menu
    or with the middle button. */
 @container (max-width: 104px) { .tab:not(.active) .close { display: none; } }
-#newtab { align-self: center; margin-top: 4px; }
+#newtab { align-self: center; margin-top: 5px; }
 /* Along the top a group's name and tabs sit in the strip itself, so that each
    gives way down to its own smallest size and no further (a group squeezed as
    one box let them overprint). The magenta line runs across them unbroken. */
 #tabrow .group { display: contents; }
 #tabrow .group > * { box-shadow: inset 0 2px 0 var(--claude); }
-#tabrow .group > .group-tag { margin-left: 6px; border-radius: 7px 0 0 0; }
+#tabrow .group > .group-tag { margin-left: 6px; border-radius: 8px 0 0 0; }
 #tabrow .group > .tab { margin-left: -2px; border-radius: 0; }
-#tabrow .group > .tab:last-child { border-radius: 0 7px 0 0; }
+#tabrow .group > .tab:last-child { border-radius: 0 8px 0 0; }
 #tabrow .group.drop-into > * { background: var(--claude-wash); }
 
 /* The user's tabs, pinned ones first. Along the top these wrappers do not
@@ -272,10 +309,10 @@ body.vertical #newtab { display: none; }
   background: var(--water);
 }
 #sidebar[hidden] { display: none; }
-/* Its toggle sits in the tab row above it, which along the top holds the tabs. */
-#sidebar-toggle { align-self: center; margin: 4px 0 0 -2px; }
+/* Its toggle sits at the start of the toolbar above it. */
+#sidebar-toggle { margin-right: 4px; }
 #sidebar-toggle[hidden] { display: none; }
-#sidebar #tabs { flex-direction: column; align-items: stretch; gap: 1px; overflow: visible; }
+#sidebar #tabs { flex-direction: column; align-items: stretch; gap: 1px; padding: 0; overflow: visible; }
 #sidebar .pins {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
@@ -350,7 +387,7 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
   min-width: min-content;
   max-width: min(100%, max(50%, 300px));
   height: 26px;
-  margin: 4px 0 0 auto;
+  margin: 5px 0 0 auto;
   padding: 0 3px 0 11px;
   border-radius: 13px;
   background: var(--claude-wash);
@@ -358,6 +395,9 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
   font-size: 13px;
 }
 #helm[hidden] { display: none; }
+/* With the tabs in the sidebar it sits in the toolbar, after the address field, which keeps a usable width. */
+body.vertical #helm { margin: 0 4px 0 0; max-width: 45%; }
+body.vertical #address-form { min-width: 130px; }
 #helm.asking { flex-shrink: 0; } /* a question is shown whole; the tabs give way to it */
 #helm-state { flex: none; font-weight: 700; white-space: nowrap; }
 #helm-state:empty { display: none; }
@@ -420,11 +460,11 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 #address-form { flex: 1; min-width: 0; margin: 0 6px; }
 #address {
   width: 100%;
-  height: 30px;
+  height: 32px;
   box-sizing: border-box;
   padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: 15px;
+  border-radius: 16px;
   background: var(--water);
   color: var(--ink);
   font: inherit;
@@ -465,7 +505,18 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
   #point { padding-right: 8px; }
 }
 @container navrow (max-width: 520px) { #device, #devtools { display: none; } }
-@container navrow (max-width: 440px) { #history-toggle { display: none; } }
+@container navrow (max-width: 440px) { #history-toggle, #point { display: none; } }
+/* With the tabs in the sidebar the toolbar is the top row and holds the
+   sidebar's button and the helm as well, so it gives way sooner. */
+@container navrow (max-width: 780px) {
+  body.vertical #point span:not(.glyph) { display: none; }
+  body.vertical #point { padding-right: 8px; }
+}
+/* Louis gives way first when the toolbar is the top row and short of room. */
+@container navrow (max-width: 900px) { body.vertical #brand { display: none; } }
+@container navrow (max-width: 720px) { body.vertical :is(#device, #devtools) { display: none; } }
+@container navrow (max-width: 660px) { body.vertical :is(#history-toggle, #point) { display: none; } }
+@container navrow (max-width: 600px) { body.vertical #downloads-toggle:not(.on, .running) { display: none; } }
 
 /* ── find bar ────────────────────────────────────────────────────────────── */
 /* A strip under the toolbar: the page area shrinks to make room for it. */
@@ -819,4 +870,5 @@ body.private {
   line-height: 22px;
 }
 #private-label[hidden] { display: none; }
+#tabrow #private-label { align-self: center; margin: 5px 0 0 10px; } /* at the start of the tab strip */
 body.private :is(#panel, #panel-toggle, #point, #chips) { display: none; }

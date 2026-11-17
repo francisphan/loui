@@ -12,7 +12,7 @@
 const { app } = require('electron');
 
 const FIRST_CHECK_MS = 10 * 1000;
-const EVERY_MS = 6 * 60 * 60 * 1000;
+const EVERY_MS = 60 * 60 * 1000;
 
 function createUpdater({ changed }) {
   // `electron .` during development has nothing to update.

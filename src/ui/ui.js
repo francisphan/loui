@@ -19,6 +19,7 @@ const ICON = {
   device: svg('<rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7.2 12.2h1.6"/>'),
   devtools: svg('<path d="m5 4.5-3.5 3.5L5 11.5M11 4.5l3.5 3.5-3.5 3.5M9.2 3 6.8 13"/>'),
   panel: svg('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/>'),
+  menu: svg('<path d="M8 3.5v.01M8 8v.01M8 12.5v.01" stroke-width="2.4"/>'),
   mask: svg('<path d="M1.5 5.5c2.2-1 4.3-1 6.5 0 2.2-1 4.3-1 6.5 0-.2 3.2-1.6 5-3.6 5-1.3 0-2-.9-2.9-.9s-1.6.9-2.9.9c-2 0-3.4-1.8-3.6-5z"/><path d="M4.5 7.5h1.8M9.7 7.5h1.8"/>', 13),
 };
 const setIcon = (el, name) => { el.innerHTML = ICON[name]; };
@@ -71,6 +72,7 @@ setIcon($('back'), 'back');
 setIcon($('forward'), 'forward');
 setIcon($('devtools'), 'devtools');
 setIcon($('panel-toggle'), 'panel');
+setIcon($('menu'), 'menu');
 setIcon($('point').querySelector('.glyph'), 'point');
 setIcon($('point-here').querySelector('.glyph'), 'point');
 setIcon($('device').querySelector('.glyph'), 'device');
@@ -83,6 +85,13 @@ $('devtools').onclick = () => loui.send('devtools');
 $('device').onclick = () => loui.send('device:menu');
 $('point').onclick = $('point-here').onclick = () =>
   loui.send(state.picking.active ? 'pick:cancel' : 'pick:start');
+
+// The window has no menu bar: the application menu drops from this button.
+$('menu').onclick = () => {
+  const r = $('menu').getBoundingClientRect();
+  loui.send('menu:show', { x: r.left, y: r.bottom + 2 });
+};
+loui.on('show-menu', () => $('menu').click()); // Alt+F, F10
 
 const address = $('address');
 $('address-form').onsubmit = (e) => {
@@ -237,6 +246,17 @@ function placeTabs() {
   const box = $('tabs');
   if (vertical && box.parentElement !== sidebar) sidebar.append(box);
   if (!vertical && box.parentElement !== $('tabrow')) $('tabs-back').after(box);
+  // The top row of the window is the tab strip; with the tabs in the sidebar it
+  // is the toolbar, which then holds what else the tab row had.
+  if (vertical && $('helm').parentElement !== $('navrow')) {
+    $('navrow').prepend($('brand'), $('sidebar-toggle'));
+    $('reload').after($('private-label'));
+    $('address-form').after($('helm'));
+  }
+  if (!vertical && $('private-label').parentElement !== $('tabrow')) {
+    $('tabrow').prepend($('brand'), $('sidebar-toggle'), $('private-label'));
+    $('tabrow').append($('helm'));
+  }
   box.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
   sidebar.hidden = $('sidebar-toggle').hidden = !vertical;
   document.body.classList.toggle('vertical', vertical);
