@@ -247,7 +247,8 @@ async function start(options = {}) {
   // Requests must name the relay by one of its own addresses. Other names that
   // happen to reach this machine (foo.localhost, 127.0.0.2, a DNS name pointing
   // at 127.0.0.1) are refused; the browser keeps sessions' tabs off these ones.
-  const hosts = new Set(relayOrigins.map((o) => new URL(o).host));
+  // The public name is accepted with or without its port, whichever the proxy in front passes on.
+  const hosts = new Set([...relayOrigins.map((o) => new URL(o).host), publicUrl.hostname]);
   app.use((req, res, next) => (hosts.has(String(req.headers.host).toLowerCase()) ? next() : res.status(421).send('Wrong host')));
   app.use(mcpAuthRouter({ provider: auth.provider, issuerUrl: publicUrl, resourceServerUrl: mcpUrl, resourceName: 'Loui' }));
   app.all('/approve', express.urlencoded({ extended: false }), auth.approve);
@@ -292,7 +293,7 @@ async function start(options = {}) {
 
   server.on('upgrade', (req, socket, head) => {
     if (new URL(req.url, 'http://x').pathname !== '/device') return socket.destroy();
-    if (!relayOrigins.some((o) => new URL(o).host === String(req.headers.host).toLowerCase())) return socket.destroy();
+    if (!hosts.has(String(req.headers.host).toLowerCase())) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws));
   });
 
