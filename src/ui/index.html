@@ -34,6 +34,9 @@
         <span class="glyph"></span><span id="device-label"></span>
       </button>
       <button id="update" class="tool" type="button" hidden></button>
+      <button id="downloads-toggle" class="tool" type="button" title="Downloads (Ctrl+J)" aria-label="Downloads" aria-expanded="false">
+        <span class="glyph"></span><span id="downloads-progress"></span>
+      </button>
       <button id="devtools" class="icon" type="button" title="Developer tools (F12)" aria-label="Developer tools"></button>
       <button id="panel-toggle" class="icon" type="button" title="Claude panel (Ctrl+Shift+L)" aria-label="Claude panel"></button>
     </div>
@@ -45,6 +48,16 @@
       <button id="find-next" class="icon" type="button" title="Next match (Enter)" aria-label="Next match"></button>
       <button id="find-close" class="icon" type="button" title="Close (Esc)" aria-label="Close find bar"></button>
     </div>
+    <section id="downloads" aria-label="Downloads" hidden>
+      <div id="downloads-head">
+        <h2>Downloads</h2>
+        <label class="check"><input id="downloads-ask" type="checkbox"> Ask where to save each file</label>
+        <button id="downloads-clear" class="quiet" type="button">Clear list</button>
+        <button id="downloads-close" class="quiet" type="button">Close</button>
+      </div>
+      <p id="downloads-empty">Files you download show up here.</p>
+      <ul id="downloads-list"></ul>
+    </section>
   </header>
 
   <main id="stage"></main>
@@ -95,5 +108,6 @@
 
   <script src="ui.js"></script>
   <script src="find.js"></script>
+  <script src="downloads.js"></script>
 </body>
 </html>

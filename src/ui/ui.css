@@ -457,9 +457,54 @@ body.panel-closed #panel { display: none; }
 }
 #send:disabled { opacity: .4; }
 
+/* ── downloads ───────────────────────────────────────────────────────────── */
+/* A strip under the toolbar. The page is a native view that nothing can be
+   drawn over, so the strip takes its room from the page instead. */
+#downloads-toggle.on, #downloads-toggle.running { color: var(--focus); }
+#downloads-toggle.running { font-variant-numeric: tabular-nums; }
+#downloads {
+  max-height: 34vh;
+  overflow-y: auto;
+  padding: 6px 12px 10px;
+  background: var(--paper);
+  box-shadow: inset 0 -1px 0 var(--rule);
+  font-size: 13px;
+}
+#downloads[hidden] { display: none; }
+#downloads-head { display: flex; align-items: center; gap: 10px; height: 30px; }
+#downloads-head h2 { flex: 1; margin: 0; font-size: 13.5px; font-weight: 650; }
+#downloads-head .check { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+#downloads-head [hidden] { display: none; }
+#downloads-empty { margin: 4px 0 2px; color: var(--ink-2); }
+#downloads-empty[hidden] { display: none; }
+#downloads-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.download {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto;
+  grid-template-areas: 'name by detail acts' 'bar bar bar acts';
+  align-items: center;
+  column-gap: 10px;
+  min-height: 30px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 6px;
+}
+.download:hover { background: var(--water); }
+.download .name { grid-area: name; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.download .by { grid-area: by; color: var(--claude); font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+.download .by:empty { display: none; }
+.download .detail { grid-area: detail; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.download.progressing .detail { font-style: italic; } /* in motion, as elsewhere */
+.download.cancelled .name, .download.interrupted .name, .download.gone .name { color: var(--ink-2); font-weight: 400; }
+.download .bar { grid-area: bar; height: 3px; margin: 1px 0 3px; overflow: hidden; border-radius: 2px; background: var(--shoal); }
+.download .bar[hidden] { display: none; }
+.download .bar span { display: block; height: 100%; background: var(--focus); transition: width .2s; }
+.download.paused .bar span { background: var(--ink-2); }
+.download .acts { grid-area: acts; display: flex; justify-content: flex-end; gap: 2px; min-width: 150px; }
+
 @keyframes turn { to { rotate: 1turn; } }
 @keyframes breathe { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) {
   .tab.loading .dot, .reply.waiting::after { animation: none; }
   #navrow { transition: none; }
+  .download .bar span { transition: none; }
 }

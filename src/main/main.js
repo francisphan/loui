@@ -16,6 +16,7 @@ const { createLink } = require('./link');
 const { createUpdater } = require('./updater');
 const { createRestore } = require('./restore');
 const { createFind } = require('./find');
+const { createDownloads } = require('./downloads');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -42,7 +43,7 @@ function setTheme(theme) {
 
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
 
-let win, tabs, sessions, actions, chat, link, handle, updater, restore, find;
+let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -70,6 +71,7 @@ const currentState = () => ({
   link: link.state(),
   update: updater.state(),
   find: find.state(),
+  downloads: downloads.state(),
 });
 
 function createWindow() {
@@ -93,6 +95,7 @@ function createWindow() {
 
   tabs = new Tabs(win, ses);
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
+  downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
@@ -179,6 +182,9 @@ const handlers = {
   // Closed by the user: the page they were reading takes the keyboard back.
   'find:close': () => { find.close(); active()?.wc.focus(); },
   find: (query) => find.search(query),
+  'download:act': (request) => downloads.act(request),
+  'download:ask': (on) => downloads.setAsk(on),
+  'download:clear': () => downloads.clear(),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -221,6 +227,7 @@ function appMenu() {
         { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
         { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
         { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
+        { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
         { type: 'separator' },
         ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{
