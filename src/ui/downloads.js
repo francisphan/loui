@@ -63,7 +63,9 @@ function describe(d, pace, now = Date.now()) {
 }
 
 // What each state lets the user do, as [action, label] pairs.
-function choices(d) {
+// stalled: it is running, but nothing has arrived for a while.
+function choices(d, stalled) {
+  if (d.state === 'progressing' && stalled) return [['retry', 'Retry'], ['pause', 'Pause'], ['cancel', 'Cancel']];
   if (d.state === 'progressing') return [['pause', 'Pause'], ['cancel', 'Cancel']];
   if (d.state === 'paused' || d.live) return [['resume', 'Resume'], ['cancel', 'Cancel']];
   if (d.state === 'completed' && !d.gone) return [RUNS.test(d.name) ? ['run', 'Run…'] : ['open', 'Open'], ['show', 'Show in folder'], ['remove', 'Remove']];
@@ -125,7 +127,7 @@ function drawDownloads(downloads) {
     // A download that does not say how big it is has a bar that only shows it is going.
     node.querySelector('.bar').classList.toggle('unknown', d.state === 'progressing' && !(d.total > 0) && !stalled);
     node.querySelector('.bar span').style.width = d.total > 0 ? `${Math.min(100, (100 * d.received) / d.total)}%` : '0';
-    const acts = choices(d);
+    const acts = choices(d, stalled);
     if (!acts.some((a) => a[0] === 'run')) row.sure = false;
     const key = acts.map((a) => a[0]).join() + (row.sure ? ' sure' : '');
     if (key !== row.key) {
@@ -183,12 +185,17 @@ function drawDownloads(downloads) {
   const total = running.reduce((n, d) => n + d.total, 0);
   const received = running.reduce((n, d) => n + d.received, 0);
   const toggle = $('downloads-toggle');
+  // Stalled: none of them has had anything arrive for a while. A percentage would say it is going.
+  const stalled = running.length > 0 && running.every((d) => now - rows.get(d.id).pace.since >= STALLED_MS);
   toggle.classList.toggle('running', running.length > 0);
+  toggle.classList.toggle('stalled', stalled);
   $('downloads-progress').textContent = !running.length ? ''
-    : known && total ? `${Math.floor((100 * received) / total)}%` : 'Downloading';
-  toggle.title = running.length
-    ? `Downloading ${running.length === 1 ? running[0].name : `${running.length} files`} (Ctrl+J)`
-    : 'Downloads (Ctrl+J)';
+    : stalled ? 'Stalled'
+      : known && total ? `${Math.floor((100 * received) / total)}%` : 'Downloading';
+  const what = running.length === 1 ? running[0].name : `${running.length} files`;
+  toggle.title = stalled ? `Stalled: ${what}. Open the list to retry (Ctrl+J)`
+    : running.length ? `Downloading ${what} (Ctrl+J)`
+      : 'Downloads (Ctrl+J)';
 }
 
 loui.on('state', (next) => drawDownloads(next.downloads));

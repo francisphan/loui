@@ -283,6 +283,8 @@ function createPip({ tabs, settings, save, lockToApp, pause, focusMain }) {
     if (tab.group === YOU) return;
     items.push({ label: 'Watch in a small window', click: () => open(tab.group) });
   });
+  // And on the session's name.
+  tabs.on('group-menu', (g, items) => items.unshift({ label: 'Watch in a small window', click: () => open(g.id) }));
   // Kept current by changed(), which main.js calls with every change of state
   // (tab changes included), rather than by listening to the tabs as well.
 

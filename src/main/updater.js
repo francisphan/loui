@@ -58,7 +58,9 @@ function createUpdater({ changed }) {
     state: () => ({ ...state, current: app.getVersion() }),
     check,
     install() {
-      if (state.status === 'ready') autoUpdater.quitAndInstall(true, true);
+      // Not silently: the installer shows its progress while Loui is closed,
+      // so the wait is not a blank; then it opens Loui again.
+      if (state.status === 'ready') autoUpdater.quitAndInstall(false, true);
     },
   };
 }

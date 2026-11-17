@@ -104,6 +104,36 @@ test('cancelling a download stops it and leaves no file', async () => {
   release();
 });
 
+test('a stalled download says so on the toolbar button too, and Retry starts it again', async () => {
+  await b.ui('go', `${url}/slow/stuck.bin`);
+  const d = await waitFor('stuck.bin', (x) => x.received > 0, 'made progress');
+  const chrome = (code) => b.ui('chrome:eval', code);
+  for (let i = 0; i < 50 && !(await chrome(`rows.has(${d.id})`)); i++) await new Promise((r) => setTimeout(r, 100));
+  const read = `({ button: document.getElementById('downloads-progress').textContent, tip: document.getElementById('downloads-toggle').title,
+    detail: rows.get(${d.id}).node.querySelector('.detail').textContent,
+    acts: [...rows.get(${d.id}).node.querySelectorAll('.acts button')].map((n) => n.textContent) })`;
+  const going = await chrome(`(drawDownloads(lastDownloads), ${read})`);
+  assert.deepEqual([going.button, going.acts], ['25%', ['Pause', 'Cancel']]);
+  // Nothing has arrived for ten seconds: the test moves the clock rather than wait.
+  const stalled = await chrome(`(rows.get(${d.id}).pace.since = Date.now() - 11000, drawDownloads(lastDownloads), ${read})`);
+  assert.equal(stalled.button, 'Stalled', 'not a percentage, which would say it is going');
+  assert.match(stalled.tip, /^Stalled: stuck\.bin/);
+  assert.match(stalled.detail, /^Stalled, /);
+  assert.deepEqual(stalled.acts, ['Retry', 'Pause', 'Cancel']);
+  // Retry stops it and starts it again from its address.
+  await b.ui('download:act', { id: d.id, action: 'retry' });
+  let again;
+  for (let i = 0; i < 100 && !again; i++) {
+    again = (await listed()).find((x) => /^stuck/.test(x.name) && x.id !== d.id && x.received > 0);
+    if (!again) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(again, `it started again: ${JSON.stringify(await listed())}`);
+  assert.ok(!(await listed()).some((x) => x.id === d.id), 'in place of the stalled one');
+  release();
+  await finished(again.name);
+  assert.equal(fs.statSync(path.join(files, again.name)).size, SLOW_SIZE);
+});
+
 test('a download from a Claude session\'s tab is saved too, marked with the session', async () => {
   const s = b.as('dl', 'Claude Code · demo');
   await s.call('navigate', { url: `${url}/file/data.csv` }).catch(() => {});

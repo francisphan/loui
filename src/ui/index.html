@@ -54,7 +54,7 @@
       <button id="point" class="tool" type="button" title="Show Claude what you mean by clicking it (Ctrl+Shift+C)">
         <span class="glyph"></span><span>Point</span>
       </button>
-      <button id="device" class="tool" type="button" title="Device size">
+      <button id="device" class="tool" type="button" title="Device size" hidden>
         <span class="glyph"></span><span id="device-label"></span>
       </button>
       <button id="device-reset" class="tool" type="button" title="Back to the full window size" hidden>Reset</button>
@@ -63,10 +63,11 @@
         <span class="glyph"></span><span id="downloads-progress"></span>
       </button>
       <button id="history-toggle" class="icon" type="button" title="History (Ctrl+H)" aria-label="History"></button>
-      <button id="devtools" class="icon" type="button" title="Developer tools (F12)" aria-label="Developer tools"></button>
       <button id="panel-toggle" class="icon" type="button" title="Claude panel (Ctrl+Shift+L)" aria-label="Claude panel"></button>
       <button id="menu" class="icon" type="button" title="Menu (Alt+F)" aria-label="Menu" aria-haspopup="menu"></button>
     </div>
+    <!-- With vertical tabs in a narrow window, ui.js moves #helm in here. -->
+    <div id="helmrow"></div>
     <nav id="bookmarks-bar" aria-label="Bookmarks bar" hidden>
       <div id="bookmarks-items"></div>
       <p id="bookmarks-hint">Bookmarks you put on the bar show up here. <button id="bookmarks-hint-import" type="button">Import bookmarks</button></p>
@@ -140,7 +141,7 @@
       <div id="panel-tools">
         <button id="link" class="quiet" type="button" title="Connection to other Claude sessions"><span class="lamp"></span><span id="link-text"></span></button>
         <button id="activity-open" class="quiet" type="button" title="What Claude sessions did, after they have gone">Sessions</button>
-        <button id="new-chat" class="quiet" type="button">New conversation</button>
+        <button id="new-chat" class="quiet" type="button" title="New conversation">New conversation</button>
       </div>
     </div>
     <div id="feed">

@@ -13,7 +13,7 @@
 // private window an in-memory session; neither exists until the user opens one.
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, Menu, ipcMain, session, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, nativeTheme, screen } = require('electron');
 const paths = require('../shared/paths');
 const { Tabs, PRESETS, toUrl, YOU } = require('./tabs');
 const { createSessions } = require('./sessions');
@@ -29,6 +29,7 @@ const { createDownloads } = require('./downloads');
 const { createPermissions } = require('./permissions');
 const { createHistory } = require('./history');
 const { createSuggest } = require('./suggest');
+const { createHints } = require('./hints');
 const { createSleep } = require('./sleep');
 const { createShields } = require('./shields');
 const { createSearch } = require('./search');
@@ -122,6 +123,7 @@ let palette;
 let pip;
 let settingsWindow;
 let startPage;
+let hints;
 let userSes;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
@@ -152,6 +154,11 @@ function pushState() {
       if (w.win.isDestroyed()) continue;
       const s = tabs.as(w, () => currentState(w));
       w.win.webContents.send('state', s);
+      // A question that arrives for a window whose page has the whole of it
+      // ends the full screen (of either kind), so that it is seen.
+      const asked = questions(s);
+      if ((w.full || w.wide) && asked.some((q) => !w.asked?.includes(q))) tabs.leaveFull(w);
+      w.asked = asked;
       // A guardrail question about a tab in a window the user is not in: that
       // window's frame flashes, once, as for a session's other questions.
       if (s.guard && !s.guard.elsewhere && s.guard.id !== flashedGuard) {
@@ -163,6 +170,16 @@ function pushState() {
     settingsWindow?.changed();
   });
 }
+
+// The questions a window's chrome is showing, each named so that a new one
+// can be told from one already there: a session's (the helm), a guardrail's,
+// a site's permission, the offer to save a password, and the one before the
+// last private window closes.
+const questions = (s) => [
+  s.prompt && `prompt ${s.prompt.id}`, s.asking && 'handoff', s.guard && `guard ${s.guard.id}`,
+  s.permission && `permission ${s.permission.id}`, s.passwords?.offer && `password ${s.passwords.offer.id}`,
+  s.window.closing && 'closing',
+].filter(Boolean);
 
 // Which window a question from a session shows in: "point at something" in
 // the window with the session's tabs, the others in the window the user
@@ -279,13 +296,28 @@ function endPrivate(ses) {
 
 // ── windows ─────────────────────────────────────────────────────────────────
 let firstWindow = true;
+// Where a new window goes: a little down and right of the one the user is in,
+// since two windows without title bars, one exactly on the other, look like
+// one. It stays on that window's screen: at the edge it starts again from the
+// screen's top left. {} when there is no window to go by.
+const STEP = 30;
+function besideFocused(width, height) {
+  const from = tabs?.focused?.win;
+  if (!from || from.isDestroyed() || from.isMinimized()) return {};
+  const b = from.getBounds();
+  const area = screen.getDisplayMatching(b).workArea;
+  const fits = (x, y) => x + Math.min(width, area.width) <= area.x + area.width && y + Math.min(height, area.height) <= area.y + area.height;
+  const [x, y] = fits(b.x + STEP, b.y + STEP) ? [b.x + STEP, b.y + STEP] : [area.x, area.y];
+  // Never exactly on the window it came from.
+  return x === b.x && y === b.y ? { x: x + STEP, y: y + STEP } : { x, y };
+}
 // private: a private window. blank: with a new tab of the user's (otherwise
 // the caller fills it). at: a point on screen to open it at (a tab dragged out).
 function openWindow({ private: priv = false, blank = true, at } = {}) {
   const win = new BrowserWindow({
     width: 1440,
     height: 940,
-    ...(at ? { x: Math.round(at.x - 120), y: Math.round(at.y - 20) } : {}),
+    ...(at ? { x: Math.round(at.x - 120), y: Math.round(at.y - 20) } : besideFocused(1440, 940)),
     minWidth: 720,
     minHeight: 480,
     title: priv ? 'Loui · Private' : 'Loui',
@@ -387,6 +419,8 @@ function start() {
     win: first.win, tabs, send, sources: [history],
     engine: () => { const s = search.state().search; return s.engines.find((e) => e.id === s.engine)?.label || ''; },
   });
+  hints = createHints({ win: first.win, tabs });
+  lockToApp(hints.webContents);
   certs = createCerts({ tabs, changed: pushState });
   errorPage = createErrorPage({ tabs, file: path.join(paths.home, 'game.json'), certs });
   errorPage.attach(userSes);
@@ -467,6 +501,7 @@ function start() {
       })),
       { label: 'Address suggestions', wc: suggest.webContents },
       { label: 'Command palette', wc: palette.webContents },
+      { label: 'Notes over the page', wc: hints.webContents },
       { label: 'Settings', wc: settingsWindow?.webContents() },
     ],
     claude: () => chat.process(),
@@ -552,6 +587,7 @@ const handlers = {
   'tab:close': (id) => tabs.close(id),
   'tab:reopen': () => restore.reopenClosed(),
   'tab:menu': (id) => tabs.tabMenu(id),
+  'tab:card': (where) => hints.card(where), // the pointer rests on a tab in the strip, or has left it
   // Ctrl+W. A pinned tab stays: Ctrl+W does nothing on it, as in Brave; its menu still closes it.
   // A session's tab is not closed under a session at work, and otherwise its × asks first.
   'tab:close-active': () => {
@@ -700,10 +736,9 @@ async function testHook({ ui, arg }) {
   if (suggest.probes[ui]) return suggest.probes[ui](arg);
   // The items of a session group's right-click menu; with click set, chooses the one so named.
   if (ui === 'group:menu-items') {
-    const items = [];
-    tabs.emit('group-menu', tabs.group(arg.group), items);
+    const items = tabs.groupMenuItems(arg.group);
     if (arg.click) items.find((i) => i.label === arg.click)?.click();
-    return items.map((i) => i.label).filter(Boolean);
+    return items.map((i) => (i.type === 'separator' ? '-' : i.label));
   }
   // The items of a tab's right-click menu in the tab strip, and of a page's (p: what
   // was clicked, as Electron describes it); with click set, chooses the one so named.
@@ -720,6 +755,16 @@ async function testHook({ ui, arg }) {
     ]);
   }
   if (ui === 'menu:shown') { const was = menuShown; if (arg === 'forget') menuShown = null; return was; }
+  // The menu button's own menu as it reads: each item, and a submenu's items after its name.
+  // With click set, chooses the item so named (in: the submenu it is in).
+  if (ui === 'menu:button') {
+    const items = buttonMenu();
+    const list = arg?.in ? items.find((i) => i.label === arg.in)?.submenu || [] : items;
+    if (arg?.click) list.find((i) => i.label === arg.click)?.click({ checked: true }, tabs.win);
+    return items.map((i) => (i.type === 'separator' ? '-'
+      : i.submenu ? [i.label, i.submenu.filter((x) => x.visible !== false).map((x) => (x.type === 'separator' ? '-' : x.label))] : i.label));
+  }
+  if (ui === 'window:bounds') return windowById(arg)?.win.getBounds();
   // A real key press in the window chrome, with its modifiers, which the menu's shortcuts answer to.
   if (ui === 'chrome:press') {
     const chrome = tabs.win.webContents;
@@ -743,8 +788,9 @@ async function testHook({ ui, arg }) {
   if (ui === 'tab:crash') { tabs.get(arg)?.wc?.forcefullyCrashRenderer(); return 'ok'; } // as a page's process dying
   // A real press of the mouse in a tab's page, at a point in it, as the user's own.
   if (ui === 'tab:press') {
-    const wc = tabs.get(arg.id)?.wc;
-    for (const type of ['mouseDown', 'mouseUp']) wc?.sendInputEvent({ type, x: arg.x, y: arg.y, button: 'left', clickCount: 1 });
+    const tab = tabs.get(arg.id);
+    if (tab) tab.userAt = Date.now(); // what Loui sends a page is otherwise not the user's (tabs.js)
+    for (const type of ['mouseDown', 'mouseUp']) tab?.wc?.sendInputEvent({ type, x: arg.x, y: arg.y, button: 'left', clickCount: 1 });
     return 'ok';
   }
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
@@ -752,7 +798,7 @@ async function testHook({ ui, arg }) {
   // acted: as if the user had just clicked or typed in the tab (a page may then open a tab).
   if (ui === 'tab:js') {
     const tab = tabs.get(arg.id);
-    if (tab && arg.acted) tab.actedAt = Date.now();
+    if (tab && arg.acted) tab.actedAt = tab.userAt = Date.now();
     return tab?.wc?.executeJavaScript(arg.code);
   }
   // Memory in use by all of Loui's processes, in KB, and how many there are.
@@ -772,6 +818,7 @@ async function testHook({ ui, arg }) {
   if (startPage.probes[ui]) return startPage.probes[ui](arg);
   if (activity.probes[ui]) return activity.probes[ui](arg);
   if (palette.probes[ui]) return palette.probes[ui](arg);
+  if (hints.probes[ui]) return hints.probes[ui](arg);
   if (pip.probes[ui]) return pip.probes[ui](arg);
   if (settingsWindow.probes[ui]) return settingsWindow.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
@@ -787,28 +834,97 @@ async function testHook({ ui, arg }) {
   return 'ok';
 }
 
-// The application menu, which has no bar to live in: it drops from the menu
-// button at the end of the toolbar (Alt+F and F10 press that button).
+// The menu button at the end of the toolbar (Alt+F and F10 press it) has a
+// short menu of its own, one level deep: what is used most, as in other
+// browsers. The application menu, which has no bar to live in, stays whole
+// for its shortcuts and the command palette, which lists its commands.
 let menuShown = null; // for the tests: where it was last opened
 function showMenu({ x, y } = {}) {
   const w = tabs.window();
   if (!w || !Number.isFinite(x) || !Number.isFinite(y)) return;
   menuShown = { window: w.id, x: Math.round(x), y: Math.round(y) };
   if (process.env.LOUI_TEST) return; // a native menu would wait for a pointer that is not there
-  Menu.getApplicationMenu().popup({ window: w.win, x: menuShown.x, y: menuShown.y });
+  Menu.buildFromTemplate(buttonMenu()).popup({ window: w.win, x: menuShown.x, y: menuShown.y });
 }
 
-function deviceMenu() {
+const RECENT_PAGES = 10;
+// The button's menu, for the window being served. Shortcuts are named, not
+// registered: the application menu has them.
+function buttonMenu() {
+  const w = tabs.window();
   const tab = active();
-  if (!tab) return;
+  const g = tabs.group(tab?.group);
+  const show = (channel, arg) => () => { tabs.win.webContents.focus(); send(channel, arg); };
+  const keys = (accelerator) => ({ accelerator, registerAccelerator: false });
+  const wc = tab?.device ? null : tab?.wc; // an emulated device owns its zoom
+  const seen = new Set();
+  const recent = history.list('', 60).filter((e) => !seen.has(e.url) && seen.add(e.url)).slice(0, RECENT_PAGES);
+  const short = (text) => (text.length > 60 ? text.slice(0, 59) + '…' : text);
+  return inWindow([
+    { label: 'New tab', ...keys('CmdOrCtrl+T'), click: () => handlers['tab:new']() },
+    { label: 'New window', ...keys('CmdOrCtrl+N'), click: () => openWindow() },
+    { label: 'New private window', ...keys('CmdOrCtrl+Shift+N'), click: () => openWindow({ private: true }) },
+    { type: 'separator' },
+    {
+      label: 'History',
+      submenu: [
+        ...recent.map((e) => ({ label: short(e.title || e.url).replace(/&/g, '&&'), click: () => tabs.create(e.url, { show: true }) })),
+        ...(recent.length ? [{ type: 'separator' }] : []),
+        { label: 'Show all history', ...keys('CmdOrCtrl+H'), click: show('show-history') },
+      ],
+    },
+    { label: 'Bookmarks', submenu: bookmarks.menuItems() },
+    { label: 'Downloads', ...keys('CmdOrCtrl+J'), click: show('toggle-downloads') },
+    ...passwords.fileMenu(),
+    { type: 'separator' },
+    { label: `Zoom: ${Math.round((wc ? wc.getZoomFactor() : 1) * 100)}%`, enabled: false },
+    { label: 'Zoom in', ...keys('CmdOrCtrl+='), enabled: !!wc, click: () => zoom(0.1) },
+    { label: 'Zoom out', ...keys('CmdOrCtrl+-'), enabled: !!wc, click: () => zoom(-0.1) },
+    { label: 'Reset zoom', ...keys('CmdOrCtrl+0'), enabled: !!wc, click: () => zoom(0) },
+    { label: 'Find in page…', ...keys('CmdOrCtrl+F'), click: () => handlers['find:open']() },
+    { label: 'Print…', ...keys('CmdOrCtrl+P'), click: handlers.print },
+    { type: 'separator' },
+    // For looking at a page as a developer; out of the toolbar's way.
+    { label: 'Device size', enabled: !!tab, submenu: tab ? deviceItems(tab) : [] },
+    { label: 'Developer tools', ...keys('F12'), enabled: !!tab, click: () => handlers.devtools() },
+    { type: 'separator' },
+    {
+      label: 'Claude',
+      submenu: [
+        { label: 'Sessions', click: show('show-activity') },
+        // The panel stays out of private windows.
+        {
+          label: 'Claude panel', type: 'checkbox', checked: !w?.private && w?.panelShown !== false, enabled: !w?.private,
+          ...keys('CmdOrCtrl+Shift+L'), click: () => send('toggle-panel'),
+        },
+        // For the tab on screen: the session working in it, or the panel's Claude in the user's own.
+        {
+          label: g?.paused ? 'Let Claude continue' : 'Take over', enabled: !!g && !(g.id === YOU && w?.private),
+          ...keys('CmdOrCtrl+Shift+.'), click: () => g && handlers.pause({ group: g.id, on: !g.paused }),
+        },
+        { label: 'Watch in a small window', enabled: !!g && g.id !== YOU, click: () => g && pip.open(g.id) },
+      ],
+    },
+    { type: 'separator' },
+    { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
+    { label: `About Loui ${app.getVersion()}`, click: () => app.showAboutPanel() },
+  ]);
+}
+
+// The sizes a tab's page can be shown at: the full window, or a device's.
+function deviceItems(tab) {
   const item = (label, device, checked) => ({
     label, type: 'radio', checked, click: () => tabs.setDevice(tab, device),
   });
-  Menu.buildFromTemplate([
+  return [
     item('Full window', null, !tab.device),
     ...Object.entries(PRESETS).map(([key, p]) =>
       item(`${p.label}  ${p.width}×${p.height}`, key, tab.device === p)),
-  ]).popup({ window: tab.window.win });
+  ];
+}
+function deviceMenu() {
+  const tab = active();
+  if (tab) Menu.buildFromTemplate(deviceItems(tab)).popup({ window: tab.window.win });
 }
 
 // Menu items act in the window they were chosen in.

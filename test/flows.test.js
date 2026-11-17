@@ -143,8 +143,12 @@ test('a guardrail question shows in the window the user is in, and Show tab brin
   // Show tab, pressed in the window chrome, puts the session's tab on screen in its window.
   const tab = (await stateOf(one)).tabs.find((t) => t.group === 'flow');
   assert.equal(tab.active, false);
-  await chrome("document.getElementById('guard-show').click()", two);
-  await wait('the tab to come on screen', async () => (await stateOf(one)).tabs.find((t) => t.id === tab.id).active);
+  // Pressed until it takes: the strip is drawn again as the window gets the focus.
+  await wait('the tab to come on screen', async () => {
+    await chrome("document.getElementById('guard-show').click()", two).catch(() => {});
+    await pause(150);
+    return (await stateOf(one)).tabs.find((t) => t.id === tab.id).active;
+  });
 
   // And the answer, pressed in the window chrome, reaches the session.
   await b.ui('window:focus', two);

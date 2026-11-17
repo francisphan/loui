@@ -244,9 +244,10 @@ body.vertical #tabrow { display: none; }
 .tab:hover .close, .tab.active .close, .tab .close:focus-visible { opacity: 1; }
 .tab .close:hover { background: var(--shoal); }
 /* A tab squeezed small has no room for its close button, which would otherwise
-   lie over the next tab; the tab on screen stays wide enough to keep its own. */
+   lie over the next tab; the tab on screen stays wide enough to keep its own
+   and a start of its title while the others go on giving way, as in Chrome. */
 .tab { container-type: inline-size; }
-.tab.active:not(.pinned) { min-width: 62px; }
+.tab.active:not(.pinned) { min-width: 120px; }
 /* (A container's width is its content's: the tab's less its 15px of padding.) */
 @container (max-width: 46px) { .tab .close { display: none; } }
 /* Nor does a tab that is not on screen keep room for one it does not show:
@@ -402,6 +403,14 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
 /* With the tabs in the sidebar it sits in the toolbar, after the address field, which keeps a usable width. */
 body.vertical #helm { margin: 0 4px 0 0; max-width: 45%; }
 body.vertical #address-form { min-width: 130px; }
+/* There the toolbar ends at the window buttons, so the text gives way
+   altogether (it is whole in the tooltip) before anything is pushed under them. */
+body.vertical #helm:not(.asking) #helm-state:not(:empty) + #helm-text { min-width: 0; }
+/* And in a window too narrow even for that, the helm has a row of its own
+   under the toolbar (placeHelm in ui.js), where a long question wraps. */
+#helmrow { display: flex; justify-content: flex-end; padding: 5px 8px; background: var(--paper); box-shadow: inset 0 -1px 0 var(--rule); }
+#helmrow:not(:has(#helm:not([hidden]))) { display: none; }
+#helmrow #helm { flex-wrap: wrap; justify-content: flex-end; row-gap: 3px; min-width: 0; max-width: 100%; height: auto; min-height: 26px; margin: 0; padding-block: 3px; box-sizing: border-box; }
 #helm.asking { flex-shrink: 0; } /* a question is shown whole; the tabs give way to it */
 #helm-state { flex: none; font-weight: 700; white-space: nowrap; }
 #helm-state:empty { display: none; }
@@ -573,6 +582,16 @@ body.panel-closed #panel { display: none; }
 
 #panel-head { display: flex; align-items: baseline; justify-content: space-between; padding: 13px 12px 9px 16px; }
 #panel-tools { display: flex; gap: 2px; }
+#panel-tools .quiet { white-space: nowrap; }
+/* A narrow panel (a small window) has room for the lamp alone, its state in
+   its tooltip, and a plus for a new conversation: the header stays one line. */
+#panel { container: panel / inline-size; }
+@container panel (max-width: 330px) {
+  #link-text { display: none; }
+  #link { align-self: center; padding: 6px; }
+  #new-chat:not(.sure) { gap: 0; font-size: 0; }
+  #new-chat:not(.sure)::before { content: '+'; width: 12px; font-size: 19px; font-weight: 400; line-height: 16px; text-align: center; }
+}
 
 /* The lamp is lit when other Claude sessions can reach this browser. */
 .lamp { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--ink-2); }
@@ -755,6 +774,7 @@ body:is(.relay-open, .perms-open) #panel { display: none; }
    drawn over, so the strip takes its room from the page instead. */
 #downloads-toggle.on, #downloads-toggle.running { color: var(--focus); }
 #downloads-toggle.running { font-variant-numeric: tabular-nums; }
+#downloads-toggle.stalled { color: var(--amber); }
 #downloads {
   max-height: 34vh;
   overflow-y: auto;

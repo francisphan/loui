@@ -156,6 +156,12 @@ test('a private window is marked, keeps no history, and shares no cookies', asyn
   await from(priv, 'go', b.base + '/second.html?private-visit');
   const tab = await loaded(priv);
   assert.equal(await js(tab.id, 'document.cookie'), '', 'it does not see the normal window\'s cookies');
+  // Its tab's menu offers nothing that would write its site down, and says what leaves the private window.
+  const menu = await b.ui('tab:menu-items', { id: tab.id });
+  assert.ok(!menu.some((l) => /^Keep .* awake$/.test(l)), String(menu));
+  assert.ok(menu.some((l) => /^Open in .+ \(not private\)$/.test(l)), String(menu));
+  const normalMenu = await b.ui('tab:menu-items', { id: normal.id });
+  assert.ok(normalMenu.some((l) => /^Keep .* awake$/.test(l)) && normalMenu.some((l) => /^Open in [^()]+$/.test(l)), String(normalMenu));
   await js(tab.id, 'document.cookie = "who=private; path=/"');
   assert.equal(await js(tab.id, 'document.cookie'), 'who=private');
   assert.equal(await js(normal.id, 'document.cookie'), 'who=normal', 'and the normal window does not see its own');

@@ -122,7 +122,8 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
     if (tab.group !== YOU) return;
     const host = hostOf(tab.url);
     items.push({ label: 'Sleep this tab now', enabled: mayRest(tab), click: () => sleepNow(tab.id) });
-    if (host && /^https?:/.test(tab.url)) {
+    // Not in a private tab: the choice is kept in settings.json, which would record the site.
+    if (host && /^https?:/.test(tab.url) && !tab.private) {
       items.push({
         label: `Keep ${host} awake`, type: 'checkbox', checked: keepAwake().includes(host),
         click: (item) => setKeepAwake(host, item.checked),

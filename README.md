@@ -145,6 +145,16 @@ copy this repository there, run `npm install --omit=dev`, start
   `Ctrl+Shift+Delete` (clear history), `Alt+Shift+P` (pin). In the tab strip
   and the bookmarks bar the arrow keys move from one item to the next. Esc
   closes any panel or strip, and the page has the keyboard again.
+- **Full screen.** `F11`, or a page's own full-screen button, gives the page
+  the whole window. Loui says over the page whose it is and how to leave
+  (`Esc` for the page's, `F11` for yours), for a few seconds and again when
+  the pointer touches the top edge. A page gets the screen only right after
+  your own click or key in it, never after a Claude session's; and a question
+  for the window (a session's, a guardrail's, a site's permission) ends it.
+- **The menu button** at the end of the toolbar has a short menu, one level
+  deep: new tab and windows, History, Bookmarks, Downloads, Passwords, zoom,
+  Find, Print, Claude, Settings. The full menus are in the command palette and
+  behind their shortcuts.
 - **Vertical tabs.** *View › Vertical tabs* (or *File › Settings*) moves the
   tabs to a sidebar on the left: pinned tabs as a grid of icons, your tabs,
   then each session's group with what it is doing. The button at the top
@@ -648,6 +658,7 @@ src/main/downloads.js downloads: where they are saved, the list, pause and resum
 src/main/permissions.js  camera, microphone, location, notifications, screen: asking and remembering
 src/main/history.js   history: what the user visits in their own tabs (history.json)
 src/main/suggest.js   address bar suggestions: their sources, and the list in front of the page
+src/main/hints.js     Loui's notes in front of the page: how to leave full screen, a tab's hover card
 src/main/requests.js  the one onBeforeRequest listener: the relay guard first, then Shields
 src/main/shields.js   Shields: blocking, hiding ad boxes, the per-site switch, list updates
 src/main/shields-update.js  downloads the lists and builds the engine, in a process of its own
