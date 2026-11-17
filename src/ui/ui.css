@@ -126,6 +126,10 @@ body.vertical #tabrow { display: none; }
 .stray.paused { color: var(--ink-2); }
 .stray-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* A short row (a small window with the Claude panel open) has room for the marks alone: of those working, asking or paused. */
+/* Louis, at the start of the top row in either layout: part of what the
+   window is dragged by. */
+#brand { flex: none; align-self: center; width: 36px; height: 36px; margin: 0 2px 0 8px; object-fit: contain; user-select: none; }
+#tabrow > #brand, body.vertical #navrow > #brand { -webkit-app-region: drag; }
 #tabrow { container: tabrow / inline-size; }
 @container tabrow (max-width: 640px) {
   .stray { padding: 0 7px; }
@@ -508,6 +512,8 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
   body.vertical #point span:not(.glyph) { display: none; }
   body.vertical #point { padding-right: 8px; }
 }
+/* Louis gives way first when the toolbar is the top row and short of room. */
+@container navrow (max-width: 900px) { body.vertical #brand { display: none; } }
 @container navrow (max-width: 720px) { body.vertical :is(#device, #devtools) { display: none; } }
 @container navrow (max-width: 660px) { body.vertical :is(#history-toggle, #point) { display: none; } }
 @container navrow (max-width: 600px) { body.vertical #downloads-toggle:not(.on, .running) { display: none; } }

@@ -315,7 +315,7 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
 - The Claude panel runs Claude Code: an installed `claude.exe` if there is
   one, otherwise Claude Code inside WSL (`wsl.exe`), with your WSL login.
 - **Updates.** An installed copy checks GitHub Releases shortly after launch and
-  every six hours, downloads a new version in the background, and installs it
+  every hour, downloads a new version in the background, and installs it
   when Loui quits. *Restart to update* in the toolbar (and the Help menu)
   installs it at once. Each download is checked against the SHA-512 published
   with the release; the builds are unsigned, so there is no publisher check.

@@ -62,7 +62,8 @@ test('the empty part of the top row drags the window; tabs and buttons do not', 
   const r = await row('tabrow');
   assert.equal(r.top[5], 'drag');
   assert.ok(r.items.length >= 2);
-  for (const [name, , , , , region] of r.items) assert.equal(region, 'no-drag', name);
+  // Louis, at the start of the row, is part of what the window is dragged by; nothing else is.
+  for (const [name, , , , , region] of r.items) assert.equal(region, name === 'brand' ? 'drag' : 'no-drag', name);
   assert.equal(await chrome(`${REGION}(document.querySelector('#tabs .tab'))`), 'no-drag');
 });
 
@@ -137,9 +138,11 @@ test('with vertical tabs the toolbar is the top row, with the helm in it, and th
     const r = await row('navrow');
     assert.deepEqual(r.top.slice(1, 6), [0, r.width, 0, 44, 'drag'], 'the toolbar, from edge to edge');
     const names = r.items.map(([name]) => name);
-    assert.equal(names[0], 'sidebar-toggle');
+    // Louis first where there is room for him; in a small window the toolbar needs it.
+    assert.deepEqual(names.slice(0, 2), width > 900 ? ['brand', 'sidebar-toggle'] : ['sidebar-toggle', 'back']);
     for (const name of ['back', 'address-form', 'helm', 'menu']) assert.ok(names.includes(name), `${name} is in it: ${names}`);
-    for (const [name, , , , , region] of r.items) assert.equal(region, 'no-drag', name);
+    // Louis, at the start of the row, is part of what the window is dragged by; nothing else is.
+  for (const [name, , , , , region] of r.items) assert.equal(region, name === 'brand' ? 'drag' : 'no-drag', name);
     clear(r, room);
     const address = r.items.find(([name]) => name === 'address-form');
     assert.ok(address[2] - address[1] >= 100, `the address field is ${address[2] - address[1]}px wide`);

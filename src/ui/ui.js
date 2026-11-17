@@ -249,12 +249,12 @@ function placeTabs() {
   // The top row of the window is the tab strip; with the tabs in the sidebar it
   // is the toolbar, which then holds what else the tab row had.
   if (vertical && $('helm').parentElement !== $('navrow')) {
-    $('navrow').prepend($('sidebar-toggle'));
+    $('navrow').prepend($('brand'), $('sidebar-toggle'));
     $('reload').after($('private-label'));
     $('address-form').after($('helm'));
   }
   if (!vertical && $('private-label').parentElement !== $('tabrow')) {
-    $('tabrow').prepend($('sidebar-toggle'), $('private-label'));
+    $('tabrow').prepend($('brand'), $('sidebar-toggle'), $('private-label'));
     $('tabrow').append($('helm'));
   }
   box.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
