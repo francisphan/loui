@@ -34,8 +34,12 @@ async function goFull(id) {
     for (const end = Date.now() + 2500; Date.now() < end; await sleep(100)) {
       if ((await place(id)).full) return;
     }
-    // Not in: if that press took the page out instead, wait for that to finish before the next.
+    // Not in. The press may have taken the page out instead; or the window was
+    // still on its way out of F11, when a page's request is lost and the page
+    // alone believes it has the screen. Either way: out, then once more.
+    await b.ui('tab:js', { id, code: 'document.fullscreenElement && document.exitFullscreen(); 1' }).catch(() => {});
     await until(() => b.ui('tab:js', { id, code: '!document.fullscreenElement' }), 'the page to be out of full screen');
+    await sleep(300);
   }
   assert.fail('the page did not go into full screen');
 }
@@ -47,7 +51,7 @@ test('a page that asks for the whole screen covers the tabs and the toolbar, and
   tab = await until(async () => { const t = await onScreen(); return t.title === 'Full screen' && !t.loading && t; }, 'the page');
   const before = await place(tab.id);
   assert.ok(before.view.y > 0 && !covers(before), 'under the toolbar to begin with');
-  await press(tab.id);
+  await goFull(tab.id);
   const full = await until(async () => { const p = await place(tab.id); return p.full && covers(p) && p; }, 'the page to cover the window');
   assert.equal(await b.ui('tab:js', { id: tab.id, code: '!!document.fullscreenElement' }), true);
   assert.deepEqual(full.view, { x: 0, y: 0, width: full.window.width, height: full.window.height });

@@ -124,7 +124,13 @@ class Tabs extends EventEmitter {
     // Leaving full screen by any road (F11, Esc, the system) gives Loui's own parts back.
     win.on('leave-full-screen', () => {
       w.wide = false;
-      this.unfull(w);
+      // This can arrive late: the window leaving F11 after a page has already
+      // taken the screen for itself. Then it is about what came before, and
+      // the page keeps the screen. Otherwise the page is told to let go too:
+      // a window out of full screen with its page still "in" would show that
+      // page as an ordinary one, stuck.
+      const held = this.get(w.full);
+      if (!held || Date.now() - (held.fullAt || 0) > 1500) this.unfull(w, { leave: true });
       const tab = this.get(w.activeId);
       if (tab?.view) this.place(tab);
       this.emit('change');
@@ -464,6 +470,7 @@ class Tabs extends EventEmitter {
         return;
       }
       tab.window.full = tab.id;
+      tab.fullAt = Date.now();
       this.place(tab);
       tab.window.win.contentView.addChildView(tab.view); // in front of everything of Loui's
       changed();
