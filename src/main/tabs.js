@@ -1114,7 +1114,11 @@ class Tabs extends EventEmitter {
       ...(/^https?:/i.test(tab.url) ? [{ label: mine ? 'Save page as…' : 'Save page', click: () => { tab.saveAs = mine; wc.downloadURL(tab.url); } }] : []),
       { label: 'Print…', click: () => this.emit('print', tab) },
       ...(mine && web(tab.url) ? [{ label: 'View page source', click: () => openTab(`view-source:${tab.url}`, true) }] : []),
-      ...(p.isEditable ? [] : [{ label: 'Select all', click: () => { wc.focus(); wc.selectAll(); } }]),
+      ...(p.isEditable ? [] : [{ label: 'Select all', click: () => {
+        // Through the page, so it does not hang on whether the page has the keyboard just now.
+        wc.focus();
+        wc.executeJavaScript('getSelection().selectAllChildren(document.documentElement)', true).catch(() => wc.selectAll());
+      } }]),
       { type: 'separator' },
       // The Claude panel stays out of private windows.
       ...(tab.private && tab.group === YOU ? [] : [{ label: 'Point Claude at this', click: () => this.emit('point', tab, { x: p.x, y: p.y }) }]),
