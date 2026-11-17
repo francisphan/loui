@@ -94,6 +94,36 @@ test('the user can hand the tab on screen to a session, and gets it back when th
   assert.ok(!state.tabs.some((t) => t.group === 'c'), 'the tabs it opened are closed');
 });
 
+test('a call in flight stops when the user takes the tab back', async () => {
+  const d = b.as('d', 'Claude Code · wait');
+  const lent = await onScreen();
+  const asked = d.text('request_tab');
+  await new Promise((r) => setTimeout(r, 300));
+  await b.ui('handoff:answer', true);
+  assert.match(await asked, new RegExp(`handed you tab ${lent.id}`));
+  await d.text('navigate', { url: b.base });
+  // Waiting for words that are on another page: the user takes the tab back
+  // and opens that page in it. The session must not be given its outline.
+  const waiting = d.text('wait_for', { text: 'Not an article', seconds: 10 });
+  await new Promise((r) => setTimeout(r, 600));
+  await b.ui('tab:move', { id: lent.id, group: 'you' }); // dragged back in the tab strip
+  await b.ui('tab:js', { id: lent.id, code: `location.href = ${JSON.stringify(b.base + '/plain.html')}` });
+  await assert.rejects(waiting, /The user took this tab back/);
+  assert.equal((await b.state()).tabs.find((t) => t.id === lent.id)?.group, 'you');
+  // Its group is where its next call works, in a tab of its own.
+  assert.match(await d.text('navigate', { url: b.base }), /Fixture page/);
+  assert.ok(!(await tabsOf('d')).some((t) => t.id === lent.id));
+  d.end();
+  await new Promise((r) => setTimeout(r, 400));
+});
+
+test('a session cannot take the name of the user\'s own group', async () => {
+  const before = (await tabsOf('you')).length;
+  await assert.rejects(b.as('you', 'Impostor').text('snapshot'), /cannot be called "you"/);
+  await assert.rejects(b.as('panel', 'Impostor').text('snapshot'), /cannot be called "panel"/);
+  assert.equal((await tabsOf('you')).length, before);
+});
+
 test('a declined hand-over leaves the tab with the user', async () => {
   const a = b.as('a');
   const asked = a.text('request_tab');

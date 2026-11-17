@@ -45,19 +45,41 @@ const MAGIC = Buffer.from('LOUIA1'); // starts an encrypted file
 // seal(bytes) / open(bytes): AES-256-GCM under the log's own key. A file
 // without the mark is read as it is (written before logs were encrypted, or
 // where the system cannot encrypt); one that will not open throws.
+const sealed = (b) => b.subarray(0, MAGIC.length).equals(MAGIC);
+const PLAIN = {
+  on: false,
+  seal: (b) => b,
+  open(b) { if (sealed(b)) throw new Error('encrypted'); return b; },
+};
+
 function createBox(cipher, keyFile) {
-  if (!cipher?.available) return { on: false, seal: (b) => b, open: (b) => b, sealed: () => false };
+  if (!cipher?.available) return PLAIN;
   let key = null;
-  try { key = Buffer.from(cipher.decrypt(fs.readFileSync(keyFile, 'utf8')), 'base64'); } catch {}
-  if (key?.length !== 32) {
-    // None yet, or one from another machine or account: logs under it are lost.
-    key = crypto.randomBytes(32);
-    fs.writeFileSync(keyFile, cipher.encrypt(key.toString('base64')), { mode: 0o600 });
+  try {
+    let kept = null;
+    try { kept = fs.readFileSync(keyFile, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (kept !== null) {
+      try { key = Buffer.from(cipher.decrypt(kept), 'base64'); } catch {}
+      if (key?.length !== 32) {
+        // From another machine or account, or the system's own key is not
+        // what it was. It is never written over: put aside, it can be put
+        // back should the system open it again. Logs under it stay until
+        // they are too old (see load()).
+        key = null;
+        fs.renameSync(keyFile, `${keyFile}.bad-${Date.now()}`);
+      }
+    }
+    if (!key) {
+      key = crypto.randomBytes(32);
+      fs.writeFileSync(keyFile, cipher.encrypt(key.toString('base64')), { mode: 0o600, flag: 'wx' });
+    }
+  } catch {
+    // The keyring failed or the profile cannot be written: plain files for
+    // this run, and whatever key file there is stays as it is.
+    return PLAIN;
   }
-  const sealed = (b) => b.subarray(0, MAGIC.length).equals(MAGIC);
   return {
     on: true,
-    sealed,
     seal(bytes) {
       const iv = crypto.randomBytes(12);
       const c = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -101,9 +123,20 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
   });
   const lastTime = (d) => d.steps.reduce((t, s) => Math.max(t, s.at + (s.ms || 0)), d.start);
 
-  // The window is told at most twice a second.
+  // The window is told at most twice a second, and which logs changed (no
+  // ids: the settings did), so it only fetches again the one it is showing.
   let telling = null;
-  const tell = () => { telling ||= setTimeout(() => { telling = null; changed(); }, 500); };
+  let told = new Set();
+  const tell = (id) => {
+    if (id && told) told.add(id);
+    else told = null;
+    telling ||= setTimeout(() => {
+      const ids = told ? [...told] : undefined;
+      telling = null;
+      told = new Set();
+      changed(ids);
+    }, 500);
+  };
 
   // Saves still on their way, by session id. A session's last save can still be
   // running after its log has stopped being live, so removing a session waits
@@ -128,7 +161,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
   function dirty(log) {
     if (log.off) return; // removed: a late picture must not bring it back
     index.set(log.data.id, summary(log.data));
-    tell();
+    tell(log.data.id);
     if (log.timer || log.off) return;
     log.timer = setTimeout(() => { log.timer = null; write(log); }, 1000);
   }
@@ -167,7 +200,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
     log.data.end = Date.now();
     log.data.ended = how;
     index.set(log.data.id, summary(log.data));
-    tell();
+    tell(log.data.id);
     write(log).then(prune);
   }
 
@@ -320,7 +353,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
     await fsp.rm(file(id), { force: true }).catch(() => {});
     await fsp.rm(pictures(id), { recursive: true, force: true }).catch(() => {});
     index.delete(id); // off the list once its files are gone
-    tell();
+    tell(id);
   }
 
   // Older than the setting, then the oldest until all of it fits the cap.
@@ -358,8 +391,12 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
   async function encryptOld(id) {
     if (!box.on) return;
     const redo = async (f) => {
+      // Only the mark is read: most files are encrypted already.
+      const fh = await fsp.open(f, 'r');
+      let head;
+      try { head = (await fh.read(Buffer.alloc(MAGIC.length), 0, MAGIC.length, 0)).buffer; } finally { await fh.close(); }
+      if (sealed(head)) return;
       const bytes = await fsp.readFile(f);
-      if (box.sealed(bytes)) return;
       await fsp.writeFile(`${f}.tmp`, box.seal(bytes), { mode: 0o600 });
       await fsp.rename(`${f}.tmp`, f);
     };
@@ -379,11 +416,16 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
       const id = name.slice(0, -5);
       const data = await read(id);
       if (!data?.id || !Array.isArray(data.steps)) {
-        // Encrypted under a key that is gone: nothing can read it again.
-        const bytes = await fsp.readFile(file(id)).catch(() => null);
-        if (bytes && box.sealed(bytes)) {
-          await fsp.rm(file(id), { force: true }).catch(() => {});
-          await fsp.rm(pictures(id), { recursive: true, force: true }).catch(() => {});
+        // Encrypted under a key that is gone or cannot be reached in this
+        // run, or damaged. It is not deleted here (the key may come back),
+        // but listed by the file's time, so that it still goes when it is
+        // too old or too much, or when the user clears the list.
+        const at = Math.round((await fsp.stat(file(id)).catch(() => null))?.mtimeMs || 0);
+        if (at) {
+          index.set(id, {
+            id, label: "Can't be read on this computer", source: null, connector: null,
+            start: at, end: at, ended: null, steps: 0, failed: 0, unreadable: true,
+          });
         }
         continue;
       }
@@ -415,14 +457,17 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
   }
 
   // A whole log, its pictures as data URLs (the window's page cannot load
-  // files from the profile).
-  async function get(id) {
+  // files from the profile). have: the numbers of the steps whose pictures
+  // the window already holds; those come back as true, not sent again.
+  async function get(id, have) {
     await ready;
     const log = [...live.values()].find((l) => l.data.id === id);
     const data = log ? JSON.parse(JSON.stringify(log.data)) : index.has(id) ? await read(id) : null;
     if (!data) return null;
-    for (const s of data.steps) {
+    const held = new Set(Array.isArray(have) ? have : []);
+    for (const [i, s] of data.steps.entries()) {
       if (!s.thumb) continue;
+      if (held.has(i)) { s.thumb = true; continue; }
       try {
         const bytes = box.open(await fsp.readFile(path.join(pictures(id), s.thumb)));
         s.thumb = `data:image/jpeg;base64,${bytes.toString('base64')}`;
@@ -461,7 +506,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher 
     open, end, step, consent, guard, list, get, remove: (id) => ready.then(() => remove(id)), clear, keep, flush, prune,
     probes: {
       'activity:list': () => list(),
-      'activity:get': (id) => get(id),
+      'activity:get': (arg) => (arg?.id ? get(arg.id, arg.have) : get(arg)),
       'activity:flush': async () => { for (const log of live.values()) { clearTimeout(log.timer); log.timer = null; await write(log); } return 'ok'; },
       'activity:prune': async () => { await ready; await prune(); return 'ok'; },
     },

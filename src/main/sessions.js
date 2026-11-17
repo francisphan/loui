@@ -30,6 +30,8 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {}, activi
     const { id, label, source } = request;
     let s = live.get(id);
     if (!s) {
+      // The user's own group and the panel's session are not a session's to name.
+      if (id === YOU || id === panel.id) throw new Error(`A session cannot be called "${id}".`);
       s = { id, group: id, label: unique(label || 'Claude'), source: source || 'claude' };
       live.set(id, s);
       tabs.addGroup({ id, label: s.label, source: s.source });
@@ -118,4 +120,4 @@ function createSessions({ tabs, changed, feed, prompts, ended = () => {}, activi
   };
 }
 
-module.exports = { createSessions };
+module.exports = { createSessions, PAUSED };

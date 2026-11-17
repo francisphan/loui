@@ -97,8 +97,18 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
 
   const toolNames = TOOLS.map((t) => `mcp__loui__${t.name}`);
 
+  let starting = false; // between a send and its query: a second send must not start another
   async function send({ text, pickIds = [] }) {
-    if (active) return;
+    if (active || starting) return;
+    starting = true;
+    try {
+      return await begin({ text, pickIds });
+    } finally {
+      starting = false;
+    }
+  }
+
+  async function begin({ text, pickIds }) {
     const claude = await claudeLauncher();
     if (claude === null) {
       emit({ type: 'user', text, picks: [] });

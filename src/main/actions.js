@@ -7,6 +7,7 @@ const { nativeImage } = require('electron');
 const TOOLS = require('../shared/tools');
 const { toUrl, PRESETS, YOU } = require('./tabs');
 const { createPicker } = require('./picker');
+const { PAUSED } = require('./sessions');
 const { articleText } = require('./reader');
 
 const LIB = fs.readFileSync(path.join(__dirname, '../page/lib.js'), 'utf8');
@@ -116,9 +117,11 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
   // After an action the active tab may have changed (a link opened a new one).
   async function after(c, tab, said) {
     await settle(tab);
+    c.own(tab); // before need(), which would open a new tab in place of one taken back
     const now = c.need();
     if (now !== tab) {
       await settle(now);
+      c.own(now);
       said += ` This opened a new tab (${now.id}), which is now active.`;
     }
     return text(`${said}\n\n${await outline(now)}`);
@@ -266,12 +269,14 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
           if (new_tab) tabs.close(tab.id);
           throw e;
         });
+        c.own(tab);
         const failed = await Promise.race([
           tab.wc.loadURL(to).then(() => null, (e) => e),
           sleep(20000).then(() => 'slow'),
         ]);
         const note = failed === 'slow' ? ' It is still loading.' : '';
         await settle(tab, { quiet: 350, max: 3000 });
+        c.own(tab);
         return text(`Opened ${to}.${note}\n\n${await outline(tab)}`);
       },
     },
@@ -317,7 +322,9 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         } else throw new Error('click needs a ref, or x and y.');
         await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
         c.say(`clicking ${what}`);
+        c.own(tab);
         await aim(tab, target, double ? 'double-click' : 'click', true);
+        c.own(tab);
         mouse(tab, target, { button, double });
         return after(c, tab, `Clicked ${what}.${note}`);
       },
@@ -333,12 +340,17 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         if (value) c.note(target.secret ? `(${value.length} characters)` : value);
         if (submit) await guarded(c, tab, guard.judge(c.session, tab, target.guard), target.rect);
         c.say(`typing into "${shorten(target.name || target.role)}"`);
+        c.own(tab);
         await aim(tab, target, 'type', true);
+        c.own(tab);
         mouse(tab, target);
         await sleep(60);
+        c.own(tab);
         check(await page(tab, 'focus', { ref, selectAll: !!clear }), ref);
+        c.own(tab);
         if (clear && !value) key(tab, 'Delete');
         if (value) await tab.wc.insertText(value);
+        c.own(tab);
         if (submit) key(tab, 'Enter');
         return after(c, tab, `Typed into ${target.role} "${shorten(target.name)}"${submit ? ' and pressed Enter' : ''}.`);
       },
@@ -355,6 +367,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
           await guarded(c, tab, guard.judge(c.session, tab, info));
         }
         await tabs.settled(tab);
+        c.own(tab);
         key(tab, chord);
         return after(c, tab, `Pressed ${chord}.`);
       },
@@ -367,6 +380,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         const target = check(await page(tab, 'locate', { ref }), ref);
         c.say(`pointing at "${shorten(target.name || target.role)}"`);
         await aim(tab, target, 'hover');
+        c.own(tab);
         tab.wc.sendInputEvent({ type: 'mouseMove', ...toView(tab, target) });
         return after(c, tab, `Hovering over ${target.role} "${shorten(target.name)}".`);
       },
@@ -378,6 +392,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         const tab = c.need();
         const target = check(await page(tab, 'locate', { ref }), ref);
         await aim(tab, target, 'choose');
+        c.own(tab);
         const r = check(await page(tab, 'choose', { ref, value }), ref);
         if (r.error === 'not-select') throw new Error(`${ref} is not a <select>. Click it instead.`);
         if (r.error === 'no-option') throw new Error(`No option "${value}". Options: ${r.options.join(' | ')}`);
@@ -391,6 +406,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         const tab = c.need();
         const r = check(await page(tab, 'scroll', { direction, ref, amount }), ref);
         await sleep(150);
+        c.own(tab);
         return text(`Scrolled to ${r.y} of ${r.max}px.\n\n${await outline(tab)}`);
       },
     },
@@ -406,8 +422,10 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         }
         const start = Date.now();
         for (;;) {
-          const has = (t) => page(tab, 'hasText', { text: t }).catch(() => false);
+          // The user may take the tab back during the wait: its page is then theirs.
+          const has = (t) => { c.own(tab); return page(tab, 'hasText', { text: t }).catch(() => false); };
           if ((!want || (await has(want))) && (!gone || !(await has(gone)))) {
+            c.own(tab);
             return text(`Done after ${((Date.now() - start) / 1000).toFixed(1)}s.\n\n${await outline(tab)}`);
           }
           if (Date.now() - start > limit) {
@@ -424,6 +442,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         const tab = c.need();
         if (ref) {
           const target = check(await page(tab, 'locate', { ref }), ref);
+          c.own(tab);
           const img = await crop(tab, target.rect);
           if (!img) throw new Error(`${ref} is not in view.`);
           return [{ type: 'text', text: `${target.role} "${shorten(target.name)}"` }, jpeg(img)];
@@ -491,6 +510,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         if (guard.applies(c.session)) {
           const fields = await page(tab, 'guardPage').catch(() => null);
           await guarded(c, tab, guard.judgeScript(c.session, tab, fields));
+          c.own(tab);
         }
         // Errors thrown by the code come back as values, so a rejection here can
         // only mean the code did not parse as an expression: run it as a body.
@@ -544,6 +564,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         else if (preset === 'desktop') tabs.setDevice(tab, null);
         else throw new Error('Give a preset, or both width and height.');
         await settle(tab);
+        c.own(tab);
         const size = await tab.wc.executeJavaScript('`${innerWidth}x${innerHeight}`');
         return text(`Viewport is now ${size}.`);
       },
@@ -595,8 +616,15 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       // what was stopped is told to the session with the tool's result.
       guard.begin(session);
       const stopped = async () => { await guard.drain(session); return guard.takeNotes(session).join('\n'); };
+      // A call in flight checks this before each read of the page and each
+      // input: the user can take a tab back, or take over, while it runs.
+      const own = (tab) => {
+        if (tabs.get(tab.id) !== tab) return; // closed: nothing of the user's is left in it
+        if (tab.group !== session.group) throw new Error('The user took this tab back.');
+        if (acts && tabs.group(session.group)?.paused) throw new Error(PAUSED);
+      };
       try {
-        const out = await handler.run(args, { say, note: record, session, need: () => need(session) });
+        const out = await handler.run(args, { say, note: record, session, own, need: () => need(session) });
         const note = await stopped();
         return note ? [...text(note), ...out] : out;
       } catch (e) {

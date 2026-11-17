@@ -12,6 +12,8 @@
   const isOpen = () => document.body.classList.contains('activity-open');
   const ask = (request) => loui.send('activity', request);
   let viewing = null; // the id of the session on show, or null for the list
+  const pics = new Map(); // step number -> its picture, for the session on show: each is sent once
+  const view = (id) => { if (id !== viewing) pics.clear(); viewing = id; };
 
   function show(open) {
     if (open) {
@@ -122,8 +124,8 @@
       const open = el('button', 'open');
       open.type = 'button';
       open.append(el('span', 'name', nameOf(s)), facts(s));
-      open.onclick = () => { viewing = s.id; ask({ do: 'open', id: s.id }); };
-      row.append(open, small('trash', `Delete what ${s.label} did`, () => ask({ do: 'delete', id: s.id })));
+      open.onclick = () => { view(s.id); ask({ do: 'open', id: s.id }); };
+      row.append(open, small('trash', s.unreadable ? 'Delete it' : `Delete what ${s.label} did`, () => ask({ do: 'delete', id: s.id })));
       nodes.push(row);
     }
     if (!nodes.length) {
@@ -183,11 +185,19 @@
 
   loui.on('activity', (m) => {
     if (m.type === 'changed') {
-      if (isOpen()) ask(viewing ? { do: 'open', id: viewing } : { do: 'list' });
+      // ids: the logs that changed. Another session's steps do not redraw this one.
+      if (!isOpen()) return;
+      if (!viewing) ask({ do: 'list' });
+      else if (!m.ids || m.ids.includes(viewing)) ask({ do: 'open', id: viewing, have: [...pics.keys()] });
     } else if (m.type === 'list') {
       if (!viewing) drawList(m);
     } else if (m.type === 'session') {
       if (m.id !== viewing) return;
+      // A picture this window already has comes back as true.
+      m.log?.steps.forEach((s, i) => {
+        if (s.thumb === true) s.thumb = pics.get(i);
+        else if (s.thumb) pics.set(i, s.thumb);
+      });
       if (m.log) drawSession(m.log);
       else back(); // deleted meanwhile
     }
