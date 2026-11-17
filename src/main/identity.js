@@ -8,10 +8,10 @@
 // stripped agent was rejected, the true one was not.
 //
 // Two things must agree: the request's User-Agent header and what the page
-// reads from navigator.userAgent. The tab's agent is switched when a
-// main-frame navigation starts, which is in time for the page but too late
-// for that navigation's own request; so the header of each main-frame request
-// is also set here, by host (attach).
+// reads from navigator.userAgent. The header of each main-frame request is
+// set by its own host (attach). The tab's agent, which the page and its
+// other requests use, is set when a navigation starts, and a redirect across
+// the line starts a new one (see below).
 const HONEST = ['accounts.google.com', 'accounts.youtube.com'];
 
 // full: Electron's own user agent, with loui/ and Electron/ in it. plain: the
@@ -28,9 +28,30 @@ function createIdentity({ tabs, full, plain, hosts = HONEST }) {
   }
 
   tabs.on('created', (tab) => {
-    tab.wc.on('did-start-navigation', (e) => {
-      if (e.isMainFrame && !e.isSameDocument) apply(tab, e.url);
+    const wc = tab.wc;
+    wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) apply(tab, e.url); });
+    // A redirect that crosses between the two kinds of host (a sign-in link
+    // usually reaches Google through one, and "Sign in with Google" leaves
+    // through one). The agent cannot be changed under a navigation in flight:
+    // Chromium abandons it. So the redirect is not followed; the tab takes
+    // the agent its target wants and loads the target afresh, which is what
+    // following a 301, 302 or 303 does anyway.
+    wc.on('will-redirect', (e, ...old) => {
+      const d = e.url !== undefined ? e : { url: old[0], isMainFrame: old[2] };
+      if (!d.isMainFrame || tab.device?.mobile) return;
+      const want = honest(d.url) ? full : plain;
+      if (wc.getUserAgent() === want) return;
+      e.preventDefault();
+      setImmediate(() => {
+        if (wc.isDestroyed()) return;
+        wc.setUserAgent(want);
+        wc.loadURL(d.url).catch(() => {});
+      });
     });
+    // The last word, for what the above cannot catch (a redirect that keeps
+    // its request body, device emulation switched off on such a page): once
+    // nothing is loading, when changing it disturbs nothing.
+    wc.on('did-stop-loading', () => apply(tab, wc.getURL()));
   });
 
   // For each session a tab can have (the user's, and a private window's).

@@ -215,7 +215,13 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   // the tabs' own session (normally straight from its cache), shrunk, and kept.
   const tried = new Set();
   async function iconFrom(url) {
-    if (url.startsWith('data:image/')) return url.length <= ICON_MAX ? url : null;
+    if (url.startsWith('data:image/')) {
+      if (url.length <= ICON_MAX) return url;
+      // A tab's icon as the page gave it: shrunk to keep, if it can be read here.
+      const img = nativeImage.createFromDataURL(url);
+      const icon = img.isEmpty() ? '' : img.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
+      return icon && icon.length <= ICON_MAX ? icon : null;
+    }
     if (!/^https?:/i.test(url)) return null;
     try {
       const res = await ses.fetch(url, { cache: 'force-cache' });
@@ -236,11 +242,11 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   }
   tabs.on('change', () => {
     const tab = tabs.active();
-    if (!tab || tab.group !== YOU || !tab.favicon || tab.loading) return;
+    if (!tab || tab.group !== YOU || !tab.icon || tab.loading) return;
     const node = byUrl.get(tab.url);
     if (!node || node.icon || tried.has(node.url)) return;
     tried.add(node.url);
-    iconFrom(tab.favicon).then((icon) => {
+    iconFrom(tabs.iconData(tab) || '').then((icon) => {
       if (icon && byId.has(node.id) && !node.icon) {
         node.icon = icon;
         save();
@@ -335,9 +341,9 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
     const node = add({ url: tab.url, title: tab.title });
     if (!node) return;
     editing(node.id, true);
-    if (tab.favicon) {
+    if (tab.icon) {
       tried.add(node.url);
-      iconFrom(tab.favicon).then((icon) => { if (icon && byId.has(node.id)) { node.icon = icon; save(); } });
+      iconFrom(tabs.iconData(tab) || '').then((icon) => { if (icon && byId.has(node.id)) { node.icon = icon; save(); } });
     }
   }
 
