@@ -90,10 +90,13 @@ sendLayout();
 new ResizeObserver(sendLayout).observe($('stage'));
 
 function drawTab(t) {
-  const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : ''));
+  const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : '') + (t.pinned ? ' pinned' : ''));
   tab.setAttribute('role', 'tab');
   tab.setAttribute('aria-selected', t.active);
+  tab.setAttribute('aria-label', t.title); // pinned tabs, and all of them in a collapsed sidebar, show no title
   tab.tabIndex = 0;
+  tab.draggable = true;
+  tab.dataset.id = t.id;
   tab.title = t.asleep ? `${t.title} (asleep, loads when you open it)` : t.title;
 
   let mark;
@@ -101,17 +104,22 @@ function drawTab(t) {
     mark = el('img');
     mark.src = t.favicon;
     mark.alt = '';
+    mark.draggable = false; // the tab is what gets dragged, not its icon
     mark.onerror = () => mark.replaceWith(el('span', 'dot'));
   } else {
     mark = el('span', 'dot');
   }
-  const close = el('button', 'close');
-  close.type = 'button';
-  close.setAttribute('aria-label', `Close ${t.title}`);
-  setIcon(close, 'close');
-  close.onclick = (e) => { e.stopPropagation(); loui.send('tab:close', t.id); };
-
-  tab.append(mark, el('span', 'title', t.title), close);
+  tab.append(mark);
+  // A pinned tab is its icon alone: it is closed from its menu, and Ctrl+W leaves it be.
+  if (!t.pinned) {
+    const close = el('button', 'close');
+    close.type = 'button';
+    close.draggable = false;
+    close.setAttribute('aria-label', `Close ${t.title}`);
+    setIcon(close, 'close');
+    close.onclick = (e) => { e.stopPropagation(); loui.send('tab:close', t.id); };
+    tab.append(el('span', 'title', t.title), close);
+  }
   tab.onclick = () => loui.send('tab:select', t.id);
   tab.onauxclick = (e) => { if (e.button === 1) loui.send('tab:close', t.id); };
   tab.oncontextmenu = (e) => { e.preventDefault(); loui.send('tab:menu', t.id); };
@@ -119,16 +127,55 @@ function drawTab(t) {
   return tab;
 }
 
-// The user's tabs first, then one cluster per Claude session with its name on it.
+// Where the tabs go: along the top, or in the sidebar on the left. The same
+// #tabs element moves between the two, so everything below draws either way.
+const sidebar = $('sidebar');
+function placeTabs() {
+  const { vertical = false, collapsed = false } = state.tabStrip || {};
+  const box = $('tabs');
+  if (vertical && box.parentElement !== sidebar) sidebar.append(box);
+  if (!vertical && box.parentElement !== $('tabrow')) $('sidebar-toggle').after(box);
+  box.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
+  sidebar.hidden = $('sidebar-toggle').hidden = !vertical;
+  document.body.classList.toggle('vertical', vertical);
+  document.body.classList.toggle('sidebar-collapsed', vertical && collapsed);
+  if (!vertical || !collapsed) document.body.classList.remove('sidebar-peek');
+  $('sidebar-toggle').title = collapsed ? 'Expand the sidebar' : 'Collapse the sidebar';
+  $('sidebar-toggle').setAttribute('aria-label', $('sidebar-toggle').title);
+  $('sidebar-toggle').setAttribute('aria-expanded', !collapsed);
+}
+
+// The user's pinned tabs first, then their other tabs, then one cluster per
+// Claude session with its name on it. Each run of tabs that a tab can be
+// dropped into carries its group's id (see the dragging below).
 function drawTabs() {
+  if (dragging) return; // redrawing would lose the tab being dragged; dragend draws
+  placeTabs();
+  const vertical = !!state.tabStrip?.vertical;
   const nodes = [];
   for (const g of state.groups) {
     const tabs = state.tabs.filter((t) => t.group === g.id);
     if (g.id === YOU) {
-      nodes.push(...tabs.map(drawTab));
+      const pins = el('div', 'pins');
+      const yours = el('div', 'yours');
+      pins.dataset.group = yours.dataset.group = YOU;
+      pins.append(...tabs.filter((t) => t.pinned).map(drawTab));
+      yours.append(...tabs.filter((t) => !t.pinned).map(drawTab));
+      if (vertical) {
+        const add = el('button', 'side-new');
+        add.type = 'button';
+        add.title = 'New tab (Ctrl+T)';
+        add.innerHTML = ICON.plus;
+        add.append(el('span', 'title', 'New tab'));
+        add.onclick = () => loui.send('tab:new');
+        yours.append(add);
+      }
+      nodes.push(pins, yours);
       continue;
     }
     const cluster = el('div', 'group' + (g.busy ? ' busy' : '') + (g.paused ? ' paused' : ''));
+    cluster.dataset.group = g.id;
+    cluster.setAttribute('aria-label', `${g.label}'s tabs`);
     const name = el('button', 'group-name', g.label);
     name.type = 'button';
     name.title = g.paused ? `${g.label} is paused` : g.busy ? `${g.label} is ${g.status}` : `${g.label}'s tabs`;
@@ -141,12 +188,111 @@ function drawTabs() {
     setIcon(close, 'close');
     close.onclick = () => loui.send('group:close', g.id);
     const tag = el('div', 'group-tag');
-    tag.append(name, close);
+    tag.title = name.title;
+    // The sidebar has room for what the session is doing; along the top the helm says it.
+    const status = el('span', 'group-status', g.paused ? 'Paused' : g.busy ? g.status : '');
+    tag.append(name, status, close);
     cluster.append(tag, ...tabs.map(drawTab));
     nodes.push(cluster);
   }
   $('tabs').replaceChildren(...nodes);
 }
+
+// ── dragging tabs ───────────────────────────────────────────────────────────
+// Within a group a dragged tab is reordered. The user's tab dropped on a
+// session's group is handed to it ("Give to" in the tab menu), and a session's
+// tab dropped among the user's is taken back. A session's tab cannot go to
+// another session. Dropped among the pinned tabs a tab is pinned, and among
+// the others unpinned. The main process applies the same rules (tabs.drop).
+// The keyboard does the same with Ctrl+Shift+PageUp/PageDown and the tab menu.
+let dragging = null; // { id, group } while a tab is dragged
+let marked = [];
+
+function clearDrop() {
+  for (const node of marked) node.classList.remove('drop-before', 'drop-after', 'drop-into');
+  marked = [];
+}
+const flag = (node, cls) => { node.classList.add(cls); marked.push(node); };
+
+// Where the pointer would drop the tab: { zone, group, index, before, last } or null.
+function dropSpot(e) {
+  const zone = e.target.closest?.('[data-group]');
+  if (!zone || !dragging) return null;
+  const group = zone.dataset.group;
+  if (group !== dragging.group && group !== YOU && dragging.group !== YOU) return null;
+  const pinning = zone.classList.contains('pins');
+  // A list in the sidebar reads top to bottom; a strip, or the pinned icons, in rows.
+  const column = !!state.tabStrip?.vertical && !pinning;
+  const tabs = [...zone.querySelectorAll('.tab')].filter((n) => +n.dataset.id !== dragging.id);
+  const before = tabs.find((n) => {
+    const r = n.getBoundingClientRect();
+    if (column) return e.clientY < r.top + r.height / 2;
+    return e.clientY < r.top || (e.clientY < r.bottom && e.clientX < r.left + r.width / 2);
+  });
+  const order = state.tabs.filter((t) => t.group === group && t.id !== dragging.id);
+  const last = tabs[tabs.length - 1];
+  const index = before ? order.findIndex((t) => t.id === +before.dataset.id)
+    : last ? order.findIndex((t) => t.id === +last.dataset.id) + 1
+      : group === YOU && !pinning ? order.filter((t) => t.pinned).length : 0;
+  return { zone, group, index, before, last, pinned: group === YOU ? pinning : undefined };
+}
+
+const tabsBox = $('tabs');
+tabsBox.addEventListener('dragstart', (e) => {
+  const node = e.target.closest?.('.tab');
+  const t = node && state.tabs.find((x) => x.id === +node.dataset.id);
+  if (!t) return;
+  dragging = { id: t.id, group: t.group };
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('application/x-loui-tab', String(t.id));
+  node.classList.add('dragged');
+});
+tabsBox.addEventListener('dragover', (e) => {
+  const spot = dropSpot(e);
+  clearDrop();
+  if (!spot) return; // not a place this tab can go: the drop is refused
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (spot.group !== dragging.group) flag(spot.zone, 'drop-into');
+  if (spot.before) flag(spot.before, 'drop-before');
+  else if (spot.last) flag(spot.last, 'drop-after');
+});
+tabsBox.addEventListener('dragleave', (e) => {
+  if (!tabsBox.contains(e.relatedTarget)) clearDrop();
+});
+tabsBox.addEventListener('drop', (e) => {
+  const spot = dropSpot(e);
+  clearDrop();
+  if (!spot) return;
+  e.preventDefault();
+  loui.send('tab:move', { id: dragging.id, group: spot.group, index: spot.index, pinned: spot.pinned });
+});
+tabsBox.addEventListener('dragend', () => {
+  dragging = null;
+  clearDrop();
+  drawTabs(); // also puts back the tab that was drawn as being dragged
+});
+
+// A collapsed sidebar opens while the pointer rests on it, as Brave's does.
+// The page is a native view that nothing can be drawn over, so it makes room
+// rather than being covered; the short wait keeps a passing pointer from
+// resizing it.
+let peekTimer = 0;
+const peek = (on, wait) => {
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => {
+    document.body.classList.toggle('sidebar-peek', on && document.body.classList.contains('sidebar-collapsed'));
+  }, wait);
+};
+sidebar.addEventListener('mouseenter', () => peek(true, 300));
+sidebar.addEventListener('mouseleave', () => peek(false, 150));
+sidebar.addEventListener('dragenter', () => peek(true, 0));
+window.addEventListener('blur', () => peek(false, 0));
+$('sidebar-toggle').innerHTML = ICON.panel;
+$('sidebar-toggle').onclick = () => {
+  document.body.classList.remove('sidebar-peek');
+  loui.send('tabs:layout', { collapsed: !state.tabStrip?.collapsed });
+};
 
 // Who is driving the tab on screen, or a question from a Claude session
 // (src/main/prompts.js): one at a time, with a count of those waiting. The

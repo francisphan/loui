@@ -1,6 +1,7 @@
 // Settings, a sheet in the panel opened from File › Settings: the search
 // engine for the address bar, and the sites that open in the user's other
-// browser (see src/main/search.js and src/main/brave.js). Uses $, el and
+// browser (see src/main/search.js and src/main/brave.js), and whether the
+// tabs sit in a sidebar (main.js, tabs:layout). Uses $, el and
 // togglePanel from ui.js.
 const sheet = $('settings');
 const engine = $('search-engine');
@@ -21,6 +22,7 @@ function drawSettings(next) {
     $('search-url-note').textContent = '';
     $('search-custom').hidden = search.engine !== 'custom';
   }
+  $('tabs-vertical').checked = !!next.tabStrip?.vertical;
   $('elsewhere-title').textContent = `Sites that open in ${elsewhere.browser}`;
   $('elsewhere-list').replaceChildren(...elsewhere.sites.map((site) => {
     const row = el('li');
@@ -50,6 +52,7 @@ $('search-custom').onsubmit = (e) => {
   $('search-url-note').textContent = 'Saved.';
   loui.send('search:set', { engine: 'custom', url });
 };
+$('tabs-vertical').onchange = () => loui.send('tabs:layout', { vertical: $('tabs-vertical').checked });
 $('elsewhere-add').onsubmit = (e) => {
   e.preventDefault();
   loui.send('brave:add', $('elsewhere-site').value);

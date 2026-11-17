@@ -3,7 +3,7 @@
 // is unloaded and its renderer's memory freed, while the tab strip keeps its
 // title, icon and address. It loads again when selected or used by Claude.
 //
-// Never put to sleep: the tab on screen; tabs in a Claude session's group;
+// Never put to sleep: the tab on screen; pinned tabs; tabs in a Claude session's group;
 // tabs playing sound, loading, asking for a permission or downloading; pages
 // with form input the user has not sent; sites the user keeps awake.
 //
@@ -55,7 +55,7 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
   // menu), only these apply.
   function mayRest(tab) {
     return !tab.asleep && !!tab.wc && !tab.wc.isDestroyed() &&
-      tab.id !== tabs.activeId && tab.group === YOU &&
+      tab.id !== tabs.activeId && tab.group === YOU && !tab.pinned &&
       !tab.loading && !tab.peeking && !tab.wc.isCurrentlyAudible() &&
       !permissions.asking(tab.id) && !downloading.has(tab.wc);
   }

@@ -42,7 +42,7 @@ function createRestore({ tabs, file }) {
     return Object.keys(PRESETS).find((k) => PRESETS[k] === d) || { width: d.width, height: d.height, mobile: !!d.mobile };
   }
 
-  const describe = (tab) => ({ history: history(tab), device: device(tab) });
+  const describe = (tab) => ({ history: history(tab), device: device(tab), pinned: !!tab.pinned });
 
   function snapshot() {
     const list = tabs.list.filter(mine);
@@ -85,7 +85,7 @@ function createRestore({ tabs, file }) {
     const was = describe(tab);
     const blank = !was.history?.entries.some((e) => e.url && e.url !== 'about:blank');
     if (blank) return; // nothing worth bringing back
-    closed.push({ ...was, at: tabs.list.indexOf(tab) });
+    closed.push({ ...was, at: tabs.in(tab.group).indexOf(tab) });
     if (closed.length > MAX_CLOSED) closed.shift();
   });
   app.on('before-quit', stop);
@@ -94,7 +94,9 @@ function createRestore({ tabs, file }) {
   // asleep: the tab loads only when it is selected (or Claude uses it).
   function open(was, show, asleep = false) {
     const h = Array.isArray(was?.history?.entries) && was.history.entries.length ? was.history : null;
-    const tab = tabs.create('', { show, device: was?.device || undefined, history: h || undefined, asleep });
+    const tab = tabs.create('', {
+      show, device: was?.device || undefined, history: h || undefined, asleep, pinned: was?.pinned === true,
+    });
     if (h) pending.set(tab, h);
     return tab;
   }
@@ -105,8 +107,9 @@ function createRestore({ tabs, file }) {
       let saved;
       try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return false; }
       if (!Array.isArray(saved?.tabs) || !saved.tabs.length) return false;
-      // All but the one on screen start asleep, so a restart does not load every tab at once.
-      const opened = saved.tabs.map((t) => open(t, false, true));
+      // All but the one on screen start asleep, so a restart does not load every tab at
+      // once. Pinned tabs load: they never sleep (see sleep.js), like a mail tab kept open.
+      const opened = saved.tabs.map((t) => open(t, false, t?.pinned !== true));
       tabs.select((opened[saved.active] || opened[0]).id);
       return true;
     },
@@ -116,9 +119,7 @@ function createRestore({ tabs, file }) {
       const was = closed.pop();
       if (!was) return null;
       const tab = open(was, true);
-      tabs.list.splice(tabs.list.indexOf(tab), 1);
-      tabs.list.splice(Math.min(was.at, tabs.list.length), 0, tab);
-      tabs.emit('change');
+      tabs.reorder(tab.id, was.at);
       return tab;
     },
   };

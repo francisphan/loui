@@ -21,6 +21,7 @@
 #settings h3 { margin: 6px 0 0; font-size: 13.5px; font-weight: 650; }
 #settings p { margin: 0; color: var(--ink-2); line-height: 1.4; }
 #settings label { display: grid; gap: 4px; font-weight: 600; }
+#settings label.check { display: flex; align-items: center; gap: 7px; font-weight: 400; }
 #search-custom { display: grid; gap: 6px; margin: 0; }
 #settings select, #settings input[type='text'] {
   height: 30px;

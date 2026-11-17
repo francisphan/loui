@@ -104,7 +104,19 @@ const currentState = () => ({
   ...search.state(),
   ...brave.state(),
   ...bookmarks.state(),
+  tabStrip: tabStrip(),
 });
+
+// Where the tabs are: a strip along the top (the default) or a sidebar on the
+// left, which can be collapsed to icons. Both kept in settings.json.
+const tabStrip = () => ({ vertical: settings.verticalTabs === true, collapsed: settings.sidebarCollapsed === true });
+function setTabStrip({ vertical, collapsed } = {}) {
+  if (typeof vertical === 'boolean') settings.verticalTabs = vertical;
+  if (typeof collapsed === 'boolean') settings.sidebarCollapsed = collapsed;
+  saveSettings();
+  pushState();
+  Menu.setApplicationMenu(appMenu());
+}
 
 function createWindow() {
   const ses = session.fromPartition('persist:loui');
@@ -208,6 +220,12 @@ const handlers = {
   'tab:close': (id) => tabs.close(id),
   'tab:reopen': () => restore.reopenClosed(),
   'tab:menu': (id) => tabs.tabMenu(id),
+  // Ctrl+W. A pinned tab stays: Ctrl+W does nothing on it, as in Brave; its menu still closes it.
+  'tab:close-active': () => active() && !active().pinned && tabs.close(active().id),
+  'tab:nudge': (step) => active() && tabs.nudge(active().id, step), // Ctrl+Shift+PageUp/PageDown
+  'tab:move': ({ id, group, index, pinned } = {}) => tabs.drop(id, group, index, { pinned }), // dragged in the tab strip
+  'tab:pin': ({ id, on } = {}) => tabs.pin(id, on),
+  'tabs:layout': (choice) => setTabStrip(choice),
   go: (input) => { active()?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
   back: () => active()?.wc.navigationHistory.goBack(),
   forward: () => active()?.wc.navigationHistory.goForward(),
@@ -313,7 +331,7 @@ function appMenu() {
       label: 'File',
       submenu: [
         { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => handlers['tab:new']() },
-        { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => active() && tabs.close(active().id) },
+        { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: handlers['tab:close-active'] },
         { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
         { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
         { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
@@ -344,6 +362,15 @@ function appMenu() {
         { label: 'Forward', accelerator: 'Alt+Right', click: handlers.forward },
         { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => cycle(1) },
         { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => cycle(-1) },
+        // The keyboard's way to do what dragging a tab does.
+        { label: 'Move tab left', accelerator: 'Ctrl+Shift+PageUp', click: () => handlers['tab:nudge'](-1) },
+        { label: 'Move tab right', accelerator: 'Ctrl+Shift+PageDown', click: () => handlers['tab:nudge'](1) },
+        { label: 'Pin or unpin tab', click: () => active() && tabs.pin(active().id, !active().pinned) },
+        { type: 'separator' },
+        {
+          label: 'Vertical tabs', type: 'checkbox', checked: tabStrip().vertical,
+          click: (item) => setTabStrip({ vertical: item.checked }),
+        },
         { type: 'separator' },
         ...bookmarks.menuItems.view(),
         { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
