@@ -57,6 +57,7 @@ function createDownloads({ ses, tabs, home, changed }) {
     started.set(wc, n + 1);
     return tabs.recent(tab) || n === 0;
   }
+  const origin = new Map(); // id -> the session a private window's download came from, to try it again there
 
   const folder = () => process.env.LOUI_DOWNLOADS || app.getPath('downloads');
   // A private window's downloads are listed while it is open, never written
@@ -105,6 +106,7 @@ function createDownloads({ ses, tabs, home, changed }) {
     };
     items.unshift(d);
     running.set(d.id, item);
+    if (priv) origin.set(d.id, s);
     if (items.length > KEEP) items = items.filter((x, i) => i < KEEP || running.has(x.id));
     const update = () => {
       const chosen = item.getSavePath();
@@ -148,6 +150,12 @@ function createDownloads({ ses, tabs, home, changed }) {
         from.downloadURL(d.url);
       }
     }
+    // A download that was cancelled or did not finish is started again from
+    // its address, in the session it came from; the new one takes its place in the list.
+    else if (action === 'retry' && !item && d.state !== 'completed' && /^https?:/i.test(d.url || '')) {
+      items = items.filter((x) => x !== d);
+      (origin.get(id) || ses).downloadURL(d.url);
+    }
     else if ((action === 'open' || action === 'show') && d.state === 'completed') {
       if (!fs.existsSync(d.file)) d.gone = true;
       else if (action === 'open') shell.openPath(d.file);
@@ -185,6 +193,7 @@ function createDownloads({ ses, tabs, home, changed }) {
   function forgetPrivate() {
     for (const d of items) if (d.private) running.get(d.id)?.cancel();
     items = items.filter((d) => !d.private);
+    origin.clear();
     changed();
   }
 

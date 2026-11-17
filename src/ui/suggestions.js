@@ -19,10 +19,13 @@ loui.on('suggest', ({ items, chosen }) => {
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', i === chosen);
     row.dataset.url = s.url;
-    row.append(el('span', 'title', s.title || plain(s.url)), el('span', 'url', plain(s.url)));
+    row.dataset.kind = s.source || '';
+    // note: what the row does, for the first row (what Enter does) and an open tab.
+    const note = s.source === 'tab' ? `Switch to tab · ${plain(s.url)}` : s.note ?? plain(s.url);
+    row.append(el('span', 'title', s.title || plain(s.url)), el('span', 'url', note));
     // On press, not on click: the press moves focus out of the address bar,
     // which closes the list before a click would arrive.
-    row.onmousedown = (e) => { if (e.button === 0) loui.send('suggest:pick', s.url); };
+    row.onmousedown = (e) => { if (e.button === 0) loui.send('suggest:pick', s.tab ? { url: s.url, tab: s.tab } : s.url); };
     return row;
   }));
 });

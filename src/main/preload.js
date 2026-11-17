@@ -18,6 +18,8 @@ const SEND = new Set([
   'activity',
   'pip:open',
   'page:focus', 'panel:shown',
+  'guard:answer', 'guard:show', 'guard:set', 'guard:site-add', 'guard:site-remove', 'guard:forget', 'guard:untrust',
+  'tab:reveal', 'window:close-answer', 'device:reset',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',

@@ -1,7 +1,7 @@
 // Loui's error page: what went wrong, Try again, and (when the network is
 // down or the address doesn't exist) Louis's walk, plus noticing when the
 // connection is back. Put together with louis.js by src/main/errorpage.js,
-// which hands it PAGE = { url, code, reason, best, shown, game }.
+// which hands it PAGE = { url, code, reason, best, shown, game, crash, cert }.
 //
 // Everything that came from the failed address is shown as text, never as
 // markup. Try again reloads this history entry, which is the address that
@@ -16,6 +16,11 @@ try { host = new URL(PAGE.url).hostname; } catch {}
 // text and the site's name, which is shown in bold.
 function describe(code) {
   const site = host || 'this site';
+  if (PAGE.crash) {
+    return ['Page crashed', 'This page crashed', [PAGE.crash === 'oom' ? 'The page ran out of memory and stopped.'
+      : PAGE.crash === 'killed' ? 'The page was stopped.' : 'Something went wrong in the page and it stopped.',
+    '', ' Reload opens it again; anything you typed into it is gone.']];
+  }
   if (OFFLINE_CODES.includes(code)) {
     return ["You're offline", "You're offline", ["Loui can't reach the internet, so this page didn't open. Check your Wi-Fi or network cable."]];
   }
@@ -43,9 +48,30 @@ why.forEach((part, i) => {
   el('why').append(i % 2 ? Object.assign(document.createElement('b'), { textContent: part }) : part);
 });
 el('address').textContent = PAGE.url;
-el('detail').textContent = PAGE.reason ? `${PAGE.reason} (${PAGE.code})` : `Error ${PAGE.code}`;
+el('detail').textContent = PAGE.crash ? `Page process: ${PAGE.crash}` : PAGE.reason ? `${PAGE.reason} (${PAGE.code})` : `Error ${PAGE.code}`;
+if (PAGE.crash) el('retry').textContent = 'Reload';
 el('retry').addEventListener('click', () => location.reload());
 el('reload').addEventListener('click', () => location.reload());
+
+// ── a certificate that can't be verified ────────────────────────────────
+// Advanced shows what opening anyway means, and the button. The main process
+// waits for the press (proceed(), below) and decides whether it counts.
+let proceeding = null; // proceed's caller
+if (PAGE.cert) {
+  el('advanced').hidden = false;
+  el('risk-site').textContent = host;
+  el('advanced').addEventListener('click', () => {
+    const open = el('risk').hidden;
+    el('risk').hidden = !open;
+    el('advanced').setAttribute('aria-expanded', open);
+  });
+  el('proceed').addEventListener('click', (e) => {
+    if (!e.isTrusted || !proceeding) return;
+    proceeding(true);
+    proceeding = null;
+  });
+  addEventListener('pagehide', () => proceeding?.(null));
+}
 
 // ── the game, and the main process waiting for new best scores ──────────
 let shown = PAGE.shown;
@@ -102,6 +128,7 @@ update();
 // Called by the main process only (src/main/errorpage.js).
 window.__louiErrorPage = {
   setShown(on) { shown = !!on; update(); },
+  proceed() { return new Promise((resolve) => { proceeding = resolve; }); },
   nextBest() {
     if (unsent != null) { const n = unsent; unsent = null; return n; }
     return new Promise((resolve) => { waiting = resolve; });

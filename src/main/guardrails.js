@@ -375,14 +375,22 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     }
   });
 
-  // The question shows in the window that holds its tab (the window being served, see tabs.as()).
+  // The question shows in the window that holds its tab (the window being
+  // served, see tabs.as()), and in the window the user is in if that is
+  // another one, so a session never waits behind a window nobody looks at.
+  // Never in a private window for a tab that is not in it.
   function state() {
     const p = pending[0];
-    const here = !!p && tabs.get(p.tabId)?.window === tabs.window();
+    const w = tabs.window();
+    const holder = p ? tabs.get(p.tabId)?.window : null;
+    const here = !!holder && holder === w;
+    const elsewhere = !!holder && !here && !!w && tabs.focused === w && !w.private;
     return {
-      guard: here ? {
+      guard: here || elsewhere ? {
         id: p.id, who: who(p.session), kind: p.kind, site: p.site, what: p.what, image: p.image,
-        canAlways: !!p.origin, onScreen: tabs.activeId === p.tabId, more: pending.length - 1,
+        canAlways: !!p.origin, onScreen: here && tabs.activeId === p.tabId, more: pending.length - 1,
+        // Asked from another window: which one the tab is in.
+        elsewhere: elsewhere ? tabs.windowLabel(holder) : null,
       } : null,
       guardrails: {
         on: conf.on,

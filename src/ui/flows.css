@@ -1,0 +1,42 @@
+/* See flows.js: the question before the last private window closes, the
+   "Not secure" mark, and Reset beside an emulated device's name. */
+
+/* A question of Loui's own, in the chrome above the page like a site's
+   permission question, marked in the danger colour: tabs are about to close. */
+#close-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 40px;
+  padding: 6px 10px 6px 14px;
+  box-sizing: border-box;
+  background: var(--paper);
+  box-shadow: inset 3px 0 0 var(--danger), inset 0 -1px 0 var(--rule);
+  font-size: 13.5px;
+}
+#close-ask[hidden] { display: none; }
+#close-ask-text { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; }
+#close-ask-no, #close-ask-yes { flex: none; height: 28px; padding: 0 14px; border-radius: 14px; font-weight: 650; }
+#close-ask-no { border: 0; background: var(--focus); color: var(--paper); }
+#close-ask-yes { border: 1px solid var(--rule); background: none; color: var(--danger); }
+
+/* Beside the address bar, like the private window's label, in the danger colour. */
+#insecure-label {
+  flex: none;
+  height: 22px;
+  margin: 0 2px 0 6px;
+  padding: 0 9px;
+  box-sizing: border-box;
+  border: 1px solid var(--danger);
+  border-radius: 11px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 20px;
+  white-space: nowrap;
+}
+#insecure-label[hidden], #device-reset[hidden] { display: none; }
+
+#device-reset { padding: 0 8px; color: var(--claude); font-weight: 650; }
+@container navrow (max-width: 520px) { #device-reset { display: none; } }

@@ -8,6 +8,9 @@
 (() => {
   ICON.key = svg('<circle cx="5.5" cy="10.5" r="3"/><path d="m7.6 8.4 6-6M11.5 4.5l2 2M9.8 6.2l1.5 1.5"/>');
   ICON.eye = svg('<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>', 14);
+  // While a password is on show the eye is struck through: pressing it hides the password.
+  ICON.eyeOff = svg('<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/><path d="m2.5 13.5 11-11"/>', 14);
+  ICON.tick = svg('<path d="m3 8.5 3.2 3.2L13 4.8"/>', 14);
   ICON.copy = svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-1h-8v8h1"/>', 14);
 
   const ask = (request) => loui.send('passwords', request);
@@ -63,6 +66,7 @@
   const shown = new Map(); // id -> { password, timer }: passwords on show
   let data = { available: true, items: [], never: [] };
   let editing = null, deleting = null;
+  let copied = null; // { id, seconds, timer }: the password just copied, said so for a moment
   const isOpen = () => document.body.classList.contains('passwords-open');
 
   function hideAll() {
@@ -76,6 +80,8 @@
     } else {
       hideAll();
       editing = deleting = null;
+      clearTimeout(copied?.timer);
+      copied = null;
     }
     document.body.classList.toggle('passwords-open', show);
     panel.hidden = !show;
@@ -167,14 +173,22 @@
     const who = el('div', 'who');
     who.append(el('span', 'user', p.username || '(no username)'));
     const secret = shown.get(p.id);
-    who.append(el('span', 'secret' + (secret ? ' on' : ''), p.unreadable ? "Can't be read on this computer" : secret ? secret.password : '••••••••'));
+    const justCopied = copied?.id === p.id;
+    if (justCopied && !p.unreadable) {
+      // The clipboard is emptied again after a while (src/main/passwords.js), so say so.
+      const said = el('span', 'secret copied', `Copied, clears in ${copied.seconds} s`);
+      said.setAttribute('role', 'status');
+      who.append(said);
+    } else {
+      who.append(el('span', 'secret' + (secret ? ' on' : ''), p.unreadable ? "Can't be read on this computer" : secret ? secret.password : '••••••••'));
+    }
     node.append(who);
     if (!p.unreadable) {
       node.append(
-        small('reveal', 'eye', secret ? `Hide the password for ${p.username}` : `Show the password for ${p.username}`, () => {
+        small('reveal' + (secret ? ' on' : ''), secret ? 'eyeOff' : 'eye', secret ? `Hide the password for ${p.username}` : `Show the password for ${p.username}`, () => {
           if (shown.has(p.id)) { clearTimeout(shown.get(p.id).timer); shown.delete(p.id); draw(); } else ask({ do: 'reveal', id: p.id });
         }),
-        small('copy', 'copy', `Copy the password for ${p.username}`, () => ask({ do: 'copy', id: p.id })),
+        small('copy' + (justCopied ? ' done' : ''), justCopied ? 'tick' : 'copy', justCopied ? `Copied the password for ${p.username}` : `Copy the password for ${p.username}`, () => ask({ do: 'copy', id: p.id })),
         small('edit', 'edit', `Edit ${p.username}`, () => { editing = p.id; deleting = null; draw(); }),
       );
     }
@@ -234,6 +248,14 @@
       clearTimeout(shown.get(m.id)?.timer);
       shown.set(m.id, { password: m.password, timer: setTimeout(() => { shown.delete(m.id); draw(); }, SHOWN_MS) });
       draw();
+    } else if (m.type === 'copied') {
+      if (!isOpen()) return;
+      const had = document.activeElement?.closest?.('.password-row')?.dataset.id === m.id;
+      clearTimeout(copied?.timer);
+      copied = { id: m.id, seconds: m.seconds, timer: setTimeout(() => { copied = null; draw(); }, 2500) };
+      draw();
+      // Drawing again replaced the button that was pressed: the keyboard stays on it.
+      if (had) $('passwords-list').querySelector(`.password-row[data-id="${CSS.escape(m.id)}"] .copy`)?.focus();
     } else if (m.type === 'panel') {
       showPasswords(true);
     }

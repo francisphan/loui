@@ -35,6 +35,7 @@
   --claude-wash: #F7E4F0;
   --on-claude: #FFFFFF;
   --danger: #A8281F;
+  --amber: #A66300;
   --panel-w: min(372px, 40vw); /* a narrow window keeps room for the toolbar */
 }
 @media (prefers-color-scheme: dark) {
@@ -50,6 +51,7 @@
     --claude-wash: #3B1C31;
     --on-claude: #2A0F22;
     --danger: #F2988F;
+    --amber: #E5B25D;
   }
 }
 
@@ -148,6 +150,8 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 .tab.loading .dot { border-color: var(--rule); border-top-color: var(--focus); scale: 1; animation: turn .8s linear infinite; }
 .tab .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* A sleeping tab: its page is unloaded until it is opened. */
+.tab .lent-private { flex: none; display: grid; place-items: center; color: var(--ink-2); }
+.tab.pinned .lent-private { display: none; }
 .tab.asleep img, .tab.asleep .dot, .tab.asleep .letter, .tab.asleep .title { opacity: .65; }
 .tab.asleep img { filter: grayscale(1); }
 .tab .close {
@@ -453,6 +457,7 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 #find-text::placeholder { color: var(--ink-2); }
 #find-text:focus { outline: none; border-color: var(--focus); background: var(--paper); }
 #find-count { min-width: 60px; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+#find-count.none { color: var(--danger); }
 #find .icon { width: 28px; height: 28px; }
 
 /* ── where the page goes ─────────────────────────────────────────────────── */
@@ -478,7 +483,11 @@ body.panel-closed #panel { display: none; }
 /* The lamp is lit when other Claude sessions can reach this browser. */
 .lamp { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--ink-2); }
 .link-connected .lamp { border-color: var(--claude); background: var(--claude); }
-.link-refused .lamp { border-color: var(--danger); }
+/* Trouble is filled in too: amber while it tries, red when it cannot get through. Off stays hollow. */
+.link-connecting .lamp { border-color: var(--amber); background: var(--amber); }
+.link-refused .lamp, .link-offline .lamp { border-color: var(--danger); background: var(--danger); }
+.link-refused #link-text, #relay p#relay-status.refused { color: var(--danger); }
+.link-refused #link-text { font-weight: 650; }
 
 /* ── side panels ─────────────────────────────────────────────────────────── */
 /* Settings, the relay form and site permissions: each takes the Claude
@@ -559,6 +568,7 @@ body:is(.settings-open, .relay-open, .perms-open) #panel { display: none; }
 .said {
   align-self: flex-end;
   max-width: 88%;
+  margin-right: 2px; /* clear of the feed's scrollbar and the panel's edge */
   padding: 7px 11px;
   border-radius: 12px 12px 3px 12px;
   background: var(--shoal);
@@ -630,6 +640,7 @@ body:is(.settings-open, .relay-open, .perms-open) #panel { display: none; }
   resize: none;
   user-select: text;
 }
+#prompt { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
 #prompt::placeholder { color: var(--ink-2); }
 #prompt:focus { outline: none; border-color: var(--focus); }
 #composer-row { display: flex; align-items: center; justify-content: space-between; }
@@ -687,7 +698,11 @@ body:is(.settings-open, .relay-open, .perms-open) #panel { display: none; }
 .download .bar { grid-area: bar; height: 3px; margin: 1px 0 3px; overflow: hidden; border-radius: 2px; background: var(--shoal); }
 .download .bar[hidden] { display: none; }
 .download .bar span { display: block; height: 100%; background: var(--focus); transition: width .2s; }
-.download.paused .bar span { background: var(--ink-2); }
+.download.paused .bar span, .download.stalled .bar span { background: var(--ink-2); }
+/* Size not known: a piece of the bar travels along it, to show it is going. */
+.download .bar.unknown span { width: 30% !important; transition: none; animation: travel 1.4s ease-in-out infinite alternate; }
+.download .acts .sure { align-self: center; margin-right: 4px; color: var(--ink); font-size: 12.5px; white-space: nowrap; }
+.download .acts .danger { color: var(--danger); font-weight: 650; }
 .download .acts { grid-area: acts; display: flex; justify-content: flex-end; gap: 2px; min-width: 150px; }
 /* ── site permissions ────────────────────────────────────────────────────── */
 /* A site's question, in the chrome above its page: below the toolbar, so it
@@ -722,10 +737,12 @@ body:is(.settings-open, .relay-open, .perms-open) #panel { display: none; }
 
 @keyframes turn { to { rotate: 1turn; } }
 @keyframes breathe { 50% { opacity: .25; } }
+@keyframes travel { from { margin-left: 0; } to { margin-left: 70%; } }
 @media (prefers-reduced-motion: reduce) {
   .tab.loading .dot, .reply.waiting::after, .group-mark.working { animation: none; }
   #navrow { transition: none; }
   .download .bar span { transition: none; }
+  .download .bar.unknown span { width: 100% !important; animation: none; opacity: .45; }
 }
 
 /* ── private window ──────────────────────────────────────────────────────── */

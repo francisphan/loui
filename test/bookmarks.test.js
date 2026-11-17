@@ -188,7 +188,8 @@ test('the address bar suggests bookmarks before pages from history, under their 
   await b.ui('address:key', 'Escape');
 
   const byName = await suggestions('reading spot');
-  assert.deepEqual(byName.map((r) => [r.url, r.title]), [[b.base + '/second.html', 'My reading spot']]);
+  // After the row that says what Enter does (here, a search for the words).
+  assert.deepEqual(byName.filter((r) => r.kind !== 'enter').map((r) => [r.url, r.title]), [[b.base + '/second.html', 'My reading spot']]);
   await b.ui('address:key', 'Escape');
   await b.ui('address:key', 'Escape');
 });

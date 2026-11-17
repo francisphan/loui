@@ -77,6 +77,40 @@ h1 { font-size: 28px; line-height: 1.2; font-weight: 600; margin: 0 0 8px; }
 .primary:hover { filter: brightness(1.08); }
 .primary:active { transform: translateY(1px); }
 
+/* A certificate that can't be verified: Advanced, and what opening anyway means. */
+.plain {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 7px 14px;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.plain:hover { background: var(--paper); }
+.plain[hidden], .risk[hidden] { display: none; }
+.risk {
+  margin: 20px 0 0;
+  padding: 12px 16px 14px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--warn);
+  border-radius: 10px;
+  background: var(--paper);
+  font-size: 15px;
+}
+.risk p { margin: 0 0 8px; }
+.risk b { font-weight: 600; overflow-wrap: anywhere; }
+.danger {
+  margin-top: 4px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 7px 14px;
+  background: none;
+  color: var(--warn);
+  font-weight: 600;
+  cursor: pointer;
+}
+.danger:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
 .back {
   display: flex;
   align-items: center;

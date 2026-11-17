@@ -211,6 +211,34 @@ test("Claude sessions' tabs get no offers, no key and no fills, and no tool reac
   await until(async () => !(await b.state()).groups.some((g) => g.id === 'pw-session'), 'the session to end');
 });
 
+test('in a private window a saved password is filled on the user\'s click, and nothing is ever offered to save', async () => {
+  const priv = await b.ui('window:new', { private: true });
+  const inPriv = (ui, arg) => b.ui('in-window', { window: priv, ui, arg });
+  const shown = async () => (await inPriv('state')).tabs.find((t) => t.active);
+  const page = (code) => shown().then((t) => b.ui('tab:js', { id: t.id, code }));
+  await inPriv('go', `${b.base}/login.html`);
+  await until(async () => { const t = await shown(); return t.title === 'Sign in' && !t.loading; }, 'the sign-in page');
+  await until(async () => (await inPriv('state')).passwords.key === 1, 'the key in the private window');
+  assert.deepEqual(await inPriv('passwords:menu'), ['ana@example.com']);
+  const used = (await list()).items[0].updated;
+  assert.deepEqual(await inPriv('passwords:choose', 0), { filled: true, username: true, password: true });
+  assert.deepEqual(await page(`[document.getElementById('user').value, document.getElementById('pass').value]`), ['ana@example.com', 'even-better-Secret#2']);
+  // Signing in with another password there offers nothing: no save, no update.
+  secrets.add('private-Secret-9');
+  await page(`(() => {
+    document.getElementById('pass').value = 'private-Secret-9';
+    document.getElementById('form').requestSubmit();
+  })()`);
+  await until(async () => (await shown()).title === 'Welcome', 'the welcome page');
+  await sleep(1500);
+  assert.equal((await inPriv('state')).passwords.offer, null);
+  assert.equal((await pw()).offer, null);
+  assert.equal(await b.ui('passwords:reveal-now', (await list()).items[0].id), 'even-better-Secret#2', 'the saved password is as it was');
+  assert.equal((await list()).items[0].updated, used);
+  await b.ui('window:close', priv);
+  await until(async () => (await b.ui('windows')).length === 1, 'the private window to close');
+});
+
 test('the Passwords panel lists, edits and deletes', async () => {
   await b.ui('passwords:panel');
   const rows = () => b.ui('chrome:eval', `[...document.querySelectorAll('#passwords-list .password-row')].map((r) => r.textContent)`);
@@ -238,6 +266,26 @@ test('the Passwords panel lists, edits and deletes', async () => {
   assert.deepEqual(await at(), ['quiet', 'Cancel', String(item.id)]);
   await pressRow('button');
   assert.deepEqual(await at(), ['remove', '', String(item.id)]);
+
+  // The eye is struck through while the password is on show.
+  const button = (which) => b.ui('chrome:eval', `document.querySelector('#passwords-list .password-row .${which}').className + ' ' + document.querySelector('#passwords-list .password-row .${which} svg').innerHTML.length`);
+  const eyeOn = await button('reveal');
+  assert.match(eyeOn, /^reveal on /);
+  await b.ui('chrome:eval', `document.querySelector('#passwords-list .password-row .reveal').click()`);
+  await until(async () => /^reveal \d/.test(await button('reveal')), 'the password to be hidden again');
+  assert.notEqual((await button('reveal')).split(' ').pop(), eyeOn.split(' ').pop(), 'the icon changes shape');
+
+  // Copying says so, and that the clipboard is emptied again.
+  await b.ui('chrome:eval', `document.querySelector('#passwords-list .password-row .copy').click()`);
+  await until(async () => (await rows())[0]?.includes('Copied, clears in 30 s'), 'the copy to be confirmed');
+  assert.match(await button('copy'), /^copy done /);
+  await until(async () => !(await rows())[0]?.includes('Copied'), 'the note to go again');
+  assert.match(await button('copy'), /^copy \d/);
+
+  // The question before deleting shows the whole account name, on as many lines as it takes.
+  await b.ui('chrome:eval', `document.querySelector('#passwords-list .password-row .remove').click()`);
+  assert.equal(await b.ui('chrome:eval', `getComputedStyle(document.querySelector('#passwords-list .password-row .ask')).whiteSpace`), 'normal');
+  await b.ui('chrome:eval', `document.querySelector('#passwords-list .password-row.confirm button').click()`);
 
   await b.ui('passwords', { do: 'remove', id: item.id });
   assert.deepEqual((await list()).items, []);

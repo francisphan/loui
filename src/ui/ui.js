@@ -19,6 +19,7 @@ const ICON = {
   device: svg('<rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7.2 12.2h1.6"/>'),
   devtools: svg('<path d="m5 4.5-3.5 3.5L5 11.5M11 4.5l3.5 3.5-3.5 3.5M9.2 3 6.8 13"/>'),
   panel: svg('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/>'),
+  mask: svg('<path d="M1.5 5.5c2.2-1 4.3-1 6.5 0 2.2-1 4.3-1 6.5 0-.2 3.2-1.6 5-3.6 5-1.3 0-2-.9-2.9-.9s-1.6.9-2.9.9c-2 0-3.4-1.8-3.6-5z"/><path d="M4.5 7.5h1.8M9.7 7.5h1.8"/>', 13),
 };
 const setIcon = (el, name) => { el.innerHTML = ICON[name]; };
 const el = (tag, className, text) => {
@@ -150,6 +151,17 @@ function drawTab(t) {
     mark = t.loading ? el('span', 'dot') : letterOf(t);
   }
   tab.append(mark);
+  // A private tab the user lent to a session sits in the session's group, in a
+  // normal window: a small mask says what it is and what becomes of it.
+  if (t.private && t.group !== YOU) {
+    const mask = el('span', 'lent-private');
+    mask.innerHTML = ICON.mask;
+    mask.setAttribute('role', 'img');
+    mask.title = `A private tab you lent to ${groupOf(t.group)?.label || 'this session'}. It goes back to your private window when the session ends, and closes if you close your last private window first.`;
+    mask.setAttribute('aria-label', 'Private tab, lent to this session');
+    tab.title = `${t.title} (private tab, lent to this session)`;
+    tab.append(mask);
+  }
   // A pinned tab is its icon alone: it is closed from its menu, and Ctrl+W leaves it be.
   if (!t.pinned) {
     const close = el('button', 'close');
@@ -611,7 +623,8 @@ function sidePanel(name, node, opened) {
 }
 
 // ── connection to other Claude sessions ─────────────────────────────────────
-const LINK_WORDS = { connected: 'Connected', connecting: 'Connecting', offline: 'Offline', refused: 'Refused', off: 'Not connected' };
+const LINK_WORDS = { connected: 'Connected', connecting: 'Connecting', offline: 'Offline, retrying', refused: 'Refused', off: 'Not connected' };
+let linkWas = ''; // the status last drawn
 const relay = $('relay');
 function drawLink() {
   const link = state.link;
@@ -622,12 +635,22 @@ function drawLink() {
     link.status === 'connected' ? `Connected as ${link.device}. ${others === 1 ? '1 session is' : `${others} sessions are`} using this browser.`
       : link.status === 'refused' ? `The relay refused this browser: ${link.detail}`
         : link.status === 'off' ? 'Not connected. Only the Claude panel can use this browser.'
-          : link.detail || 'Connecting…';
+          : link.status === 'offline' ? `Offline, retrying${link.detail ? `: ${link.detail}` : '.'}`
+            : link.detail || 'Connecting…';
   if (relay.hidden) {
     $('relay-url').value = link.url || '';
     $('relay-on').checked = link.on !== false;
     $('relay-key').placeholder = link.hasKey ? 'Saved. Enter a new key to replace it.' : '';
   }
+  // Refused: no Claude session can reach this browser until the key is put
+  // right, so the form opens, once, when it happens (never in a private
+  // window, which has no panel; nor taking the keyboard from what the user is typing).
+  $('relay-status').classList.toggle('refused', link.status === 'refused');
+  if (link.status === 'refused' && linkWas !== 'refused' && !state.window?.private && relay.hidden) {
+    relay.hidden = false;
+    togglePanel(true);
+  }
+  linkWas = link.status;
 }
 const showRelay = sidePanel('relay', relay, () => $('relay-url').focus());
 $('link').onclick = () => showRelay(relay.hidden);

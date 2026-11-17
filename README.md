@@ -205,7 +205,8 @@ Claude with its selector, text, HTML and a cropped screenshot.
   memory, shared by the private windows open at the same time and cleared when
   the last of them closes: no cookies, cache or site data survive, and none
   are shared with normal windows. Nothing goes into history, passwords are
-  never offered or filled, permission answers are not remembered, it is never
+  never offered to be saved (a saved one can be filled from the key in the
+  address bar), permission answers are not remembered, it is never
   restored, and closed tabs in it cannot be reopened. Downloads from it are
   listed only in private windows and only while one is open (the files stay
   in your Downloads folder; one still running is cancelled). Shields and the
@@ -217,6 +218,8 @@ Claude with its selector, text, HTML and a cropped screenshot.
   group (in a normal window) but keeps its private session, so the session
   sees that tab's private cookies and nothing else. When the session ends the
   tab goes back to its private window, or closes if no private window is left.
+  The lent tab carries a small mask in the session's group, and closing the
+  last private window while a session still holds one asks first.
 - **Cost.** A second window costs one more window chrome renderer (roughly
   30 to 90 MB); a private window also an in-memory session. Nothing is made
   until you open one. The address suggestions list is one view that moves to
@@ -332,8 +335,11 @@ Files are saved to your Downloads folder without asking (`LOUI_DOWNLOADS`
 overrides the folder). A file never replaces one already there: the second
 `report.pdf` becomes `report (1).pdf`. The downloads button in the toolbar
 (`Ctrl+J`) shows how far running downloads have got and opens the list, where
-you can pause, resume or cancel them, and open a finished file or show it in
-its folder. *Ask where to save each file* there brings back the Save As dialog
+you can pause, resume or cancel them, try a cancelled or failed one again,
+open a finished file or show it in its folder, and remove single rows. A
+program, script or shortcut says *Run…* instead of *Open* and asks once more
+in its row. A running download shows its speed and time left, and *Stalled*
+after ten seconds without a byte. *Ask where to save each file* there brings back the Save As dialog
 for downloads you start. Downloads that start in a Claude session's tab are
 saved and listed too, with the session's name; they never open a dialog, and
 sessions have no way to open a downloaded file. The last 50 are kept in
@@ -357,7 +363,10 @@ Pages you visit in your own tabs are kept in `history.json` in the profile
 in their tab groups are not, nor are tabs while you have handed them to a
 session. Typing in the address bar suggests pages from it, ranked by how often
 and how recently you visited them; the arrow keys move through them, Enter
-opens one, Esc closes the list. *History* (`Ctrl+H`, or the clock in the
+opens one, Esc closes the list. The first row says what Enter does: an address
+you have visited is completed inline as selected text (typing on replaces it,
+Backspace removes it), anything else that is not an address is searched for.
+Your own open tabs that match are offered as *Switch to tab*. *History* (`Ctrl+H`, or the clock in the
 toolbar) lists everything, with search, removal of single pages, and *Clear all*.
 
 ## Shields
@@ -515,6 +524,14 @@ itself, or, if you have started playing, offers to. The game stops whenever
 its tab is not on screen, and Louis sits still if the system asks for reduced
 motion.
 
+A site whose certificate can't be verified (a box or dev server of your own
+with a self-signed one) has *Advanced › Open anyway* on that page, in your own
+tabs only. Loui then accepts that one certificate for that site until you quit
+(`src/main/certs.js`; nothing is written down) and marks the address bar *Not
+secure* while you are there. Claude sessions' tabs are never let through, and
+a press by Claude does not count. A page whose process crashed gets the same
+page, saying so, with *Reload*.
+
 The page is drawn into Chromium's own error document (`src/ui/errorpage.*`,
 `src/ui/louis.js`), which has an opaque origin: no bridge, no storage, no
 cookies, and history does not record it.
@@ -546,7 +563,8 @@ src/main/search.js    the search engine for the address bar
 src/main/brave.js     Open in Brave, and the sites that open there instead of in Loui
 src/main/print.js     printing and Save as PDF
 src/main/bookmarks.js bookmarks: the bar's folder menus, import, bookmarks.json
-src/main/errorpage.js the page shown when a page can't be opened (and Louis's walk)
+src/main/errorpage.js the page shown when a page can't be opened or has crashed (and Louis's walk)
+src/main/certs.js     certificates the user accepted for this run ("Open anyway")
 src/main/passwords.js passwords: the encrypted store, offers to save, filling, import
 src/main/taskmanager.js  the task manager window: memory and CPU per tab and process
 src/main/pip.js       watching a session in a small window: its tab's frames, scaled down

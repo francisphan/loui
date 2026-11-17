@@ -145,8 +145,11 @@ function createPasswords({ tabs, home, send, changed }) {
   const watched = new Map(); // tab id -> { attempt, user, checking }
   const offers = []; // { id, tabId, origin, username, password, update }
   let seq = 0;
-  // A private window's tabs are never offered a save or a fill.
-  const yours = (tab) => !!tab && tab.group === YOU && !tab.private && !!tab.wc && !tab.wc.isDestroyed();
+  // The user's own tab, awake. In a private window a saved password can be
+  // filled on the user's click (mine), but nothing there is watched, and no
+  // save or update is ever offered (yours).
+  const mine = (tab) => !!tab && tab.group === YOU && !!tab.wc && !tab.wc.isDestroyed();
+  const yours = (tab) => mine(tab) && !tab.private;
   const notes = (tab) => {
     if (!watched.has(tab.id)) watched.set(tab.id, {});
     return watched.get(tab.id);
@@ -268,7 +271,7 @@ function createPasswords({ tabs, home, send, changed }) {
   // The tab on screen, if it is the user's, awake, on a web page: its origin.
   function fillable() {
     const tab = tabs.active();
-    if (!cipher.available || !yours(tab) || tab.asleep) return null;
+    if (!cipher.available || !mine(tab) || tab.asleep) return null;
     const origin = originOf(tab.wc.getURL());
     return origin ? { tab, origin } : null;
   }
@@ -278,7 +281,7 @@ function createPasswords({ tabs, home, send, changed }) {
   async function fill(tabId, loginId) {
     const tab = tabs.get(tabId);
     const login = byId(loginId);
-    if (!login || !yours(tab) || tab.id !== tabs.activeId) return { filled: false };
+    if (!login || !mine(tab) || tab.id !== tabs.activeId) return { filled: false };
     const origin = originOf(tab.wc.getURL());
     if (origin !== login.origin) return { filled: false };
     const username = open(login.username);
@@ -287,7 +290,7 @@ function createPasswords({ tabs, home, send, changed }) {
     const result = await tab.wc.executeJavaScriptInIsolatedWorld(WORLD, [{
       code: `${SCRIPT}\n;__louiPw.fill(${JSON.stringify({ origin, username: username || '', password })})`,
     }]).catch(() => ({ filled: false }));
-    if (result?.filled) {
+    if (result?.filled && !tab.private) { // a private window leaves no trace, not even when it was used
       login.used = Date.now();
       save();
     }
@@ -350,6 +353,7 @@ function createPasswords({ tabs, home, send, changed }) {
   // after 30 s if it still holds the password.
   let clearing = null;
   async function copy(id) {
+    const w = tabs.window(); // the answer goes to the window that asked, which an await forgets (tabs.as())
     const l = byId(id);
     if (!l || !(await confirmUser(`copy the password for ${siteOf(l.origin)}`))) return;
     const password = open(l.password);
@@ -357,6 +361,7 @@ function createPasswords({ tabs, home, send, changed }) {
     clipboard.writeText(password);
     clearTimeout(clearing);
     clearing = setTimeout(() => { if (clipboard.readText() === password) clipboard.clear(); }, CLEAR_CLIPBOARD_MS);
+    tabs.as(w, () => send('passwords', { type: 'copied', id, seconds: CLEAR_CLIPBOARD_MS / 1000 }));
   }
 
   function update({ id, username, password } = {}) {

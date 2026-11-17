@@ -26,7 +26,13 @@
     <p id="address" class="address"></p>
     <div class="actions">
       <button id="retry" class="primary" type="button">Try again</button>
+      <button id="advanced" class="plain" type="button" aria-expanded="false" aria-controls="risk" hidden>Advanced</button>
       <span id="detail" class="detail"></span>
+    </div>
+    <div id="risk" class="risk" hidden>
+      <p>If <b id="risk-site"></b> is a device or server of your own with a certificate it made itself, this is expected and you can open it. Anywhere else, don't: what you type there, passwords included, could be read by someone else.</p>
+      <p>Loui will accept this certificate for this site until you quit Loui, and marks the address bar "Not secure" while you are there.</p>
+      <button id="proceed" class="danger" type="button">Open anyway</button>
     </div>
     <p id="back" class="back" role="status" hidden>
       <span>You're back online.</span>
