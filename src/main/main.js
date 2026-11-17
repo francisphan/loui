@@ -310,6 +310,7 @@ function start() {
   activity = createActivity({
     dir: path.join(paths.home, 'activity'), tabs, settings, save: saveSettings,
     changed: () => broadcast('activity', { type: 'changed' }, false),
+    cipher: createCipher(),
   });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState, decided: activity.consent });
   sessions = createSessions({

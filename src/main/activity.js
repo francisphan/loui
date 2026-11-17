@@ -18,11 +18,17 @@
 // other typed text up to 200 characters, and only the first line of a script.
 // Tabs of a private window are not recorded.
 //
+// On disk the logs and pictures are encrypted where the system can encrypt
+// (cipher: as passwords.js makes it): with a key of their own, kept beside
+// the folder (activity.key) encrypted by the system. Where it cannot, they
+// are plain files only this user can read.
+//
 // The Claude panel works in the user's own tabs and has no session that ends:
 // its steps go to one "Claude panel" log per day.
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
+const crypto = require('crypto');
 
 const DAY = 864e5;
 const THUMB_WIDTH = 320;
@@ -34,9 +40,46 @@ const slug = (s) => String(s).replace(/[^\w-]/g, '_').slice(0, 40);
 const dayOf = (t) => new Date(t).toDateString();
 // Private windows (being built alongside this) mark their tabs; nothing in
 // them is recorded. Until then no tab has the field and this is always false.
+const MAGIC = Buffer.from('LOUIA1'); // starts an encrypted file
+
+// seal(bytes) / open(bytes): AES-256-GCM under the log's own key. A file
+// without the mark is read as it is (written before logs were encrypted, or
+// where the system cannot encrypt); one that will not open throws.
+function createBox(cipher, keyFile) {
+  if (!cipher?.available) return { on: false, seal: (b) => b, open: (b) => b, sealed: () => false };
+  let key = null;
+  try { key = Buffer.from(cipher.decrypt(fs.readFileSync(keyFile, 'utf8')), 'base64'); } catch {}
+  if (key?.length !== 32) {
+    // None yet, or one from another machine or account: logs under it are lost.
+    key = crypto.randomBytes(32);
+    fs.writeFileSync(keyFile, cipher.encrypt(key.toString('base64')), { mode: 0o600 });
+  }
+  const sealed = (b) => b.subarray(0, MAGIC.length).equals(MAGIC);
+  return {
+    on: true,
+    sealed,
+    seal(bytes) {
+      const iv = crypto.randomBytes(12);
+      const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+      const body = Buffer.concat([c.update(bytes), c.final()]);
+      return Buffer.concat([MAGIC, iv, c.getAuthTag(), body]);
+    },
+    open(bytes) {
+      if (!sealed(bytes)) return bytes;
+      const at = MAGIC.length;
+      const d = crypto.createDecipheriv('aes-256-gcm', key, bytes.subarray(at, at + 12));
+      d.setAuthTag(bytes.subarray(at + 12, at + 28));
+      return Buffer.concat([d.update(bytes.subarray(at + 28)), d.final()]);
+    },
+  };
+}
+
 const isPrivate = (tab) => !!(tab && (tab.private || tab.partition?.startsWith?.('private')));
 
-function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
+function createActivity({ dir, tabs, settings, save, changed = () => {}, cipher }) {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const box = createBox(cipher, `${dir}.key`);
+  const pack = (data) => box.seal(Buffer.from(JSON.stringify(data)));
   const keepDays = () => (Number.isFinite(settings.activityDays) ? Math.max(0, settings.activityDays) : 7);
   const maxBytes = () => (Number.isFinite(settings.activityMaxMB) ? settings.activityMaxMB : 200) * 1048576;
 
@@ -73,7 +116,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     log.saving = (log.saving || Promise.resolve()).then(async () => {
       if (log.off || removed.has(id)) return;
       const to = file(id);
-      await fsp.writeFile(`${to}.tmp`, JSON.stringify(log.data), { mode: 0o600 });
+      await fsp.writeFile(`${to}.tmp`, pack(log.data), { mode: 0o600 });
       if (removed.has(id)) return void fsp.rm(`${to}.tmp`, { force: true }).catch(() => {});
       await fsp.rename(`${to}.tmp`, to);
     }).catch(() => {});
@@ -204,7 +247,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
       const jpeg = img.resize({ width: Math.min(THUMB_WIDTH, width), quality: 'good' }).toJPEG(60);
       const name = `${log.data.steps.indexOf(s)}.jpg`;
       await fsp.mkdir(pictures(log.data.id), { recursive: true, mode: 0o700 });
-      await fsp.writeFile(path.join(pictures(log.data.id), name), jpeg);
+      await fsp.writeFile(path.join(pictures(log.data.id), name), box.seal(jpeg));
       if (log.off) return void fsp.rm(pictures(log.data.id), { recursive: true, force: true }).catch(() => {});
       s.thumb = name;
       dirty(log);
@@ -250,7 +293,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
 
   // ── on disk ─────────────────────────────────────────────────────────────
   async function read(id) {
-    try { return JSON.parse(await fsp.readFile(file(id), 'utf8')); } catch { return null; }
+    try { return JSON.parse(box.open(await fsp.readFile(file(id))).toString('utf8')); } catch { return null; }
   }
 
   async function sizeOf(id) {
@@ -310,6 +353,22 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     return pruning;
   }
 
+  // A log written as plain files (before logs were encrypted) is encrypted
+  // where it lies.
+  async function encryptOld(id) {
+    if (!box.on) return;
+    const redo = async (f) => {
+      const bytes = await fsp.readFile(f);
+      if (box.sealed(bytes)) return;
+      await fsp.writeFile(`${f}.tmp`, box.seal(bytes), { mode: 0o600 });
+      await fsp.rename(`${f}.tmp`, f);
+    };
+    await redo(file(id)).catch(() => {});
+    for (const f of await fsp.readdir(pictures(id)).catch(() => [])) {
+      if (!f.endsWith('.tmp')) await redo(path.join(pictures(id), f)).catch(() => {});
+    }
+  }
+
   // At start: every log on disk is listed. One left unfinished was cut short
   // by Loui closing; the panel's log for today carries on.
   async function load() {
@@ -317,8 +376,18 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     for (const name of await fsp.readdir(dir)) {
       if (name.endsWith('.tmp')) await fsp.rm(path.join(dir, name), { force: true }).catch(() => {});
       if (!name.endsWith('.json')) continue;
-      const data = await read(name.slice(0, -5));
-      if (!data?.id || !Array.isArray(data.steps)) continue;
+      const id = name.slice(0, -5);
+      const data = await read(id);
+      if (!data?.id || !Array.isArray(data.steps)) {
+        // Encrypted under a key that is gone: nothing can read it again.
+        const bytes = await fsp.readFile(file(id)).catch(() => null);
+        if (bytes && box.sealed(bytes)) {
+          await fsp.rm(file(id), { force: true }).catch(() => {});
+          await fsp.rm(pictures(id), { recursive: true, force: true }).catch(() => {});
+        }
+        continue;
+      }
+      await encryptOld(data.id);
       if (data.source === 'panel' && dayOf(data.start) === dayOf(Date.now()) && !live.has('panel')) {
         data.end = null;
         data.ended = null;
@@ -326,7 +395,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
       } else if (!data.ended) {
         data.end = lastTime(data);
         data.ended = data.source === 'panel' ? 'day' : 'quit';
-        await fsp.writeFile(file(data.id), JSON.stringify(data), { mode: 0o600 }).catch(() => {});
+        await fsp.writeFile(file(data.id), pack(data), { mode: 0o600 }).catch(() => {});
       }
       index.set(data.id, summary(data));
     }
@@ -355,7 +424,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     for (const s of data.steps) {
       if (!s.thumb) continue;
       try {
-        const bytes = await fsp.readFile(path.join(pictures(id), s.thumb));
+        const bytes = box.open(await fsp.readFile(path.join(pictures(id), s.thumb)));
         s.thumb = `data:image/jpeg;base64,${bytes.toString('base64')}`;
       } catch {
         delete s.thumb;
@@ -384,7 +453,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
       if (!log.timer || log.off) continue;
       clearTimeout(log.timer);
       log.timer = null;
-      try { fs.writeFileSync(file(log.data.id), JSON.stringify(log.data), { mode: 0o600 }); } catch {}
+      try { fs.writeFileSync(file(log.data.id), pack(log.data), { mode: 0o600 }); } catch {}
     }
   }
 

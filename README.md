@@ -258,6 +258,10 @@ to one *Claude panel* entry per day.
   it) for 7 days by default; the panel's *Keep for* changes that
   (`activityDays` in `settings.json`, 0 keeps nothing). At most 200 MB in all
   (`activityMaxMB`), oldest first. *Clear all*, or delete one session.
+- Encrypted on disk where the system can encrypt (as for passwords), with a
+  key of its own in `activity.key`; logs from before are encrypted at the
+  next start. A profile copied to another machine or account cannot read
+  them, and drops them.
 - Text typed into password, card and one-time-code fields is stored only as
   its length; other typed text up to 200 characters, and only a script's first
   line. No tool reads the log: only the window does.
