@@ -56,7 +56,7 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
   // Nor a private window's tabs, which keep no history.
   const usersTab = (wc) => {
     const tab = tabs.list.find((t) => t.wc === wc);
-    return tab?.group === YOU && !tab.private;
+    return tab?.group === YOU && !tab.private && !tab.offRecord; // offRecord: Claude Code's sign-in page (main.js)
   };
 
   function visit(url, title) {

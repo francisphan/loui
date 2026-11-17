@@ -116,6 +116,7 @@ test('each section lists its settings', async () => {
   assert.deepEqual(of('Privacy and security'), ['Sites with Shields off', 'Filter lists', 'Pop-ups', 'Site permissions', 'Sites that open in your other browser', 'Private windows']);
   assert.deepEqual(of('Passwords'), ['Offer to save passwords', 'Encryption', 'Sites whose passwords are never saved', 'Saved passwords', 'Import passwords']);
   assert.deepEqual(of('Claude'), [
+    'Claude account',
     'Let other Claude sessions use this browser', 'Relay address', 'Relay key', 'Connection', 'This browser\'s name on the relay', 'Let in without asking',
     'Ask before Claude pays, buys, sends, deletes or signs in', 'Sites Claude asks before opening', 'Allowed without asking', 'Sessions trusted until they end',
     'Keep what Claude sessions did for', 'Most disk space for the log', 'Clear the log', 'Local control socket',

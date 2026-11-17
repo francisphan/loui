@@ -258,6 +258,21 @@ function info(def) {
   };
 }
 
+// How Claude Code is signed in, in words (the account: chat.js).
+function accountWords(a) {
+  if (a.signIn) return 'Signing in. Finish in your browser, or in the Claude panel.';
+  if (a.checking) return 'Checking…';
+  const failed = a.failed ? ` The last sign-in did not work: ${a.failed}` : '';
+  if (a.state === 'ready') {
+    if (a.kind === 'api-key') return 'Signed in with an API key, not a Claude subscription. Messages in the panel are billed to that key.';
+    if (a.kind === 'cloud') return `Set up for a cloud provider${a.detail ? ` (${a.detail})` : ''}, not a Claude subscription.`;
+    return `Signed in with your Claude subscription${a.detail ? ` (${a.detail})` : ''}.`;
+  }
+  if (a.state === 'signed-out') return `Not signed in.${a.detail ? ` ${a.detail}` : ''}${failed}`;
+  if (a.state === 'not-installed') return 'Claude Code is not installed on this computer (on Windows, or in WSL).';
+  return `Loui could not tell. The panel says so if a message cannot be sent.${failed}`;
+}
+
 // The relay key: never shown. "Saved", and a way to put another in its place.
 function relayKey(def) {
   const f = frame(def);
@@ -648,6 +663,22 @@ const SECTIONS = [
   },
   {
     id: 'claude', title: 'Claude', groups: [
+      {
+        title: 'The Claude panel', rows: [
+          info({
+            id: 'claude-account', label: 'Claude account',
+            help: 'The Claude panel uses your Claude subscription through Claude Code\'s own sign-in. No API key is involved, and Loui keeps nothing of the account.',
+            value: (s) => accountWords(s.claude.account),
+            buttons: [
+              {
+                id: 'claude-sign-in', label: 'Sign in', act: ['claude:sign-in'],
+                shown: (s) => s.claude.account.state === 'signed-out' && !s.claude.account.signIn,
+              },
+              { id: 'claude-check', label: 'Check again', act: ['claude:check'], disabled: (s) => !!s.claude.account.signIn },
+            ],
+          }),
+        ],
+      },
       {
         title: 'Other Claude sessions', rows: [
           toggle({

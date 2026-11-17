@@ -22,6 +22,7 @@ const SEND = new Set([
   'tab:reveal', 'window:close-answer', 'device:reset',
   'tab:card',
   'voice',
+  'claude',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',

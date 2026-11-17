@@ -1,0 +1,47 @@
+/* The Claude panel's account card (account.js): it stands where the message
+   box does while Claude Code is not signed in, or not installed. */
+
+body.account-card :is(#composer, #starters) { display: none; }
+
+#account-card {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 16px 14px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+  line-height: 1.42;
+}
+#account-card[hidden], #account-card [hidden] { display: none; }
+#account-card h2 { margin: 0; font-size: 15px; font-weight: 650; }
+#account-card p { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+#account-note { font-size: 13.5px; }
+#account-card #account-note { color: var(--danger); }
+
+#account-code-form { display: flex; gap: 8px; }
+#account-code {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+}
+#account-code:focus { outline: none; border-color: var(--focus); }
+
+#account-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 2px; }
+.account-main {
+  height: 30px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--claude);
+  color: var(--on-claude);
+  font-weight: 650;
+}
+#account-check:disabled { opacity: .6; }

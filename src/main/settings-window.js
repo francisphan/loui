@@ -39,7 +39,7 @@ function hostOf(input) {
 function createSettingsWindow({
   settings, save, tabs, home, lockToApp, setTheme, setTabStrip, tabStrip, refreshMenu,
   search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-  guardrails, activity, reader, updater, defaultBrowser, startPage,
+  guardrails, activity, reader, updater, defaultBrowser, startPage, chat,
 }) {
   let win = null;
   let sent = ''; // what the page was last sent, as text
@@ -52,6 +52,7 @@ function createSettingsWindow({
   function askSystem() {
     if (canLogin) login = app.getLoginItemSettings().openAtLogin;
     browser = defaultBrowser.state();
+    chat.claude('look'); // whether Claude Code is signed in, if that was not asked lately
   }
 
   // Everything the page shows. No secrets: link.state() says only whether a key is saved.
@@ -79,6 +80,7 @@ function createSettingsWindow({
       },
       passwords: passwords.prefs(),
       claude: {
+        account: chat.account(), // in memory only: nothing of the account is kept
         relay: { ...link.state(), sessions: tabs.groups.filter((g) => g.id !== YOU).length },
         connectors: consent.state().allowedConnectors,
         guardrails: guardrails.state().guardrails,
@@ -158,6 +160,15 @@ function createSettingsWindow({
       on: typeof on === 'boolean' ? on : link.state().on,
     }),
     'relay:name': (name) => link.rename(typeof name === 'string' ? name : ''),
+    // Whether Claude Code is signed in (chat.js). Signing in is followed in the
+    // Claude panel of a normal window, which comes to the front.
+    'claude:check': () => chat.claude('check'),
+    'claude:sign-in': () => {
+      const w = tabs.normalWindow();
+      if (w) w.win.webContents.send('toggle-panel', true);
+      chat.claude('sign-in', { window: w });
+      toMain(w);
+    },
     'consent:revoke': (id) => consent.revoke(id),
     'guard:set': (on) => guardrails.set({ on: !!on }),
     'guard:site-add': (site) => guardrails.addSite(site),

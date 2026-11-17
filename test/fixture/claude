@@ -1,0 +1,92 @@
+#!/usr/bin/env node
+// A stand-in for Claude Code, for test/account.test.js: the tests point
+// Loui's launcher at a copy of this (LOUI_CLAUDE) so that the real one is
+// never asked anything, signed in or signed out.
+//
+// What it does is in a JSON file named by LOUI_FAKE_CLAUDE, which the tests
+// write and this reads (and writes back: what it was started with, and
+// "signed in" after a sign-in that worked):
+//   status: 'subscription' | 'key' | 'cloud' | 'out' | 'old' (no auth command)
+//   login:  { url, browser, code, fail }
+//             browser: says it opened the system's browser (the tests then set
+//             "done" as the browser coming back would); else the address is
+//             all there is. code: the code to be pasted back. fail: why it
+//             fails instead of signing in.
+//   query:  'refuse' (a message is turned away: not logged in) | 'answer'
+const fs = require('fs');
+const readline = require('readline');
+
+const file = process.env.LOUI_FAKE_CLAUDE;
+const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+const write = (change) => fs.writeFileSync(file, JSON.stringify({ ...read(), ...change }));
+const args = process.argv.slice(2);
+const said = read();
+write({
+  calls: [...(said.calls || []), args.slice(0, 3).join(' ')],
+  // The variables an API key would arrive in: Loui must have removed them.
+  keys: [...(said.keys || []), ...Object.keys(process.env).filter((k) => /^ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL)$/.test(k))],
+});
+
+const STATUS = {
+  subscription: { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'owner@example.test', orgName: 'Example Org', subscriptionType: 'max' },
+  key: { loggedIn: true, authMethod: 'api_key', apiProvider: 'firstParty', apiKeySource: '/login managed key' },
+  cloud: { loggedIn: true, authMethod: 'third_party', apiProvider: 'bedrock' },
+  out: { loggedIn: false, authMethod: 'none', apiProvider: 'firstParty' },
+};
+
+if (args[0] === 'auth' && said.status === 'old') {
+  process.stderr.write("error: unknown command 'auth'\n");
+  process.exit(1);
+} else if (args[0] === 'auth' && args[1] === 'status') {
+  process.stdout.write(JSON.stringify(STATUS[said.status], null, 2) + '\n');
+  process.exit(STATUS[said.status].loggedIn ? 0 : 1);
+} else if (args[0] === 'auth' && args[1] === 'login') {
+  const { url, browser, code, fail } = said.login;
+  const finish = () => {
+    if (fail) {
+      process.stderr.write(`Couldn't log in: ${fail}\n`);
+      process.exit(1);
+    }
+    write({ status: 'subscription' });
+    process.stdout.write('Login successful.\n');
+    process.exit(0);
+  };
+  // As the real one: the address inside a terminal hyperlink, then a prompt with no line end.
+  const link = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
+  if (browser) process.stdout.write(`Opening browser to sign in…\nIf the browser didn't open, visit: ${link}\nPaste code here if prompted > `);
+  else process.stdout.write(`Sign in at: ${link}\n${code ? 'Paste code here > ' : ''}`);
+  readline.createInterface({ input: process.stdin }).on('line', (line) => {
+    if (!code) return;
+    if (line.trim() === code) return finish();
+    process.stderr.write('That code is not from this sign-in. Paste the code shown after opening the address above.\n');
+    process.stdout.write('Paste code here > ');
+  });
+  setInterval(() => { if (read().done) { write({ done: false }); finish(); } }, 100);
+} else {
+  // A message from the panel, in the Agent SDK's line-by-line JSON.
+  const session_id = '00000000-0000-4000-8000-000000000001';
+  const out = (m) => process.stdout.write(JSON.stringify({ ...m, session_id, uuid: '00000000-0000-4000-8000-00000000000' + (2 + Math.floor(Math.random() * 7)) }) + '\n');
+  const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+  readline.createInterface({ input: process.stdin }).on('line', (line) => {
+    let m;
+    try { m = JSON.parse(line); } catch { return; }
+    if (m.type === 'control_request') {
+      process.stdout.write(JSON.stringify({
+        type: 'control_response',
+        response: { subtype: 'success', request_id: m.request_id, response: m.request.subtype === 'initialize' ? { commands: [], output_style: 'default', available_output_styles: [], models: [], account: {} } : {} },
+      }) + '\n');
+    } else if (m.type === 'user') {
+      const refuse = said.query !== 'answer';
+      const text = refuse ? 'Not logged in · Please run /login' : 'Hello.';
+      out({
+        type: 'assistant', parent_tool_use_id: null, ...(refuse ? { error: 'authentication_failed' } : {}),
+        message: { id: 'msg_fake', type: 'message', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text }], stop_reason: 'stop_sequence', stop_sequence: null, usage },
+      });
+      out({
+        type: 'result', subtype: 'success', is_error: refuse, duration_ms: 1, duration_api_ms: 0, num_turns: 1, result: text,
+        stop_reason: null, total_cost_usd: 0, usage, modelUsage: {}, permission_denials: [],
+      });
+      process.exit(refuse ? 1 : 0);
+    }
+  });
+}
