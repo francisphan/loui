@@ -112,7 +112,7 @@ test('turning Shields off for the site lets everything through, and is remembere
   await start1();
   await open(page());
   assert.equal((await shields()).on, false);
-  assert.equal(await run('window.trackerRan === true'), true);
+  await wait('the tracker to run, with Shields still off', async () => run('window.trackerRan === true'));
   assert.equal(fetched, 1, 'the lists were not downloaded again');
 
   await b.ui('shields:set', { site: '127.0.0.1', on: true });

@@ -22,6 +22,9 @@ const { createHistory } = require('./history');
 const { createSuggest } = require('./suggest');
 const { createSleep } = require('./sleep');
 const { createShields } = require('./shields');
+const { createSearch } = require('./search');
+const { createBrave } = require('./brave');
+const { createPrint } = require('./print');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -47,16 +50,18 @@ app.userAgentFallback = app.userAgentFallback.replace(/ (loui|Electron)\/\S+/gi,
 // It applies to the window and is what pages see as prefers-color-scheme.
 const settingsFile = path.join(paths.home, 'settings.json');
 const settings = (() => { try { return JSON.parse(fs.readFileSync(settingsFile, 'utf8')); } catch { return {}; } })();
+const saveSettings = () => fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
 nativeTheme.themeSource = ['dark', 'light', 'system'].includes(settings.theme) ? settings.theme : 'dark';
 function setTheme(theme) {
   nativeTheme.themeSource = theme;
   settings.theme = theme;
-  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+  saveSettings();
   Menu.setApplicationMenu(appMenu());
 }
 
 let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
 let shields;
+let search, brave, print;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -87,6 +92,8 @@ const currentState = () => ({
   downloads: downloads.state(),
   ...permissions.state(),
   ...shields.state(),
+  ...search.state(),
+  ...brave.state(),
 });
 
 function createWindow() {
@@ -108,8 +115,11 @@ function createWindow() {
   });
 
   lockToApp(win.webContents);
+  search = createSearch({ settings, save: saveSettings, changed: pushState });
   tabs = new Tabs(win, ses);
   shields = createShields({ ses, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first
+  brave = createBrave({ tabs, settings, save: saveSettings, changed: pushState });
+  print = createPrint({ win, active: () => tabs.active() });
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
   permissions = createPermissions({ ses, tabs, home: paths.home, changed: pushState });
@@ -120,7 +130,7 @@ function createWindow() {
   suggest = createSuggest({ win, tabs, send, sources: [history] });
   lockToApp(suggest.webContents);
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
-  actions = createActions({ tabs, sessions, changed: pushState });
+  actions = createActions({ tabs, sessions, changed: pushState, refuse: brave.refuse });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
   handle = rpc.createHandler({ run: actions.run, sessions, extra: process.env.LOUI_TEST ? testHook : null });
   link = createLink({
@@ -219,6 +229,12 @@ const handlers = {
   'history:clear': () => history.clear(),
   'shields:menu': () => shields.menu(),
   'shields:set': (choice) => shields.set(choice),
+  print: () => print.print(),
+  'print:save-pdf': () => print.savePdf(),
+  'search:set': (choice) => search.set(choice),
+  'brave:open': () => brave.open(active()?.url),
+  'brave:add': (site) => brave.add(site),
+  'brave:remove': (site) => brave.remove(site),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -234,6 +250,9 @@ async function testHook({ ui, arg }) {
     const metrics = app.getAppMetrics();
     return { kb: metrics.reduce((sum, m) => sum + m.memory.workingSetSize, 0), processes: metrics.length };
   }
+  if (brave.probes[ui]) return brave.probes[ui](arg);
+  if (print.probes[ui]) return print.probes[ui](arg);
+  if (ui === 'to-url') return toUrl(arg);
   // A page trying to take over the window chrome, as a dropped link would.
   if (ui === 'chrome-navigate') {
     await win.webContents.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});
@@ -279,6 +298,11 @@ function appMenu() {
         { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
         { label: 'Site permissions…', click: () => send('show-permissions') },
         { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { win.webContents.focus(); send('show-history'); } },
+        { type: 'separator' },
+        { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: handlers.print },
+        { label: 'Save as PDF…', click: handlers['print:save-pdf'] },
+        { label: `Open in ${brave?.name() || 'Brave'}`, click: handlers['brave:open'] },
+        { label: 'Settings…', click: () => send('show-settings') },
         { type: 'separator' },
         ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{
@@ -358,7 +382,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     for (const [name, fn] of Object.entries(handlers)) ipcMain.on(name, (_e, arg) => fn(arg));
-    Menu.setApplicationMenu(appMenu());
     createWindow();
+    Menu.setApplicationMenu(appMenu()); // after the window: the File menu names the user's other browser
   });
 }
