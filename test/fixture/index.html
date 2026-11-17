@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Fixture</title>
+<style>body{font:16px system-ui;margin:24px} .card{cursor:pointer;border:1px solid #ccc;padding:8px;width:200px} #far{margin-top:1600px}</style>
+</head>
+<body>
+<nav aria-label="Primary"><a href="/second.html">Second page</a> <a href="/second.html" target="_blank">New tab link</a></nav>
+<main>
+  <h1>Fixture page</h1>
+  <p>Some <em>plain</em> text with <code>inline</code> bits.</p>
+  <form id="f" onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'Hello, ' + this.who.value + ' (' + this.size.value + ')'">
+    <label>Your name <input name="who" value="old"></label>
+    <label>Size <select name="size"><option value="s">Small</option><option value="l">Large</option></select></label>
+    <label><input type="checkbox" id="agree"> Agree</label>
+    <button type="submit">Greet</button>
+  </form>
+  <p id="out">Nobody yet</p>
+  <button id="count" onclick="this.dataset.n = (+this.dataset.n||0)+1; this.textContent = 'Clicked ' + this.dataset.n">Count</button>
+  <div class="card" id="card">A clickable card</div>
+  <button id="late" onclick="setTimeout(() => document.getElementById('out').textContent = 'Late arrival', 600)">Later</button>
+  <button id="boom" onclick="console.error('kaboom from fixture'); fetch('/missing.json')">Break</button>
+  <ul><li>One</li><li><a href="#x">Two link</a> and text</li></ul>
+  <p id="far">Far down the page</p>
+</main>
+</body>
+</html>

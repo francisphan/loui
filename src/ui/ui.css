@@ -1,0 +1,432 @@
+/* Loui's window chrome.
+
+   Palette from a nautical chart: pale water, paper, ink, and the magenta that
+   charts reserve for navigation marks. Magenta here always means Claude: its
+   pointer in the page, its status in the tab row, its actions in the panel.
+   Following the chart convention that water features are lettered in italic,
+   anything that is in motion (what Claude is doing right now) is set in italic;
+   everything fixed is upright. */
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: block;
+  src: url('../../node_modules/@fontsource-variable/source-sans-3/files/source-sans-3-latin-wght-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: italic;
+  font-weight: 200 900;
+  font-display: block;
+  src: url('../../node_modules/@fontsource-variable/source-sans-3/files/source-sans-3-latin-wght-italic.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: light dark;
+  --water: #E6EDEF;
+  --paper: #FBFCFC;
+  --ink: #14242C;
+  --ink-2: #55676F;
+  --rule: #C6D2D7;
+  --shoal: #D3E5EA;
+  --focus: #2B7A93;
+  --claude: #B3257F;
+  --claude-wash: #F7E4F0;
+  --on-claude: #FFFFFF;
+  --danger: #A8281F;
+  --panel-w: 372px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --water: #101B22;
+    --paper: #1A2832;
+    --ink: #E3EBEE;
+    --ink-2: #93A6AF;
+    --rule: #2B3E4A;
+    --shoal: #23404D;
+    --focus: #7CC4DA;
+    --claude: #F07CC0;
+    --claude-wash: #3B1C31;
+    --on-claude: #2A0F22;
+    --danger: #F2988F;
+  }
+}
+
+html, body { height: 100%; margin: 0; }
+body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--water);
+  color: var(--ink);
+  font: 14px/1.4 'Source Sans 3', system-ui, sans-serif;
+  user-select: none;
+  cursor: default;
+}
+button { font: inherit; color: inherit; cursor: default; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.glyph { display: grid; place-items: center; }
+
+/* ── top bar ─────────────────────────────────────────────────────────────── */
+#bar { grid-column: 1; grid-row: 1; min-width: 0; }
+
+#tabrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 38px;
+  padding: 0 8px;
+}
+#tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; }
+
+/* A Claude session's tab group: its name, then its tabs, tied together by a
+   magenta line along the top. */
+.group {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 6px;
+  box-shadow: inset 0 2px 0 var(--claude);
+  border-radius: 7px 7px 0 0;
+}
+.group-tag {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 31px;
+  padding: 0 2px 0 9px;
+  color: var(--claude);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.group-name { max-width: 190px; overflow: hidden; padding: 2px 3px; border: 0; border-radius: 4px; background: none; white-space: nowrap; text-overflow: ellipsis; }
+.group.busy .group-name { font-style: italic; }
+.group.paused .group-name { color: var(--ink-2); text-decoration: line-through; }
+.group-tag .close { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; opacity: 0; }
+.group-tag:hover .close, .group-tag .close:focus-visible { opacity: 1; }
+.group-tag .close:hover { background: var(--claude-wash); }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 1 auto;
+  width: 210px;
+  min-width: 40px;
+  height: 31px;
+  box-sizing: border-box;
+  padding: 0 5px 0 10px;
+  border-radius: 7px 7px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.tab:hover { background: color-mix(in srgb, var(--paper) 50%, transparent); }
+.tab.active { background: var(--paper); color: var(--ink); }
+.tab img, .tab .dot { flex: none; width: 14px; height: 14px; }
+.tab .dot { box-sizing: border-box; border: 1.5px solid var(--rule); border-radius: 50%; scale: .7; }
+.tab.loading .dot { border-color: var(--rule); border-top-color: var(--focus); scale: 1; animation: turn .8s linear infinite; }
+.tab .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab .close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  opacity: 0;
+}
+.tab:hover .close, .tab.active .close, .tab .close:focus-visible { opacity: 1; }
+.tab .close:hover { background: var(--shoal); }
+#newtab { align-self: center; margin-top: 4px; }
+
+/* Who is driving. Sits in the spare end of the tab row so that it can come
+   and go without resizing the page underneath. */
+#helm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  flex: none; /* tabs give way before the status does */
+  max-width: 50%;
+  height: 26px;
+  margin: 4px 0 0 auto;
+  padding: 0 3px 0 11px;
+  border-radius: 13px;
+  background: var(--claude-wash);
+  color: var(--claude);
+  font-size: 13px;
+}
+#helm[hidden] { display: none; }
+#helm-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+#helm.moving #helm-text { font-style: italic; }
+#helm-no { flex: none; height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-weight: 600; }
+#helm-no[hidden] { display: none; }
+#helm-btn {
+  flex: none;
+  height: 20px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--claude);
+  color: var(--on-claude);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+#navrow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  padding: 0 8px;
+  background: var(--paper);
+  box-shadow: inset 0 -1px 0 var(--rule);
+  transition: box-shadow .2s;
+}
+body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
+
+.icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-2);
+}
+.icon:hover:not(:disabled), .tool:hover { background: var(--shoal); color: var(--ink); }
+.icon:disabled { opacity: .35; }
+
+#address-form { flex: 1; min-width: 0; margin: 0 6px; }
+#address {
+  width: 100%;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 15px;
+  background: var(--water);
+  color: var(--ink);
+  font: inherit;
+  user-select: text;
+}
+#address::placeholder { color: var(--ink-2); }
+#address:focus { outline: none; border-color: var(--focus); background: var(--paper); }
+
+.tool {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+.tool span:empty { display: none; }
+#device:has(#device-label:empty) { padding-right: 8px; }
+#point.on, #device.on, #panel-toggle.on { color: var(--claude); }
+#point.on { background: var(--claude-wash); }
+
+/* ── where the page goes ─────────────────────────────────────────────────── */
+/* The pages are native views laid over this box, on a backdrop of the same colour. */
+#stage { grid-column: 1; grid-row: 2; }
+
+/* ── Claude panel ────────────────────────────────────────────────────────── */
+#panel {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  position: relative;
+  width: var(--panel-w);
+  border-left: 1px solid var(--rule);
+  background: var(--paper);
+}
+body.panel-closed #panel { display: none; }
+
+#panel-head { display: flex; align-items: baseline; justify-content: space-between; padding: 13px 12px 9px 16px; }
+#panel-tools { display: flex; gap: 2px; }
+
+/* The lamp is lit when other Claude sessions can reach this browser. */
+.lamp { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--ink-2); }
+.link-connected .lamp { border-color: var(--claude); background: var(--claude); }
+.link-refused .lamp { border-color: var(--danger); }
+
+#relay {
+  position: absolute;
+  inset: 44px 0 auto 0;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  margin: 0 10px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 10px 28px rgb(8 24 32 / .18);
+  font-size: 13.5px;
+}
+#relay[hidden] { display: none; }
+#relay h2 { margin: 0; font-size: 14.5px; font-weight: 650; }
+#relay p { margin: 0; color: var(--ink-2); line-height: 1.4; }
+#relay label { display: grid; gap: 4px; font-weight: 600; }
+#relay label.check { display: flex; align-items: center; gap: 7px; font-weight: 400; }
+#relay input[type='text'], #relay input[type='password'] {
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 400;
+  user-select: text;
+}
+#relay input:focus { outline: none; border-color: var(--focus); }
+#relay .row { display: flex; justify-content: space-between; align-items: center; }
+#relay-save { height: 28px; padding: 0 13px; border: 0; border-radius: 14px; background: var(--claude); color: var(--on-claude); font-weight: 650; }
+#panel-head h1 { margin: 0; font-size: 15px; font-weight: 650; }
+.quiet {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.quiet:hover { background: var(--shoal); color: var(--ink); }
+
+#feed {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  overflow-y: auto;
+  padding: 6px 16px 18px;
+  font-size: 14.5px;
+  line-height: 1.46;
+  user-select: text;
+  cursor: auto;
+}
+#empty { margin: auto 0; color: var(--ink-2); }
+#empty p { margin: 0 0 .8em; }
+#starters { display: grid; gap: 6px; margin-top: 16px; }
+.starter {
+  padding: 8px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+}
+.starter:hover { background: var(--shoal); border-color: transparent; }
+
+.said {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 3px 12px;
+  background: var(--shoal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.said .thumbs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
+.said .thumbs img { height: 28px; max-width: 80px; border-radius: 3px; object-fit: cover; }
+
+.reply { overflow-wrap: anywhere; }
+.reply > * { margin: 0 0 .65em; }
+.reply > :last-child { margin-bottom: 0; }
+.reply ul, .reply ol { padding-left: 1.25em; }
+.reply li + li { margin-top: .2em; }
+.reply code { padding: .05em .3em; border-radius: 4px; background: var(--water); font: .88em/1.4 ui-monospace, 'Cascadia Mono', Menlo, monospace; }
+.reply pre { overflow-x: auto; padding: 9px 11px; border-radius: 7px; background: var(--water); }
+.reply pre code { padding: 0; background: none; }
+.reply a { color: var(--focus); }
+.reply.waiting::after { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--claude); animation: breathe 1.1s ease-in-out infinite; }
+
+/* One line per thing Claude did. Italic while it is the live step, as in the helm. */
+.did { display: flex; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 13.5px; }
+.did + .did { margin-top: -6px; }
+.did::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--claude); translate: 0 -1px; }
+.did.live { font-style: italic; color: var(--claude); }
+.did.failed::before { background: none; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+/* Heads a run of steps that came from Claude Code rather than this panel. */
+.from { margin-bottom: -5px; color: var(--ink-2); font-size: 12.5px; font-weight: 650; }
+.did .what { min-width: 0; overflow-wrap: anywhere; }
+
+.trouble { color: var(--danger); font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+#composer { display: grid; gap: 8px; margin: 0; padding: 10px 12px 12px; border-top: 1px solid var(--rule); }
+#chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#chips:empty { display: none; }
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 3px;
+  border: 1px solid var(--claude);
+  border-radius: 6px;
+  background: var(--claude-wash);
+  font-size: 12.5px;
+}
+.chip img { height: 22px; max-width: 60px; border-radius: 3px; object-fit: cover; object-position: left; }
+.chip .name { overflow: hidden; max-width: 170px; white-space: nowrap; text-overflow: ellipsis; }
+.chip button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; }
+.chip button:hover { background: color-mix(in srgb, var(--claude) 18%, transparent); }
+
+#prompt {
+  field-sizing: content;
+  min-height: 38px;
+  max-height: 170px;
+  box-sizing: border-box;
+  padding: 8px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14.5px;
+  resize: none;
+  user-select: text;
+}
+#prompt::placeholder { color: var(--ink-2); }
+#prompt:focus { outline: none; border-color: var(--focus); }
+#composer-row { display: flex; align-items: center; justify-content: space-between; }
+#send {
+  height: 30px;
+  min-width: 68px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--claude);
+  color: var(--on-claude);
+  font-weight: 650;
+}
+#send:disabled { opacity: .4; }
+
+@keyframes turn { to { rotate: 1turn; } }
+@keyframes breathe { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) {
+  .tab.loading .dot, .reply.waiting::after { animation: none; }
+  #navrow { transition: none; }
+}

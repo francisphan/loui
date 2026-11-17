@@ -1,0 +1,68 @@
+// Local control socket: a Unix socket inside the profile directory, so only
+// this user can reach it and no web page can. The test suite drives the app
+// through it; Claude sessions normally arrive through the relay (link.js).
+//
+// One JSON object per line each way:
+//   -> {"id": 1, "tool": "click", "args": {"ref": "e4"}, "session": {"id": "a", "label": "Claude Code"}}
+//   <- {"id": 1, "content": [...]}   or   {"id": 1, "error": "..."}
+//   -> {"end": "a"}                  the session is over: close its tab group
+// A request without "session" belongs to a session tied to the connection.
+// Every session a connection opened ends when the connection closes.
+const fs = require('fs');
+const net = require('net');
+
+// handle(request) -> reply, shared with the relay link.
+function createHandler({ run, sessions, extra }) {
+  return async function handle(request, fallback) {
+    if (request.end) return void sessions.end(request.end);
+    try {
+      if (request.ui && extra) return { id: request.id, content: await extra(request) };
+      const session = sessions.open(request.session || fallback);
+      return { id: request.id, content: await run(request.tool, request.args || {}, session) };
+    } catch (e) {
+      return { id: request.id, error: e.message || String(e) };
+    }
+  };
+}
+
+let connections = 0;
+
+function serve(socketPath, handle, sessions) {
+  // A socket file outlives a crash and must be cleared; a Windows named pipe
+  // does not exist on disk and takes no file mode.
+  const isFile = process.platform !== 'win32';
+  if (isFile) fs.rmSync(socketPath, { force: true });
+  const server = net.createServer((conn) => {
+    const fallback = { id: `local-${++connections}`, label: 'Local session', source: 'code' };
+    const opened = new Set();
+    let buffer = '';
+    conn.setEncoding('utf8');
+    conn.on('data', (chunk) => {
+      buffer += chunk;
+      let end;
+      while ((end = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        if (line.trim()) answer(line);
+      }
+    });
+    conn.on('error', () => {});
+    conn.on('close', () => { for (const id of opened) sessions.end(id); });
+
+    async function answer(line) {
+      let request;
+      try {
+        request = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (request.tool) opened.add(request.session?.id || fallback.id);
+      const reply = await handle(request, fallback);
+      if (reply && !conn.destroyed) conn.write(JSON.stringify(reply) + '\n');
+    }
+  });
+  server.listen(socketPath, () => isFile && fs.chmodSync(socketPath, 0o600));
+  return server;
+}
+
+module.exports = { serve, createHandler };

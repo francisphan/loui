@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+// Stand-in for `wine` when building the Windows installer on Linux.
+// electron-builder only uses wine to run the freshly built NSIS stub so that it
+// writes out its uninstaller. Its own UninstallerReader extracts the same file
+// without running any Windows code, so do that instead.
+const path = require('path');
+const { UninstallerReader } = require('app-builder-lib/out/targets/nsis/nsisUtil');
+
+const installer = process.argv[2];
+if (!installer || !installer.endsWith('.exe')) {
+  console.error('nowine: expected the NSIS stub installer, got', process.argv.slice(2));
+  process.exit(1);
+}
+const out = path.join(path.dirname(installer), `${path.basename(installer, 'exe')}__uninstaller.exe`);
+UninstallerReader.exec(installer, out).catch((e) => {
+  console.error('nowine:', e.message);
+  process.exit(1);
+});

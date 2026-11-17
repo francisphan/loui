@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https: http:">
+  <title>Loui</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <header id="bar">
+    <div id="tabrow">
+      <div id="tabs" role="tablist" aria-label="Tabs"></div>
+      <button id="newtab" class="icon" type="button" title="New tab (Ctrl+T)" aria-label="New tab"></button>
+      <div id="helm" role="status" hidden>
+        <span id="helm-text"></span>
+        <button id="helm-no" type="button" hidden>Not now</button>
+        <button id="helm-btn" type="button"></button>
+      </div>
+    </div>
+    <div id="navrow">
+      <button id="back" class="icon" type="button" title="Back (Alt+Left)" aria-label="Back"></button>
+      <button id="forward" class="icon" type="button" title="Forward (Alt+Right)" aria-label="Forward"></button>
+      <button id="reload" class="icon" type="button" title="Reload (Ctrl+R)" aria-label="Reload"></button>
+      <form id="address-form">
+        <input id="address" type="text" spellcheck="false" autocomplete="off"
+               placeholder="Search or enter an address" aria-label="Address">
+      </form>
+      <button id="point" class="tool" type="button" title="Show Claude what you mean by clicking it (Ctrl+Shift+C)">
+        <span class="glyph"></span><span>Point</span>
+      </button>
+      <button id="device" class="tool" type="button" title="Device size">
+        <span class="glyph"></span><span id="device-label"></span>
+      </button>
+      <button id="devtools" class="icon" type="button" title="Developer tools (F12)" aria-label="Developer tools"></button>
+      <button id="panel-toggle" class="icon" type="button" title="Claude panel (Ctrl+Shift+L)" aria-label="Claude panel"></button>
+    </div>
+  </header>
+
+  <main id="stage"></main>
+
+  <aside id="panel" aria-label="Claude">
+    <div id="panel-head">
+      <h1>Claude</h1>
+      <div id="panel-tools">
+        <button id="link" class="quiet" type="button" title="Connection to other Claude sessions"><span class="lamp"></span><span id="link-text"></span></button>
+        <button id="new-chat" class="quiet" type="button">New conversation</button>
+      </div>
+    </div>
+    <form id="relay" hidden>
+      <h2>Other Claude sessions</h2>
+      <p>Claude Desktop, Claude Code and the Claude apps reach this browser through your relay. Each session works in a tab group of its own, which closes when the session ends.</p>
+      <label>Relay address
+        <input id="relay-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7332">
+      </label>
+      <label>Relay key
+        <input id="relay-key" type="password" autocomplete="off">
+      </label>
+      <label class="check"><input id="relay-on" type="checkbox"> Let other Claude sessions use this browser</label>
+      <p id="relay-status" role="status"></p>
+      <div class="row">
+        <button id="relay-close" class="quiet" type="button">Close</button>
+        <button id="relay-save" type="submit">Save and connect</button>
+      </div>
+    </form>
+    <div id="feed">
+      <div id="empty">
+        <p>Ask about the page you're on, or say what to do in it. You'll see every click as it happens, and you can take over whenever you like.</p>
+        <p>Claude Code can drive this window too. What it does shows up here.</p>
+        <div id="starters">
+          <button class="starter" type="button">Summarize this page</button>
+          <button class="starter" type="button">Check this page for console and network errors</button>
+        </div>
+      </div>
+    </div>
+    <form id="composer">
+      <div id="chips"></div>
+      <textarea id="prompt" rows="1" placeholder="Message Claude" aria-label="Message Claude"></textarea>
+      <div id="composer-row">
+        <button id="point-here" class="quiet" type="button"><span class="glyph"></span>Point at something</button>
+        <button id="send" type="submit">Send</button>
+      </div>
+    </form>
+  </aside>
+
+  <script src="ui.js"></script>
+</body>
+</html>
