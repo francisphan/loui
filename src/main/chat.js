@@ -203,7 +203,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
     return { onProcessSpawned: (pid) => { running = { pid, wsl: false }; } };
   }
 
-  return { send, stop, reset, process: () => running };
+  return { send, stop, reset, busy: () => !!active, process: () => running };
 }
 
 module.exports = { createChat };

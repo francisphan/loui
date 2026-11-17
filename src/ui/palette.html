@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" class="palette-page">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'">
+  <title>Command palette</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="palette.css">
+</head>
+<body>
+  <div id="palette" role="dialog" aria-label="Command palette">
+    <input id="palette-input" type="text" spellcheck="false" autocomplete="off"
+           role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list">
+    <div id="palette-list" role="listbox" aria-label="Results"></div>
+    <div id="palette-keys" aria-hidden="true">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>Tab</kbd> next group</span>
+      <span><kbd>Enter</kbd> open</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+  </div>
+  <script src="palette.js"></script>
+</body>
+</html>

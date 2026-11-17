@@ -35,6 +35,7 @@ const { createTaskManager } = require('./taskmanager');
 const { createActivity } = require('./activity');
 const { createDefaultBrowser, urlsFrom } = require('./default-browser');
 const { createReader } = require('./reader');
+const { createPalette } = require('./palette');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -80,6 +81,7 @@ let passwords;
 let taskManager, defaultBrowser;
 let reader;
 let activity;
+let palette;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
 
@@ -205,9 +207,21 @@ function createWindow() {
     emit: (event) => send('chat', event),
   });
 
+  palette = createPalette({
+    win, tabs, settings, save: saveSettings, sources: { bookmarks, history },
+    // Shields has no menu item of its own (its menu is the toolbar's).
+    extras: () => {
+      const s = shields.state().shields;
+      return s ? [{ label: `Turn Shields ${s.on ? 'off' : 'on'} for ${s.site}`, click: () => shields.set({ site: s.site, on: !s.on }) }] : [];
+    },
+    ask: (text) => { send('toggle-panel', true); chat.send({ text }); },
+    busy: () => chat.busy(),
+  });
+  lockToApp(palette.webContents);
+
   taskManager = createTaskManager({
     tabs, sleep, lockToApp,
-    pages: () => [{ label: 'Window chrome', wc: win.webContents }, { label: 'Address suggestions', wc: suggest.webContents }],
+    pages: () => [{ label: 'Window chrome', wc: win.webContents }, { label: 'Address suggestions', wc: suggest.webContents }, { label: 'Command palette', wc: palette.webContents }],
     claude: () => chat.process(),
     focusMain: () => { if (win.isMinimized()) win.restore(); win.focus(); },
   });
@@ -350,6 +364,7 @@ async function testHook({ ui, arg }) {
   if (taskManager.probes[ui]) return taskManager.probes[ui](arg);
   if (reader.probes[ui]) return reader.probes[ui](arg);
   if (activity.probes[ui]) return activity.probes[ui](arg);
+  if (palette.probes[ui]) return palette.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
@@ -428,6 +443,8 @@ function appMenu() {
         { label: 'Move tab right', accelerator: 'Ctrl+Shift+PageDown', click: () => handlers['tab:nudge'](1) },
         { label: 'Reader view', accelerator: 'F9', click: handlers['reader:toggle'] },
         { label: 'Pin or unpin tab', click: () => active() && tabs.pin(active().id, !active().pinned) },
+        { label: 'Command palette…', id: 'palette', accelerator: 'CmdOrCtrl+K', click: () => palette.show() },
+        { label: 'Search tabs…', id: 'palette-tabs', accelerator: 'CmdOrCtrl+Shift+A', click: () => palette.show('tabs') },
         { type: 'separator' },
         {
           label: 'Vertical tabs', type: 'checkbox', checked: tabStrip().vertical,

@@ -74,7 +74,7 @@ const togglePanel = (open) => {
 };
 $('panel-toggle').onclick = () => togglePanel();
 $('panel-toggle').classList.add('on');
-loui.on('toggle-panel', () => togglePanel());
+loui.on('toggle-panel', (open) => togglePanel(open)); // open: true from "Ask Claude" in the command palette
 
 // The page is a native view placed over #stage; tell the main process where
 // that is. Once straight away (measuring forces layout, so this needs no
