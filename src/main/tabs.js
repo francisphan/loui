@@ -115,6 +115,15 @@ class Tabs extends EventEmitter {
     win.once('closed', () => nativeTheme.off('updated', tint));
     win.contentView.addChildView(w.backdrop);
     win.on('focus', () => this.focus(w));
+    // Leaving full screen by any road (F11, Esc, the system) gives Loui's own parts back.
+    win.on('leave-full-screen', () => {
+      w.wide = false;
+      this.unfull(w);
+      const tab = this.get(w.activeId);
+      if (tab?.view) this.place(tab);
+      this.emit('change');
+    });
+    win.on('resize', () => { const tab = this.get(w.activeId); if (tab?.view && (w.full || w.wide)) this.place(tab); });
     // errorpage.js tells a page whether it is on screen, which a minimized window's is not.
     for (const event of ['minimize', 'restore', 'hide', 'show']) win.on(event, () => this.emit('change'));
     this.windows.push(w);
@@ -419,6 +428,24 @@ class Tabs extends EventEmitter {
     });
     wc.on('context-menu', (_e, p) => this.contextMenu(tab, p));
     wc.on('audio-state-changed', (e) => { tab.audible = !!e.audible; this.rest(tab); });
+    // A page asking for the whole screen (a video's full-screen button) gets
+    // the whole window: its view covers the tabs, the toolbar and the panel
+    // until it lets go (Esc). Only the tab on screen: one in the background,
+    // a session's at work say, is told no.
+    wc.on('enter-html-full-screen', () => {
+      if (!this.onScreen(tab)) {
+        wc.executeJavaScript('document.exitFullscreen()', true).catch(() => {});
+        // The window must not be left full screen on its account either.
+        const w = tab.window;
+        setTimeout(() => { if (!w.full && !w.wide && !w.win.isDestroyed() && w.win.isFullScreen()) w.win.setFullScreen(false); }, 300);
+        return;
+      }
+      tab.window.full = tab.id;
+      this.place(tab);
+      tab.window.win.contentView.addChildView(tab.view); // in front of everything of Loui's
+      changed();
+    });
+    wc.on('leave-html-full-screen', () => this.unfull(tab.window));
     // Before its first load, so other modules can watch its navigations. Also
     // when a sleeping tab wakes, since it then has a new page.
     this.emit('created', tab);
@@ -543,10 +570,39 @@ class Tabs extends EventEmitter {
 
   // Put a tab on screen in its window. It also becomes its group's current
   // tab (for the user's group, unless it is private: see fallback()).
+  // F11: the page on screen takes the whole screen, with nothing of Loui's
+  // around it, as in other browsers; F11 again gives it back.
+  fullScreen(w) {
+    if (!w || w.win.isDestroyed()) return;
+    const on = !w.wide;
+    if (!on && w.full) this.unfull(w, { leave: true });
+    w.wide = on;
+    w.win.setFullScreen(on);
+    const tab = this.get(w.activeId);
+    if (tab?.view) {
+      this.place(tab);
+      if (on) w.win.contentView.addChildView(tab.view);
+    }
+    this.emit('change');
+  }
+
+  // The window's page gives the whole window back: on its own (Esc), or
+  // because another tab is to be shown or its tab is going.
+  unfull(w, { leave = false } = {}) {
+    const tab = this.get(w?.full);
+    if (!w?.full) return;
+    w.full = null;
+    if (leave && tab?.wc && !tab.wc.isDestroyed()) tab.wc.executeJavaScript('document.exitFullscreen()', true).catch(() => {});
+    if (leave && !w.win.isDestroyed() && w.win.isFullScreen() && !w.wide) w.win.setFullScreen(false);
+    if (tab?.view) this.place(tab);
+    this.emit('change');
+  }
+
   select(id) {
     const tab = this.get(id);
     if (!tab) return null;
     const w = tab.window;
+    if (w.full && w.full !== id) this.unfull(w, { leave: true });
     const now = Date.now();
     const leaving = this.get(w.activeId);
     if (leaving) leaving.seenAt = now; // the tab the user is leaving was seen until now
@@ -623,6 +679,7 @@ class Tabs extends EventEmitter {
     const w = tab.window;
     const peers = this.in(tab.group).filter((t) => t.window === w);
     const next = peers[peers.indexOf(tab) + 1] || peers[peers.indexOf(tab) - 1] || null;
+    if (w.full === id) this.unfull(w, { leave: true });
     this.emit('closing', tab); // still in the list, its page and history intact
     this.list.splice(this.list.indexOf(tab), 1);
     this.emit('leaving', tab);
@@ -837,7 +894,14 @@ class Tabs extends EventEmitter {
   // device's size in CSS pixels fits the page area. (Electron's own device
   // emulation does not resize the viewport of an embedded view.)
   place(tab) {
-    const a = tab.window.area;
+    const w = tab.window;
+    // Full screen: the page asked for it (w.full), or the user did with F11
+    // (w.wide) and this is the tab on screen. Nothing of Loui's shows.
+    if (tab.view && (w.full === tab.id || (w.wide && w.activeId === tab.id)) && !tab.peeking) {
+      const [width, height] = w.win.getContentSize();
+      return tab.view.setBounds({ x: 0, y: 0, width, height });
+    }
+    const a = w.area;
     if (a.width < 1 || a.height < 1 || !tab.view) return;
     const d = tab.device;
     const peekX = a.x + a.width - 1;
