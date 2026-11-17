@@ -13,7 +13,7 @@
 // so the normal windows closed before come back.
 const fs = require('fs');
 const { app } = require('electron');
-const { PRESETS, YOU } = require('./tabs');
+const { PRESETS, YOU, onStart } = require('./tabs');
 
 const EVERY_MS = 1000;
 const MAX_ENTRIES = 50; // per tab's history
@@ -96,7 +96,7 @@ function createRestore({ tabs, file, openWindow, settings = {} }) {
   tabs.on('closing', (tab) => {
     if (!mine(tab) || stopped) return;
     const was = describe(tab);
-    const blank = !was.history?.entries.some((e) => e.url && e.url !== 'about:blank');
+    const blank = !was.history?.entries.some((e) => e.url && e.url !== 'about:blank' && !onStart(e.url));
     if (blank) return; // nothing worth bringing back
     closed.push({ ...was, at: tabs.in(tab.group).filter((t) => t.window === tab.window).indexOf(tab) });
     if (closed.length > MAX_CLOSED) closed.shift();

@@ -370,7 +370,9 @@ change applies at once; there is no Save button. `Esc` or `Ctrl+W` closes it.
 
 - **General**: appearance; whether Loui starts with the tabs from last time
   or a new tab (`"startup"`); open at sign-in and the default browser
-  (Windows); the downloads folder and *Ask where to save each file*.
+  (Windows); the downloads folder and *Ask where to save each file*;
+  and the start page: what new tabs open with, and its parts (see *Start
+  page*).
 - **Tabs**: vertical tabs, the bookmarks bar, how long before a background
   tab sleeps (or never), and the sites that are never put to sleep.
 - **Search**: the search engine, or an address of your own.
@@ -559,6 +561,49 @@ no bridge, and a policy that runs no scripts and cannot be framed. Articles
 are kept in memory only; after a restart a reader entry in a tab's history
 links to the page instead.
 
+## Start page
+
+A new tab, a new window, and Loui itself when there is nothing to restore
+open on the start page: Louis, a box that does what the address bar does
+(the address bar still has the keyboard, so typing straight away works), the
+eight sites you visit most (from history, one tile per site, most visited
+first; the × on a tile takes that site off the page, kept in `"startHidden"`),
+the bookmarks bar's bookmarks while the bar is hidden, the weather, a few
+headlines, and a line with the date and how many Claude sessions are open.
+The address bar stays empty, the tab is called *New tab* and carries Louis as
+its icon. Back returns to it like any page; it sleeps, wakes and is restored
+like one.
+
+*Settings › General › Start page* chooses what new tabs open with (`"newTab"`:
+`"start"`, `"blank"`, or `"address"` with `"newTabAddress"`) and switches each
+part on or off (`"startTiles"`, `"startWeather"`, `"startNews"`).
+
+- **Weather** comes from [Open-Meteo](https://open-meteo.com), which needs no
+  key. The place is a name you type in Settings, looked up once and kept as
+  coordinates (`"weatherPlace"`, `"weatherAt"`); Loui never asks where the
+  computer is. `"weatherUnits"` is `"f"` or `"c"`.
+- **News** is the first headlines of the feeds in `"newsFeeds"` (RSS or Atom;
+  Google News by default), read by a small parser of Loui's own: titles,
+  sources and dates as plain text, links only if they are http or https.
+- Loui itself fetches both, from the main process: no tab's session is
+  involved and no cookies go. They are kept in memory (weather 30 minutes,
+  news 15), asked for only when a start page is shown, and a failed fetch is
+  tried again after three minutes. A start page waits at most a second and a
+  half for them; one that is late shows on the next new tab.
+
+The page is Loui's own, served under `loui-start:` the way reader view is
+(`src/main/startpage.js`): an opaque origin, no bridge, and a policy that runs
+no script and loads nothing from the web, so its box and its × are a plain
+form and plain links that the main process catches. Because it lists the
+sites you visit, only your own tabs are ever served it: each request is
+checked against the tab that makes it, so a session's tab, a frame or a fetch
+gets nothing; no page can send a tab there, and a session's `navigate`
+refuses the scheme. A tab you hand to a session while it is on the start page
+is given a new blank page first, with the start page gone from its history.
+A session's new tabs, and the Claude panel's, are blank as before. In a
+private window the start page shows no history and no bookmarks: Louis, the
+box, what private windows keep and do not keep, and the weather and news.
+
 ## When a page can't be opened
 
 The tab explains what went wrong in a sentence or two, with *Try again*. The
@@ -617,6 +662,8 @@ src/main/taskmanager.js  the task manager window: memory and CPU per tab and pro
 src/main/pip.js       watching a session in a small window: its tab's frames, scaled down
 src/main/default-browser.js  links from other apps (command line, second launch), Default apps
 src/main/reader.js    reader view: the check, the loui-reader: page and its settings, read_article's text
+src/main/startpage.js the start page new tabs open with: the loui-start: page, who is served it, its settings
+src/main/startfeeds.js  the start page's weather (Open-Meteo) and news (RSS/Atom), fetched and kept by the main process
 src/main/settings-window.js  the Settings window: every setting, each driven through the module that owns it
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/page/passwords.js runs in your own pages only: notices sign-ins, fills on request
