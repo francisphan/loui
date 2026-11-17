@@ -92,7 +92,10 @@ function createDownloads({ ses, tabs, home, changed }) {
     const taken = new Set(items.filter((d) => running.has(d.id)).map((d) => d.file));
     const file = freePath(dir, name, taken);
     // A session's download never pops up a dialog: the user did not start it.
-    if (ask && !g) item.setSaveDialogOptions({ defaultPath: file });
+    // "Save image as…" in the page's menu asks where, whatever the setting.
+    const saveAs = !!tab?.saveAs;
+    if (tab) tab.saveAs = false;
+    if ((ask || saveAs) && !g) item.setSaveDialogOptions({ defaultPath: file });
     else item.setSavePath(file);
 
     const d = {

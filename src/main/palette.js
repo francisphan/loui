@@ -398,6 +398,12 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
       return 'ok';
     },
     'palette:key': ({ key, modifiers } = {}) => { keyInto(view.webContents, key, modifiers); return 'ok'; },
+    // A key pressed in whichever of Loui's pages has the keyboard.
+    'focus:key': ({ key, modifiers } = {}) => {
+      const wc = webContents.getFocusedWebContents();
+      if (wc) keyInto(wc, key, modifiers);
+      return wc ? 'ok' : 'none';
+    },
     // Which of Loui's pages has the keyboard: 'palette', 'chrome', a tab's id, or null.
     'focus:owner': () => {
       const wc = webContents.getFocusedWebContents();

@@ -17,7 +17,7 @@ try { host = new URL(PAGE.url).hostname; } catch {}
 function describe(code) {
   const site = host || 'this site';
   if (OFFLINE_CODES.includes(code)) {
-    return ['No connection', "You're offline", ["Loui can't reach the internet, so this page didn't open. Check your Wi-Fi or network cable."]];
+    return ["You're offline", "You're offline", ["Loui can't reach the internet, so this page didn't open. Check your Wi-Fi or network cable."]];
   }
   if (code === -105) {
     return ['Site not found', "Can't find this site", ["Loui couldn't find ", site, '. Check the address for typos, or check your connection.']];

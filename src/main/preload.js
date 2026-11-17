@@ -17,6 +17,7 @@ const SEND = new Set([
   'prompt:answer', 'prompt:next', 'consent:revoke',
   'activity',
   'pip:open',
+  'page:focus', 'panel:shown',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
@@ -25,6 +26,7 @@ const LISTEN = new Set([
   'bookmarks', 'passwords',
   'activity', 'show-activity',
   'group:end',
+  'tab:ask-close', 'update:ask',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {

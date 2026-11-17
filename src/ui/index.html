@@ -87,7 +87,7 @@
         <h2>Downloads</h2>
         <label class="check"><input id="downloads-ask" type="checkbox"> Ask where to save each file</label>
         <button id="downloads-clear" class="quiet" type="button">Clear list</button>
-        <button id="downloads-close" class="quiet" type="button">Close</button>
+        <button id="downloads-close" class="quiet" type="button" title="Close (Esc)" aria-label="Close downloads"></button>
       </div>
       <p id="downloads-empty">Files you download show up here.</p>
       <ul id="downloads-list"></ul>
@@ -131,69 +131,6 @@
         <button id="new-chat" class="quiet" type="button">New conversation</button>
       </div>
     </div>
-    <form id="relay" hidden>
-      <h2>Other Claude sessions</h2>
-      <p>Claude Desktop, Claude Code and the Claude apps reach this browser through your relay. Each session works in a tab group of its own, which closes when the session ends.</p>
-      <label>Relay address
-        <input id="relay-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7332">
-      </label>
-      <label>Relay key
-        <input id="relay-key" type="password" autocomplete="off">
-      </label>
-      <label class="check"><input id="relay-on" type="checkbox"> Let other Claude sessions use this browser</label>
-      <p id="relay-status" role="status"></p>
-      <div class="row">
-        <button id="relay-close" class="quiet" type="button">Close</button>
-        <button id="relay-save" type="submit">Save and connect</button>
-      </div>
-    </form>
-    <section id="perms" aria-labelledby="perms-title" hidden>
-      <h2 id="perms-title">Site permissions</h2>
-      <p>Choices you asked Loui to remember. Tabs in a Claude session's group are always refused, whatever is here.</p>
-      <ul id="perms-list"></ul>
-      <p id="perms-none">No remembered choices yet.</p>
-      <div class="row"><button id="perms-close" class="quiet" type="button">Close</button></div>
-    </section>
-    <section id="settings" aria-labelledby="settings-title" hidden>
-      <h2 id="settings-title">Settings</h2>
-      <label>Search with
-        <select id="search-engine"></select>
-      </label>
-      <form id="search-custom" hidden>
-        <label>Search address, with %s where the words go
-          <input id="search-url" type="text" spellcheck="false" autocomplete="off" placeholder="https://example.com/search?q=%s">
-        </label>
-        <div class="row">
-          <span id="search-url-note" role="status"></span>
-          <button type="submit" class="quiet">Use this address</button>
-        </div>
-      </form>
-      <label class="check"><input id="tabs-vertical" type="checkbox"> Show tabs in a sidebar on the left</label>
-      <h3 id="elsewhere-title"></h3>
-      <p>Loui sends these sites to your other browser instead of opening them, for sites like Google sign-in that refuse browsers like Loui. Claude's tabs never open them.</p>
-      <ul id="elsewhere-list"></ul>
-      <form id="elsewhere-add" class="row">
-        <input id="elsewhere-site" type="text" spellcheck="false" autocomplete="off" placeholder="accounts.google.com" aria-label="Site to send to your other browser">
-        <button type="submit" class="quiet">Add</button>
-      </form>
-      <h3>Claude sessions let in without asking</h3>
-      <p>The first time a new Claude session uses Loui, Loui asks you. Sessions from these are let in straight away.</p>
-      <ul id="consent-list"></ul>
-      <h3>Ask before Claude acts</h3>
-      <label class="check"><input id="guard-on" type="checkbox"> Ask me before Claude pays, buys, sends, deletes or signs in</label>
-      <p>Loui pauses Claude and asks you above the page first. This covers every Claude session and the Claude panel, never what you do yourself.</p>
-      <h3>Sites Claude asks before opening</h3>
-      <ul id="guard-sites" class="guard-list"></ul>
-      <form id="guard-site-add" class="row">
-        <input id="guard-site" type="text" spellcheck="false" autocomplete="off" placeholder="mybank.com" aria-label="Site Claude should ask before opening">
-        <button type="submit" class="quiet">Add</button>
-      </form>
-      <h3>Allowed without asking</h3>
-      <ul id="guard-remembered" class="guard-list"></ul>
-      <h3 id="guard-trusted-title" hidden>Sessions you trust until they end</h3>
-      <ul id="guard-trusted" class="guard-list" hidden></ul>
-      <div class="row end"><button id="settings-close" class="quiet" type="button">Close</button></div>
-    </section>
     <div id="feed">
       <div id="empty">
         <p>Ask about the page you're on, or say what to do in it. You'll see every click as it happens, and you can take over whenever you like.</p>
@@ -296,6 +233,84 @@
         </select>
       </label>
       <p>Only you can see this. Claude can't read it, and text typed into password fields is never kept.</p>
+    </div>
+  </aside>
+
+  <aside id="relay" aria-label="Other Claude sessions" hidden>
+    <div class="side-head">
+      <h1>Other Claude sessions</h1>
+      <button id="relay-close" class="quiet" type="button" title="Close (Esc)" aria-label="Close"></button>
+    </div>
+    <form id="relay-form" class="side-body">
+      <p>Claude Desktop, Claude Code and the Claude apps reach this browser through your relay. Each session works in a tab group of its own, which closes when the session ends.</p>
+      <label>Relay address
+        <input id="relay-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7332">
+      </label>
+      <label>Relay key
+        <input id="relay-key" type="password" autocomplete="off">
+      </label>
+      <label class="check"><input id="relay-on" type="checkbox"> Let other Claude sessions use this browser</label>
+      <p id="relay-status" role="status"></p>
+      <div class="row">
+        <button id="relay-save" type="submit">Save and connect</button>
+      </div>
+    </form>
+  </aside>
+
+  <aside id="perms" aria-label="Site permissions" hidden>
+    <div class="side-head">
+      <h1>Site permissions</h1>
+      <button id="perms-close" class="quiet" type="button" title="Close (Esc)" aria-label="Close site permissions"></button>
+    </div>
+    <div class="side-body">
+      <p>Choices you asked Loui to remember. Tabs in a Claude session's group are always refused, whatever is here.</p>
+      <ul id="perms-list"></ul>
+      <p id="perms-none">No remembered choices yet.</p>
+    </div>
+  </aside>
+
+  <aside id="settings" aria-label="Settings" hidden>
+    <div class="side-head">
+      <h1>Settings</h1>
+      <button id="settings-close" class="quiet" type="button" title="Close (Esc)" aria-label="Close settings"></button>
+    </div>
+    <div class="side-body">
+      <label>Search with
+        <select id="search-engine"></select>
+      </label>
+      <form id="search-custom" hidden>
+        <label>Search address, with %s where the words go
+          <input id="search-url" type="text" spellcheck="false" autocomplete="off" placeholder="https://example.com/search?q=%s">
+        </label>
+        <div class="row">
+          <span id="search-url-note" role="status"></span>
+          <button type="submit" class="quiet">Use this address</button>
+        </div>
+      </form>
+      <label class="check"><input id="tabs-vertical" type="checkbox"> Show tabs in a sidebar on the left</label>
+      <h3 id="elsewhere-title"></h3>
+      <p>Loui sends these sites to your other browser instead of opening them, for sites like Google sign-in that refuse browsers like Loui. Claude's tabs never open them.</p>
+      <ul id="elsewhere-list"></ul>
+      <form id="elsewhere-add" class="row">
+        <input id="elsewhere-site" type="text" spellcheck="false" autocomplete="off" placeholder="accounts.google.com" aria-label="Site to send to your other browser">
+        <button type="submit" class="quiet">Add</button>
+      </form>
+      <h3>Claude sessions let in without asking</h3>
+      <p>The first time a new Claude session uses Loui, Loui asks you. Sessions from these are let in straight away.</p>
+      <ul id="consent-list"></ul>
+      <h3>Ask before Claude acts</h3>
+      <label class="check"><input id="guard-on" type="checkbox"> Ask me before Claude pays, buys, sends, deletes or signs in</label>
+      <p>Loui pauses Claude and asks you above the page first. This covers every Claude session and the Claude panel, never what you do yourself.</p>
+      <h3>Sites Claude asks before opening</h3>
+      <ul id="guard-sites" class="guard-list"></ul>
+      <form id="guard-site-add" class="row">
+        <input id="guard-site" type="text" spellcheck="false" autocomplete="off" placeholder="mybank.com" aria-label="Site Claude should ask before opening">
+        <button type="submit" class="quiet">Add</button>
+      </form>
+      <h3>Allowed without asking</h3>
+      <ul id="guard-remembered" class="guard-list"></ul>
+      <h3 id="guard-trusted-title" hidden>Sessions you trust until they end</h3>
+      <ul id="guard-trusted" class="guard-list" hidden></ul>
     </div>
   </aside>
 

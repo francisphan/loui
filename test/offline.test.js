@@ -130,6 +130,7 @@ async function offlinePage() {
   await b.ui('pretend-offline');
   const page = await open(url);
   assert.match(page, /heading1 "You're offline"/);
+  assert.equal((await b.state()).tabs.find((t) => t.active).title, "You're offline", 'the tab is named as the page is headed');
   assert.match(page, /region "Louis's walk"/);
   const server = http.createServer((_req, res) => res.end('<title>Back</title><h1>Back</h1>'));
   return { url, page, up: () => new Promise((r) => server.listen(port, '127.0.0.1', r)), down: () => server.close() };

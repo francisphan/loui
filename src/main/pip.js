@@ -151,8 +151,9 @@ function createPip({ tabs, settings, save, lockToApp, pause, focusMain }) {
   }
 
   // Where the window goes: where it was last time, if that is still on a
-  // screen, otherwise the bottom right corner.
-  function bounds() {
+  // screen, otherwise the bottom left corner of the page area of the window
+  // the session's tabs are in, clear of the Claude panel on the right.
+  function bounds(host) {
     const saved = settings.pip;
     if (saved && [saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) {
       const area = screen.getDisplayMatching(saved).workArea;
@@ -164,12 +165,20 @@ function createPip({ tabs, settings, save, lockToApp, pause, focusMain }) {
         y: Math.min(Math.max(saved.y, area.y), area.y + area.height - height),
       };
     }
-    const area = screen.getPrimaryDisplay().workArea;
-    return {
+    const within = (area, x, y) => ({
       ...SIZE,
-      x: area.x + area.width - SIZE.width - MARGIN,
-      y: area.y + area.height - SIZE.height - MARGIN,
-    };
+      x: Math.min(Math.max(x, area.x), area.x + area.width - SIZE.width),
+      y: Math.min(Math.max(y, area.y), area.y + area.height - SIZE.height),
+    });
+    if (host && !host.win.isDestroyed() && !host.win.isMinimized()) {
+      const content = host.win.getContentBounds();
+      const page = host.area;
+      const x = content.x + page.x + MARGIN;
+      const y = content.y + page.y + page.height - SIZE.height - MARGIN;
+      return within(screen.getDisplayMatching(content).workArea, x, y);
+    }
+    const area = screen.getPrimaryDisplay().workArea;
+    return within(area, area.x + MARGIN, area.y + area.height - SIZE.height - MARGIN);
   }
 
   // Once the user stops moving or resizing it: near an edge, it snaps to the
@@ -208,7 +217,7 @@ function createPip({ tabs, settings, save, lockToApp, pause, focusMain }) {
       return true;
     }
     win = new BrowserWindow({
-      ...bounds(),
+      ...bounds(g.window),
       minWidth: 220, minHeight: 170,
       frame: false, alwaysOnTop: true, fullscreenable: false, maximizable: false,
       title: 'Watching a Claude session',

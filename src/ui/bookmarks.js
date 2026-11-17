@@ -54,6 +54,7 @@
   function barItem(b) {
     const item = el('button', 'bar-item' + (b.folder ? ' folder' : ''));
     item.type = 'button';
+    item.tabIndex = -1; // the bar is one Tab stop (see rove())
     item.dataset.id = b.id;
     item.title = b.folder ? b.title : `${b.title}\n${b.url}`;
     item.append(mark(b), el('span', 'name', b.title));
@@ -79,7 +80,27 @@
     firstHidden = kids.findIndex((k) => k.offsetLeft + k.offsetWidth > room);
     if (firstHidden >= 0) for (const k of kids.slice(firstHidden)) k.classList.add('overflow');
     $('bookmarks-more').hidden = firstHidden < 0;
+    if (!stops().some((s) => s.tabIndex === 0)) rove(stops()[0]);
   }
+  // The bar is one Tab stop: Left and Right (Home and End) move between its
+  // items, the » and "Other bookmarks" included.
+  const stops = () => [...items.children].filter((k) => !k.classList.contains('overflow'))
+    .concat([$('bookmarks-more'), $('bookmarks-other')].filter((b) => !b.hidden));
+  function rove(to) {
+    for (const s of [...items.children, $('bookmarks-more'), $('bookmarks-other')]) s.tabIndex = s === to ? 0 : -1;
+  }
+  rove(null); // fit() gives the first item the Tab stop
+  bar.addEventListener('keydown', (e) => {
+    const all = stops();
+    const at = all.indexOf(e.target);
+    if (at < 0) return;
+    const to = e.key === 'ArrowRight' ? all[at + 1] : e.key === 'ArrowLeft' ? all[at - 1]
+      : e.key === 'Home' ? all[0] : e.key === 'End' ? all[all.length - 1] : null;
+    if (!to) return;
+    e.preventDefault();
+    rove(to);
+    to.focus();
+  });
   new ResizeObserver(fit).observe(items);
   $('bookmarks-more').onclick = () => menuUnder($('bookmarks-more'), 'bar', firstHidden);
   $('bookmarks-other').onclick = () => menuUnder($('bookmarks-other'), 'other');
@@ -173,13 +194,19 @@
     if (show) {
       refresh();
       search.focus();
-    }
+    } else focusPage();
   }
   $('bookmarks-close').onclick = () => showBookmarks(false);
   $('bookmarks-new-folder').onclick = () => ask({ do: 'folder', parent: 'bar' });
   $('bookmarks-import').onclick = () => ask({ do: 'import' });
   search.oninput = refresh;
-  search.onkeydown = (e) => { if (e.key === 'Escape') showBookmarks(false); };
+  // Esc anywhere in the panel: first out of the question, then the panel closes.
+  $('bookmarks').addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if ($('bookmarks-confirm').hidden) return showBookmarks(false);
+    $('bookmarks-confirm').hidden = true;
+    search.focus();
+  });
   // Opening history, or asking for the Claude panel, closes this one.
   const historyInstead = () => { if (bookmarksOpen() && historyOpen()) showBookmarks(false); };
   $('history-toggle').addEventListener('click', historyInstead);

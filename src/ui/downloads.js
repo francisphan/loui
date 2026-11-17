@@ -5,10 +5,15 @@ const DOWNLOAD_ICON = svg('<path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11"/>')
 $('downloads-toggle').querySelector('.glyph').innerHTML = DOWNLOAD_ICON;
 
 const strip = $('downloads');
+setIcon($('downloads-close'), 'close');
+strip.tabIndex = -1;
+// Opened, the strip takes the keyboard (so Esc closes it); closed, the page has it back.
 const showDownloads = (show) => {
   strip.hidden = !show;
   $('downloads-toggle').classList.toggle('on', show);
   $('downloads-toggle').setAttribute('aria-expanded', show);
+  if (show) strip.focus();
+  else focusPage();
 };
 $('downloads-toggle').onclick = () => showDownloads(strip.hidden);
 $('downloads-close').onclick = () => showDownloads(false);

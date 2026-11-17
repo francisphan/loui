@@ -1,8 +1,9 @@
-// Settings, a sheet in the panel opened from File › Settings: the search
+// Settings, a panel in the Claude panel's place (File › Settings, Ctrl+,;
+// see sidePanel in ui.js): the search
 // engine for the address bar, and the sites that open in the user's other
 // browser (see src/main/search.js and src/main/brave.js), and whether the
 // tabs sit in a sidebar (main.js, tabs:layout). Uses $, el and
-// togglePanel from ui.js.
+// sidePanel from ui.js.
 const sheet = $('settings');
 const engine = $('search-engine');
 const validSearch = (url) => /^https?:\/\/\S+$/i.test(url.trim()) && url.includes('%s');
@@ -59,24 +60,14 @@ $('elsewhere-add').onsubmit = (e) => {
   $('elsewhere-site').value = '';
 };
 
+const showSettingsPanel = sidePanel('settings', sheet, () => engine.focus());
 const showSettings = (show) => {
   if (show && settings) {
     sheet.hidden = true; // so it is drawn afresh
     drawSettings(settings);
   }
-  sheet.hidden = !show;
-  if (show) {
-    $('relay').hidden = true; // they share the same place in the panel
-    $('perms').hidden = true;
-    togglePanel(true);
-    engine.focus();
-  }
+  showSettingsPanel(show);
 };
-$('settings-close').onclick = () => showSettings(false);
 loui.on('show-settings', () => showSettings(true));
-// The other sheets in the same place close this one.
-loui.on('show-relay', () => showSettings(false));
-loui.on('show-permissions', () => showSettings(false));
-$('link').addEventListener('click', () => showSettings(false));
 
 loui.on('state', (next) => drawSettings(next));

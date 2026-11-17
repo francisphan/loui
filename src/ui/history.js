@@ -82,11 +82,17 @@ function showHistory(show) {
   if (show) {
     loui.send('history:list', $('history-search').value);
     $('history-search').focus();
-  }
+  } else focusPage();
 }
 $('history-toggle').onclick = () => showHistory(!historyOpen());
 $('history-close').onclick = () => showHistory(false);
-loui.on('show-history', () => showHistory(true));
+// what: 'clear' from History › Clear history… (Ctrl+Shift+Delete), which opens on the question.
+loui.on('show-history', (what) => {
+  showHistory(true);
+  if (what !== 'clear') return;
+  $('history-confirm').hidden = false;
+  $('history-confirm-yes').focus();
+});
 // Asking for the Claude panel while this one is open brings it back.
 const claudeInstead = () => {
   if (!historyOpen()) return;
@@ -98,7 +104,13 @@ loui.on('toggle-panel', claudeInstead);
 loui.on('show-relay', claudeInstead);
 
 $('history-search').oninput = () => loui.send('history:list', $('history-search').value);
-$('history-search').onkeydown = (e) => { if (e.key === 'Escape') showHistory(false); };
+// Esc anywhere in the panel: first out of the question, then the panel closes.
+$('history').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if ($('history-confirm').hidden) return showHistory(false);
+  $('history-confirm').hidden = true;
+  $('history-search').focus();
+});
 $('history-clear').onclick = () => { $('history-confirm').hidden = false; };
 $('history-confirm-no').onclick = () => { $('history-confirm').hidden = true; };
 $('history-confirm-yes').onclick = () => {

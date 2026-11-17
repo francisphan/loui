@@ -34,6 +34,36 @@ let running = false; // a panel conversation turn is in flight
 const activeTab = () => state.tabs.find((t) => t.active);
 const groupOf = (id) => state.groups.find((g) => g.id === id);
 
+// The keyboard goes back to the page once nothing in the window chrome holds
+// it: after Esc in the address bar, and when a panel or strip closes (unless
+// another one opened in its place and took the keyboard).
+const focusPage = () => setTimeout(() => {
+  const at = document.activeElement;
+  if (!at || at === document.body || at.closest('[hidden]')) loui.send('page:focus');
+}, 0);
+
+// A button whose action cannot be undone asks first, in place: while needed()
+// holds it turns into the question for a few seconds, and pressing it again
+// does it. Esc, or waiting, leaves things as they are.
+function askFirst(button, question, needed, act) {
+  let timer = 0, label = '';
+  const rest = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = 0;
+    button.textContent = label;
+    button.classList.remove('sure');
+  };
+  button.addEventListener('click', () => {
+    if (timer || !needed()) { rest(); return act(); }
+    label = button.textContent;
+    button.textContent = question;
+    button.classList.add('sure');
+    timer = setTimeout(rest, 5000);
+  });
+  button.addEventListener('keydown', (e) => { if (e.key === 'Escape' && timer) { e.stopPropagation(); rest(); } });
+}
+
 // ── toolbar ─────────────────────────────────────────────────────────────────
 setIcon($('newtab'), 'plus');
 setIcon($('back'), 'back');
@@ -64,6 +94,7 @@ address.onkeydown = (e) => {
   if (e.key !== 'Escape') return;
   address.value = activeTab()?.url || '';
   address.blur();
+  focusPage();
 };
 loui.on('focus-address', () => address.focus());
 
@@ -71,6 +102,7 @@ const panelOpen = () => !document.body.classList.contains('panel-closed');
 const togglePanel = (open) => {
   document.body.classList.toggle('panel-closed', open === true ? false : undefined);
   $('panel-toggle').classList.toggle('on', panelOpen());
+  loui.send('panel:shown', panelOpen()); // the Claude menu's checkbox follows
 };
 $('panel-toggle').onclick = () => togglePanel();
 $('panel-toggle').classList.add('on');
@@ -97,11 +129,12 @@ function letterOf(t) {
 }
 
 function drawTab(t) {
-  const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : '') + (t.pinned ? ' pinned' : ''));
+  const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : '') + (t.pinned ? ' pinned' : '')
+    + (t.id === state.aimed ? ' aimed' : ''));
   tab.setAttribute('role', 'tab');
   tab.setAttribute('aria-selected', t.active);
   tab.setAttribute('aria-label', t.title); // pinned tabs, and all of them in a collapsed sidebar, show no title
-  tab.tabIndex = 0;
+  tab.tabIndex = t.active ? 0 : -1; // one Tab stop for the strip; the arrow keys move within it
   tab.draggable = true;
   tab.dataset.id = t.id;
   tab.title = t.asleep ? `${t.title} (asleep, loads when you open it)` : t.title;
@@ -125,6 +158,13 @@ function drawTab(t) {
     close.setAttribute('aria-label', `Close ${t.title}`);
     setIcon(close, 'close');
     close.onclick = (e) => { e.stopPropagation(); loui.send('tab:close', t.id); };
+    // Ctrl+W on a session's tab: its × asks first.
+    if (closing?.id === t.id) {
+      close.className = 'close sure';
+      close.textContent = 'Close tab?';
+      close.title = `Close this tab of ${groupOf(t.group)?.label || 'Claude'}'s. Esc cancels.`;
+      close.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Escape') { closeTab(null); focusPage(); } };
+    }
     tab.append(el('span', 'title', t.title), close);
   }
   tab.onclick = () => loui.send('tab:select', t.id);
@@ -158,6 +198,9 @@ function placeTabs() {
 let markTimer = 0;
 function drawTabs() {
   if (dragging) return; // redrawing would lose the tab being dragged; dragend draws
+  // A tab that has the keyboard keeps it through the redraw.
+  const at = document.activeElement;
+  const held = at?.classList.contains('tab') && $('tabs').contains(at) ? at.dataset.id : null;
   placeTabs();
   const vertical = !!state.tabStrip?.vertical;
   const nodes = [];
@@ -223,6 +266,7 @@ function drawTabs() {
     nodes.push(cluster);
   }
   $('tabs').replaceChildren(...nodes);
+  if (held) $('tabs').querySelector(`.tab[data-id="${held}"]`)?.focus();
   // A dot that only lingers is taken away once its time is up.
   clearTimeout(markTimer);
   if (state.groups.some((g) => !g.busy && lingerUntil.get(g.id) > Date.now())) markTimer = setTimeout(drawTabs, 1450);
@@ -251,6 +295,32 @@ function endGroup(id) {
   $('tabs').querySelector('.group-tag .close.sure')?.focus();
 }
 loui.on('group:end', endGroup);
+
+// Ctrl+W on a session's tab asks the same way: the tab's × turns into
+// "Close tab?" for a few seconds, and Ctrl+W again (or pressing it) closes.
+let closing = null; // { id, timer } while a tab's × asks
+function closeTab(id) {
+  const sure = id != null && closing?.id === id;
+  clearTimeout(closing?.timer);
+  closing = null;
+  if (sure) return loui.send('tab:close', id);
+  if (id != null) closing = { id, timer: setTimeout(() => closeTab(null), 5000) };
+  drawTabs();
+  $('tabs').querySelector('.tab .close.sure')?.focus();
+}
+loui.on('tab:ask-close', closeTab);
+
+// The tab strip is one Tab stop: the arrow keys (and Home and End) move
+// between its tabs, Enter or Space shows the one that has the keyboard.
+$('tabs').addEventListener('keydown', (e) => {
+  if (!e.target.classList.contains('tab')) return;
+  const all = [...$('tabs').querySelectorAll('.tab')];
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  const to = step ? all[all.indexOf(e.target) + step] : e.key === 'Home' ? all[0] : e.key === 'End' ? all[all.length - 1] : null;
+  if (!to) return;
+  e.preventDefault();
+  to.focus();
+});
 
 // ── dragging tabs ───────────────────────────────────────────────────────────
 // Within a group a dragged tab is reordered. The user's tab dropped on a
@@ -503,6 +573,43 @@ function drawChips() {
   }));
 }
 
+// ── side panels ─────────────────────────────────────────────────────────────
+// Settings, the relay form and site permissions each take the Claude panel's
+// place while open, as History, Bookmarks, Passwords and Sessions do: one at
+// a time, with a × at the top, and Esc closes. opened(): once it is on show.
+// Returns show(open).
+const SIDE_PANELS = ['history', 'bookmarks', 'passwords', 'activity', 'settings', 'relay', 'perms'];
+function sidePanel(name, node, opened) {
+  const cls = document.body.classList;
+  const isOpen = () => cls.contains(`${name}-open`);
+  const show = (open) => {
+    if (!open && !isOpen()) return;
+    if (open) {
+      for (const other of SIDE_PANELS) if (other !== name && cls.contains(`${other}-open`)) $(`${other}-close`).click();
+    }
+    cls.toggle(`${name}-open`, open);
+    node.hidden = !open;
+    $('panel-toggle').classList.toggle('on', !open && panelOpen());
+    if (open) opened?.();
+    else focusPage();
+  };
+  setIcon($(`${name}-close`), 'close');
+  $(`${name}-close`).onclick = () => show(false);
+  node.addEventListener('keydown', (e) => { if (e.key === 'Escape') show(false); });
+  // Asking for the Claude panel brings it back; another panel opening here closes this one.
+  const claudeInstead = () => {
+    if (!isOpen()) return;
+    show(false);
+    togglePanel(true);
+  };
+  $('panel-toggle').addEventListener('click', claudeInstead);
+  loui.on('toggle-panel', claudeInstead);
+  new MutationObserver(() => {
+    if (isOpen() && SIDE_PANELS.some((other) => other !== name && cls.contains(`${other}-open`))) show(false);
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  return show;
+}
+
 // ── connection to other Claude sessions ─────────────────────────────────────
 const LINK_WORDS = { connected: 'Connected', connecting: 'Connecting', offline: 'Offline', refused: 'Refused', off: 'Not connected' };
 const relay = $('relay');
@@ -522,15 +629,8 @@ function drawLink() {
     $('relay-key').placeholder = link.hasKey ? 'Saved. Enter a new key to replace it.' : '';
   }
 }
-const showRelay = (show) => {
-  relay.hidden = !show;
-  if (show) {
-    togglePanel(true);
-    $('relay-url').focus();
-  }
-};
+const showRelay = sidePanel('relay', relay, () => $('relay-url').focus());
 $('link').onclick = () => showRelay(relay.hidden);
-$('relay-close').onclick = () => showRelay(false);
 loui.on('show-relay', () => showRelay(true));
 relay.onsubmit = (e) => {
   e.preventDefault();
@@ -543,11 +643,13 @@ function drawUpdate() {
   const u = state.update;
   const ready = u?.status === 'ready';
   $('update').hidden = !ready;
-  if (!ready) return;
+  if (!ready || $('update').classList.contains('sure')) return; // not while it asks "Restart now?"
   $('update').textContent = 'Restart to update';
   $('update').title = `Version ${u.version} is ready. Loui restarts and reopens; Claude sessions' tab groups close.`;
 }
-$('update').onclick = () => loui.send('update:install');
+// Restarting closes sessions' tab groups, so while one is working (in any window) it asks first.
+askFirst($('update'), 'Restart now?', () => state.working > 0, () => loui.send('update:install'));
+loui.on('update:ask', () => $('update').click()); // "Restart to update" in the Help menu
 
 loui.on('state', (next) => {
   const fresh = state.picks.length < next.picks.length;
@@ -723,6 +825,8 @@ loui.on('chat', (e) => {
     if (pinned) feed.scrollTop = feed.scrollHeight;
   } else if (e.type === 'error') {
     add(el('div', 'trouble', e.text));
+  } else if (e.type === 'stopped') {
+    add(el('div', 'did stopped', 'Stopped')); // the Stop button: one quiet line
   } else if (e.type === 'done') {
     running = false;
     reply = null;
@@ -759,5 +863,9 @@ prompt.onkeydown = (e) => {
 for (const starter of document.querySelectorAll('.starter')) {
   starter.onclick = () => sendMessage(starter.textContent);
 }
-$('new-chat').onclick = () => loui.send('chat:reset');
+// A new conversation wipes this one: asked first while Claude is answering,
+// or once there is more than a few messages to lose.
+askFirst($('new-chat'), 'Clear this one?',
+  () => running || feed.querySelectorAll('.said, .reply').length > 3,
+  () => loui.send('chat:reset'));
 setSend();

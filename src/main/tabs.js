@@ -46,7 +46,7 @@ const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electro
 const { EventEmitter } = require('events');
 const path = require('path');
 const { requestRules } = require('./requests');
-const { searchFor } = require('./search');
+const { searchFor, searchName } = require('./search');
 
 const YOU = 'you';
 const LOG_LIMIT = 500;
@@ -903,29 +903,69 @@ class Tabs extends EventEmitter {
     ses.webRequest.onErrorOccurred(all, (d) => record(d, { error: d.error }));
   }
 
-  // Right-click inside a page.
-  contextMenu(tab, p) {
+  // Right-click inside a page: what was clicked first (a link, an image, the
+  // selection, a text field), then the page. In a session's tab nothing here
+  // takes a page out of the session's group: what opens, opens in the group.
+  pageMenuItems(tab, p) {
     const wc = tab.wc;
+    const mine = tab.group === YOU;
     const items = [];
+    const rule = () => { if (items.length && items[items.length - 1].type !== 'separator') items.push({ type: 'separator' }); };
+    const openTab = (url, show = false) => this.create(url, { group: tab.group, window: tab.window, show });
     if (p.linkURL) {
-      items.push(
-        { label: 'Open link in new tab', click: () => this.create(p.linkURL, { group: tab.group, window: tab.window, show: false }) },
-        { label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) },
-        { type: 'separator' },
-      );
+      items.push({ label: 'Open link in new tab', click: () => openTab(p.linkURL) });
+      // A private tab's link stays private.
+      if (mine) items.push({ label: 'Open link in new window', click: () => this.emit('open-window', { url: p.linkURL, private: tab.private }) });
+      if (mine && !tab.private) items.push({ label: 'Open link in private window', click: () => this.emit('open-window', { url: p.linkURL, private: true }) });
+      items.push({ label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) });
+      rule();
     }
-    if (p.isEditable) items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' });
-    else if (p.selectionText) items.push({ role: 'copy' }, { type: 'separator' });
+    if (p.mediaType === 'image' && p.srcURL) {
+      items.push(
+        { label: 'Open image in new tab', click: () => openTab(p.srcURL) },
+        // Asks where to save; a session's tab never opens a dialog (downloads.js).
+        { label: mine ? 'Save image as…' : 'Save image', click: () => { tab.saveAs = mine; wc.downloadURL(p.srcURL); } },
+        { label: 'Copy image', click: () => wc.copyImageAt(p.x, p.y) },
+        { label: 'Copy image address', click: () => clipboard.writeText(p.srcURL) },
+      );
+      rule();
+    }
+    const selected = (p.selectionText || '').trim();
+    if (p.isEditable) {
+      if (p.misspelledWord) {
+        for (const word of (p.dictionarySuggestions || []).slice(0, 5)) items.push({ label: word, click: () => wc.replaceMisspelling(word) });
+        items.push({ label: 'Add to dictionary', click: () => tab.ses.addWordToSpellCheckerDictionary(p.misspelledWord) });
+        rule();
+      }
+      items.push(
+        { role: 'cut', enabled: !!p.editFlags?.canCut }, { role: 'copy', enabled: !!p.editFlags?.canCopy }, { role: 'paste' },
+        { role: 'pasteAndMatchStyle', label: 'Paste as plain text' }, { role: 'selectAll' },
+      );
+      rule();
+    } else if (selected) {
+      items.push(
+        { role: 'copy' },
+        { label: `Search ${searchName()} for “${clipped(selected.replace(/\s+/g, ' '), 30)}”`, click: () => openTab(searchFor(selected), true) },
+      );
+      rule();
+    }
     items.push(
       { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
       { label: 'Reload', click: () => wc.reload() },
       { type: 'separator' },
+      { label: 'Print…', click: () => this.emit('print', tab) },
+      ...(/^https?:/i.test(tab.url) ? [{ label: 'View page source', click: () => openTab(`view-source:${tab.url}`, true) }] : []),
+      { type: 'separator' },
       // The Claude panel stays out of private windows.
       ...(tab.private && tab.group === YOU ? [] : [{ label: 'Point Claude at this', click: () => this.emit('point', tab, { x: p.x, y: p.y }) }]),
       { label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) },
     );
-    Menu.buildFromTemplate(items).popup({ window: tab.window.win });
+    return items;
+  }
+
+  contextMenu(tab, p) {
+    Menu.buildFromTemplate(this.pageMenuItems(tab, p)).popup({ window: tab.window.win });
   }
 
   // How a window is named in menus: by the tab on screen in it.
@@ -935,36 +975,79 @@ class Tabs extends EventEmitter {
     return `${w.private ? 'Private window' : 'Window'} with “${title.length > 40 ? title.slice(0, 39) + '…' : title}”`;
   }
 
-  // Right-click on a tab in the tab strip: hand it to a session, or take it
-  // back, or move it (or a session's whole group) to another window.
+  // A copy of a tab beside it, with its history.
+  duplicate(id) {
+    const tab = this.get(id);
+    if (!tab) return null;
+    const nav = tab.wc?.navigationHistory;
+    const entries = nav?.getAllEntries() || [];
+    const history = entries.length ? { entries, index: nav.getActiveIndex() } : tab.history;
+    const copy = this.create(tab.url, { group: tab.group, window: tab.window, show: this.onScreen(tab), history });
+    const peers = this.in(tab.group).filter((t) => t.window === tab.window && t !== copy);
+    this.reorder(copy.id, peers.indexOf(tab) + 1);
+    return copy;
+  }
+
+  // The items of a tab's right-click menu in the tab strip, in four parts:
+  // what is done to the tab, what Claude has to do with it, moving it to
+  // another window, and closing.
+  tabMenuItems(id) {
+    const tab = this.get(id);
+    if (!tab) return [];
+    const w = tab.window;
+    const g = this.group(tab.group);
+    const more = [];
+    this.emit('tab-menu', tab, more); // other modules add their items (sleep.js, brave.js, pip.js)
+    const reload = { label: 'Reload', click: () => (tab.asleep ? this.wake(tab) : tab.wc.reload()) };
+    const parts = [];
+    if (tab.group === YOU) {
+      const mine = this.in(YOU).filter((t) => t.window === w);
+      const others = mine.filter((t) => t !== tab && !t.pinned);
+      const right = mine.slice(mine.indexOf(tab) + 1).filter((t) => !t.pinned);
+      const closeAll = (list) => () => { for (const t of list) this.close(t.id); };
+      const there = this.windows.filter((x) => x !== w && x.private === tab.private && x.ses === tab.ses);
+      parts.push(
+        [
+          reload,
+          { label: 'Duplicate', click: () => this.duplicate(id) },
+          { label: tab.pinned ? 'Unpin tab' : 'Pin tab', click: () => this.pin(id, !tab.pinned) },
+          ...(/^(https?|file|ftp):/i.test(tab.url) ? [{ label: 'Bookmark this tab…', click: () => this.emit('bookmark-tab', tab) }] : []),
+          ...more,
+        ],
+        this.groups.filter((x) => x.id !== YOU).map((x) => ({ label: `Give to ${x.label}`, click: () => this.move(id, x.id, { lent: true }) })),
+        [
+          { label: 'Move to new window', click: () => this.emit('to-new-window', { tab }) },
+          ...(there.length ? [{
+            label: 'Move to window',
+            submenu: there.map((x) => ({ label: this.windowLabel(x), click: () => this.toWindow(id, x) })),
+          }] : []),
+        ],
+        [
+          ...(tab.private ? [] : [{ label: 'Reopen closed tab', click: () => this.emit('reopen-closed', w) }]),
+          { label: 'Close other tabs', enabled: others.length > 0, click: closeAll(others) },
+          { label: 'Close tabs to the right', enabled: right.length > 0, click: closeAll(right) },
+          { label: 'Close tab', click: () => this.close(id) },
+        ],
+      );
+    } else {
+      parts.push(
+        [reload, ...more],
+        [
+          { label: g.paused ? 'Let Claude continue' : 'Take over', click: () => { g.paused = !g.paused; this.emit('change'); } },
+          { label: 'Take back', click: () => this.move(id, YOU) },
+          { label: 'End session', click: () => this.emit('end-session', g.id) },
+        ],
+        this.groupMoveItems(tab.group),
+        [{ label: 'Close tab', click: () => this.close(id) }],
+      );
+    }
+    return parts.filter((part) => part.length).flatMap((part, i) => (i ? [{ type: 'separator' }, ...part] : part));
+  }
+
+  // Right-click on a tab in the tab strip.
   tabMenu(id) {
     const tab = this.get(id);
-    if (!tab) return;
-    const others = this.groups.filter((g) => g.id !== YOU && g.id !== tab.group);
-    const items = [];
-    if (tab.group === YOU) {
-      items.push({ label: tab.pinned ? 'Unpin tab' : 'Pin tab', click: () => this.pin(id, !tab.pinned) });
-      for (const g of others) {
-        items.push({ label: `Give to ${g.label}`, click: () => this.move(id, g.id, { lent: true }) });
-      }
-      const there = this.windows.filter((w) => w !== tab.window && w.private === tab.private && w.ses === tab.ses);
-      items.push({
-        label: 'Move to new window', click: () => this.emit('to-new-window', { tab }),
-      });
-      if (there.length) {
-        items.push({
-          label: 'Move to window',
-          submenu: there.map((w) => ({ label: this.windowLabel(w), click: () => this.toWindow(id, w) })),
-        });
-      }
-    } else {
-      items.push({ label: 'Take back', click: () => this.move(id, YOU) });
-      items.push(...this.groupMoveItems(tab.group));
-    }
-    this.emit('tab-menu', tab, items); // other modules add their items (sleep.js, brave.js)
-    if (items.length) items.push({ type: 'separator' });
-    items.push({ label: 'Close tab', click: () => this.close(id) });
-    Menu.buildFromTemplate(items).popup({ window: tab.window.win });
+    if (tab) Menu.buildFromTemplate(this.tabMenuItems(id)).popup({ window: tab.window.win });
   }
 
   // "Move group to window" for a session's group: a new window, or another
