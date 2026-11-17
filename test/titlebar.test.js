@@ -515,9 +515,7 @@ test("Louis's menu: how Loui looks and is set up, each item ticked as things sta
   // Settings, on the section asked for.
   const section = () => b.ui('settings:js', `document.querySelector('.st-section-tab[aria-selected="true"]')?.id`);
   await b.ui('menu:louis', { click: 'Start page settings' });
-  await until(async () => (await b.ui('settings:state')).open && section(), (s) => s === 'tab-general');
-  await until(() => b.ui('settings:js', `(() => { const h = [...document.querySelectorAll('#section-general h3')].find((n) => n.textContent === 'Start page');
-    const r = h.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`), (seen) => seen === true);
+  await until(async () => (await b.ui('settings:state')).open && section(), (s) => s === 'tab-start'); // the start page has a section of its own
   await b.ui('menu:louis', { click: 'Check for updates' });
   await until(section, (s) => s === 'tab-about');
   assert.match(await b.ui('settings:js', `document.getElementById('section-about').innerText`), /Updates/);

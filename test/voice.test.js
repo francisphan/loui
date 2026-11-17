@@ -340,8 +340,9 @@ test('the speech model is fetched on first use, with progress on the button and 
 
   // A connection that goes quiet is given up, and leaves nothing behind.
   serving = 'hold';
-  await press('mic');
-  await press('mic');
+  await press('mic'); // after a failure it asks again
+  await wait('the question', async () => (await mic()).cls === 'asking');
+  await press('mic'); // yes
   await wait('the download to show', async () => (await mic()).cls === 'getting');
   await wait('the stalled download to be given up', async () => (await mic()).trouble);
   assert.match((await mic()).note, /could not be fetched: the download stalled\..*press the microphone to try again/);
@@ -352,12 +353,13 @@ test('the speech model is fetched on first use, with progress on the button and 
   for (const res of held.splice(0)) res.destroy();
 
   await press('mic');
+  await wait('the question once more', async () => ['asking', 'getting'].includes((await mic()).cls));
+  if ((await mic()).cls === 'asking') await press('mic'); // yes
   await wait('the download to show', async () => (await mic()).cls === 'getting');
   assert.match((await mic()).text, /^\d+%$/);
   assert.match((await mic()).note, /Getting the speech model/);
   assert.equal((await b.state()).voice.model, 'downloading');
   // A press while it downloads cancels it, and what had arrived is removed.
-  const dir = (await b.ui('voice:state')).dir;
   await wait('a partial file', async () => fs.existsSync(dir) && fs.readdirSync(dir).some((f) => f.endsWith('.part')));
   await press('mic');
   await wait('the download to stop', async () => (await mic()).cls === 'idle');

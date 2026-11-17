@@ -507,11 +507,12 @@ test("a private window's start page asks the web for nothing: it shows what is a
 
 test('a feed is fetched from the web only: not from this machine, directly or by a redirect', async () => {
   await act('start:feed-remove', `${at}/feed`);
-  for (const feed of [`${at}/inward`, `${within}/secret`, `${within.replace('127.0.0.1', 'localhost')}/secret`, `${within.replace('127.0.0.1', '[::ffff:127.0.0.1]')}/secret`]) await act('start:feed-add', feed);
-  const refused = await fresh();
-  assert.match(await words(refused.id), /Couldn't load the news\./);
+  // A feed is tried once when it is added: these are refused there, and never listed.
+  const inward = [`${at}/inward`, `${within}/secret`, `${within.replace('127.0.0.1', 'localhost')}/secret`, `${within.replace('127.0.0.1', '[::ffff:127.0.0.1]')}/secret`];
+  for (const feed of inward) await act('start:feed-add', feed).catch(() => {});
   assert.equal(hits.inner, 0, 'nothing on this machine was asked');
-  for (const feed of saved().newsFeeds) await act('start:feed-remove', feed);
+  assert.ok(!(saved().newsFeeds || []).some((f) => inward.includes(f)), 'and none of them is kept');
+  for (const feed of saved().newsFeeds || []) await act('start:feed-remove', feed);
   // A redirect to somewhere allowed is followed.
   await act('start:feed-add', `${at}/moved`);
   const tab = await fresh();
