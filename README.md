@@ -142,6 +142,18 @@ copy this repository there, run `npm install --omit=dev`, start
   rests on it. The page makes room rather than being covered, since nothing
   can be drawn over a page. Kept in `settings.json` (`"verticalTabs"`,
   `"sidebarCollapsed"`).
+- **Watching a session in a small window.** Right-click one of a session's
+  tabs and choose *Watch in a small window*, or press *Watch* in the helm
+  while it works: a small window that stays on top shows a live picture of
+  the tab it is working in (following it to a new tab), what it is doing, and
+  *Take over* / *Let Claude continue*. Click the picture to show that tab.
+  Drag it by its bar and resize it from its edges; dropped near a screen edge
+  it snaps to it, and it opens where it was last time (`"pip"` in
+  `settings.json`), at first in the bottom right corner. When the session
+  ends it says so and closes. The pictures are the tab's own frames, scaled
+  down: at most five a second while the page changes, none while it is still,
+  and none while the small window is hidden, minimised or closed. Sessions
+  cannot open or see it.
 - **Task manager** (`Shift+Esc`, or *View › Task manager*) shows what each
   tab costs, in a small window of its own: private memory, working set and CPU
   for every tab (yours, and each session's with its group's name), sleeping
@@ -471,6 +483,7 @@ src/main/bookmarks.js bookmarks: the bar's folder menus, import, bookmarks.json
 src/main/errorpage.js the page shown when a page can't be opened (and Louis's walk)
 src/main/passwords.js passwords: the encrypted store, offers to save, filling, import
 src/main/taskmanager.js  the task manager window: memory and CPU per tab and process
+src/main/pip.js       watching a session in a small window: its tab's frames, scaled down
 src/main/default-browser.js  links from other apps (command line, second launch), Default apps
 src/main/reader.js    reader view: the check, the loui-reader: page and its settings, read_article's text
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" class="pip-page">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src data:">
+  <title>Watching a Claude session</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="pip.css">
+</head>
+<body>
+  <main id="pip">
+    <header id="pip-head">
+      <span id="pip-label"></span>
+      <button id="pip-close" type="button" title="Close" aria-label="Close">×</button>
+    </header>
+    <button id="pip-view" type="button" title="Show this tab in Loui">
+      <img id="pip-frame" alt="">
+      <span id="pip-empty">Nothing to show yet</span>
+    </button>
+    <footer id="pip-foot">
+      <span id="pip-status" role="status"></span>
+      <button id="pip-pause" type="button"></button>
+    </footer>
+    <div id="pip-ended" hidden>
+      <p>Session ended</p>
+      <button id="pip-ended-close" type="button">Close</button>
+    </div>
+  </main>
+  <script src="pip.js"></script>
+</body>
+</html>

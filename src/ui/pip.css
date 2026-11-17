@@ -1,0 +1,110 @@
+/* The small window that watches a session (pip.html). Colours come from
+   ui.css; magenta, as everywhere, means Claude. */
+.pip-page body { display: block; background: var(--water); }
+#pip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+/* The bar along the top moves the window (it has no frame of its own). */
+#pip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  background: var(--claude-wash);
+  box-shadow: inset 0 2px 0 var(--claude);
+  color: var(--claude);
+  font-size: 13px;
+  font-weight: 650;
+  -webkit-app-region: drag;
+}
+#pip-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#pip-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  -webkit-app-region: no-drag;
+}
+#pip-close:hover { background: var(--shoal); }
+
+/* The picture: the whole page, scaled to fit. A click shows the tab. */
+#pip-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: var(--water);
+}
+#pip-frame { display: block; width: 100%; height: 100%; object-fit: contain; }
+#pip-frame:not([src]) { visibility: hidden; }
+#pip-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+#pip-empty[hidden] { display: none; }
+
+#pip-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 32px;
+  padding: 0 5px 0 10px;
+  border-top: 1px solid var(--rule);
+  background: var(--paper);
+  font-size: 13px;
+}
+#pip-status { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); }
+/* In motion, so in italic, as in the helm. */
+#pip-status.moving { color: var(--claude); font-style: italic; font-weight: 500; }
+#pip-pause {
+  flex: none;
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--claude);
+  color: var(--on-claude);
+  font-size: 12px;
+  font-weight: 650;
+}
+#pip-pause[hidden] { display: none; }
+
+#pip-ended {
+  position: absolute;
+  inset: 28px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--water);
+  color: var(--ink-2);
+}
+#pip-ended[hidden] { display: none; }
+#pip-ended p { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+#pip-ended-close {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--paper);
+}
+#pip-ended-close:hover { background: var(--shoal); }

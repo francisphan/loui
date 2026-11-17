@@ -33,6 +33,7 @@ const { createGuardrails } = require('./guardrails');
 const { createPasswords } = require('./passwords');
 const { createTaskManager } = require('./taskmanager');
 const { createActivity } = require('./activity');
+const { createPip } = require('./pip');
 const { createDefaultBrowser, urlsFrom } = require('./default-browser');
 const { createReader } = require('./reader');
 const { createPalette } = require('./palette');
@@ -82,6 +83,7 @@ let taskManager, defaultBrowser;
 let reader;
 let activity;
 let palette;
+let pip;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
 
@@ -96,6 +98,7 @@ function pushState() {
   setImmediate(() => {
     stateQueued = false;
     send('state', currentState());
+    pip?.changed(); // the small window watching a session shows its status too
   });
 }
 
@@ -226,6 +229,11 @@ function createWindow() {
     focusMain: () => { if (win.isMinimized()) win.restore(); win.focus(); },
   });
   defaultBrowser = createDefaultBrowser({ getWin: () => win, tabs });
+  pip = createPip({
+    tabs, settings, save: saveSettings, lockToApp,
+    pause: (group, on) => handlers.pause({ group, on }),
+    focusMain: () => { if (win.isMinimized()) win.restore(); win.focus(); },
+  });
 
   tabs.on('change', pushState);
   tabs.on('point', (tab, point) => actions.picker.at(tab, point));
@@ -286,6 +294,7 @@ const handlers = {
   'prompt:answer': ({ id, value }) => prompts.answer(id, value),
   'consent:revoke': (id) => consent.revoke(id),
   'group:close': (id) => sessions.end(id, 'closed'),
+  'pip:open': (id) => pip.open(id), // watch a session in a small window
   'device:menu': () => deviceMenu(),
   'relay:set': (settings) => link.configure(settings),
   'update:install': () => updater.install(),
@@ -365,6 +374,7 @@ async function testHook({ ui, arg }) {
   if (reader.probes[ui]) return reader.probes[ui](arg);
   if (activity.probes[ui]) return activity.probes[ui](arg);
   if (palette.probes[ui]) return palette.probes[ui](arg);
+  if (pip.probes[ui]) return pip.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.

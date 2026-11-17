@@ -391,6 +391,10 @@ function drawHelm() {
       for (const b of [$('helm-btn'), $('helm-no')]) b.disabled = false;
     }
   }
+  // A busy session can be watched from a small window while the user goes back to their own tabs.
+  $('helm-pip').hidden = g.id === YOU || !driving || !!asked || picking.active;
+  $('helm-pip').title = `Watch ${g.label} in a small window`;
+  $('helm-pip').onclick = () => loui.send('pip:open', g.id);
   document.body.classList.toggle('driving', driving);
 }
 
