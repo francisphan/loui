@@ -103,6 +103,9 @@ copy this repository there, run `npm install --omit=dev`, start
 - **When a session ends, its group closes.** A session ends when its app says
   so, or about a minute after its connection drops (Claude Code closing), or,
   for apps that hold no connection open, after 15 minutes without a call.
+- **Your tabs come back after a restart** (and after an update), with their
+  history and device size. Sessions' groups do not. `Ctrl+Shift+T` reopens
+  the tabs you closed, most recent first.
 
 The **Claude panel** in the window is different: it is your own co-driver and
 works in your tabs. It runs on your Claude Code login through the Agent SDK
@@ -162,6 +165,7 @@ src/shared/tools.js   the tool list (relay and panel both advertise it)
 src/main/main.js      window, menu, requests from the window chrome
 src/main/tabs.js      views, tab groups, console and network history, device sizes
 src/main/sessions.js  sessions and their groups, take over, hand-over
+src/main/restore.js   your tabs across restarts (tabs.json), reopening closed tabs
 src/main/actions.js   what each tool does
 src/main/link.js      the connection out to the relay
 src/main/rpc.js       local control socket, used by the tests

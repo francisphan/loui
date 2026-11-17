@@ -20,8 +20,8 @@ function serveFixture() {
 }
 
 // env: extra environment for the app (for example the relay to connect to).
-async function launch(env = {}) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
+async function launch(env = {}, { home: reuse } = {}) {
+  const home = reuse || fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
   const server = await serveFixture();
   const base = `http://127.0.0.1:${server.address().port}`;
   const app = spawn(require('electron'), [root, '--no-sandbox'], {
@@ -82,7 +82,7 @@ async function launch(env = {}) {
       await exited;
       clearTimeout(timer);
     }
-    fs.rmSync(home, { recursive: true, force: true });
+    if (!reuse) fs.rmSync(home, { recursive: true, force: true });
   };
   return { call, text, as, ui, state, close, base, home };
 }
