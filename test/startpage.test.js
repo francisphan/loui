@@ -9,6 +9,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { launch } = require('./drive');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(what, fn, tries = 80) {
@@ -170,6 +171,18 @@ test('typing in its box and pressing Enter opens an address, or searches for wor
   await b.ui('search:set', { engine: 'custom', url: `${b.base}/second.html?q=%s` });
   await panel('type', { ref: ref(await panel('snapshot')), text: 'two words', submit: true });
   await until('the words are searched for', async () => (await tabOf(tab.id)).url === `${b.base}/second.html?q=two%20words`);
+});
+
+test('the box opens web addresses and searches only: not a file, though the Claude panel can type in it', async () => {
+  const tab = await fresh();
+  const ref = (page) => /textbox "Search or enter an address" \[(e\d+)\]/.exec(page)[1];
+  for (const address of [`file://${__filename}`, `view-source:${b.base}/plain.html`, 'file:///etc/hostname']) {
+    await panel('type', { ref: ref(await panel('snapshot')), text: address, submit: true }).catch(() => {});
+    await sleep(700);
+    const now = await tabOf(tab.id);
+    assert.equal(now.url, '', `${address} is not opened`);
+    assert.doesNotMatch(await panel('snapshot'), /node:test|require\(/, 'and nothing of the file is read');
+  }
 });
 
 test('the weather and the news are drawn from what Loui fetched, once for any number of start pages', async () => {

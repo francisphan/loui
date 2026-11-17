@@ -310,8 +310,23 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
   // Resolves { out: fn's result, note: what to tell the session }.
   // posts: whether a form the tab posts meanwhile is asked about (not for a
   // select that is all its form holds).
+  // The watch ends with the session's hold on the tab: when the tab changes
+  // hands, when the user takes over, and, in the user's own tab, a little
+  // after the panel's script (it must not sit in a page he keeps open all
+  // day, stopping what the site itself does long after).
+  const PANEL_WATCH_MS = Number(process.env.LOUI_TEST && process.env.LOUI_PANEL_WATCH_MS) || 10000;
+  function unwatch(tab) {
+    clearTimeout(tab?.unwatching);
+    if (!tab?.watched) return;
+    tab.watched = false;
+    if (tab.wc && !tab.wc.isDestroyed()) page(tab, 'unwatchScript').catch(() => {});
+  }
+  tabs.on('handed', unwatch);
+  const unwatchGroup = (groupId) => { for (const tab of tabs.in(groupId)) unwatch(tab); };
+
   async function watched(c, tab, fn, posts = true) {
     if (!guard.applies(c.session)) return { out: await fn(), note: '' };
+    clearTimeout(tab.unwatching);
     await page(tab, 'watchScript', guard.hints()).catch(() => {});
     guard.scripting(c.session, posts);
     tab.watched = true;
@@ -319,6 +334,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     try { out = await fn(); } catch (e) { failed = e; }
     await sleep(100); // what the script set off without waiting for it: a timer, a form on its way
     const note = tab.wc ? await held(c, tab, true) : '';
+    if (c.session.group === YOU) tab.unwatching = setTimeout(() => unwatch(tab), PANEL_WATCH_MS);
     if (failed) throw failed;
     return { out, note };
   }
@@ -758,7 +774,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     });
   }
 
-  return { run, picker, describePick };
+  return { run, picker, describePick, unwatchGroup };
 }
 
 module.exports = { createActions };

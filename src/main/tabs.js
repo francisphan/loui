@@ -458,15 +458,7 @@ class Tabs extends EventEmitter {
         // Told to let go, and told again: the page may not have finished going
         // in when the first word arrives, and would then stay in while Loui
         // shows it as an ordinary page.
-        const w = tab.window;
-        const out = () => {
-          if (wc.isDestroyed() || w.full === tab.id) return;
-          wc.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
-          // The window must not be left full screen on its account either.
-          if (!w.full && !w.wide && !w.win.isDestroyed() && w.win.isFullScreen()) w.win.setFullScreen(false);
-        };
-        out();
-        for (const ms of [150, 400, 1000]) setTimeout(out, ms);
+        this.tellOut(tab);
         return;
       }
       tab.window.full = tab.id;
@@ -637,13 +629,30 @@ class Tabs extends EventEmitter {
     else if (w.full) this.unfull(w, { leave: true });
   }
 
+  // A page that has, or is about to have, the screen for itself is told to
+  // let go, and told again for a moment: one word can arrive before the page
+  // has finished going in, and it would then stay in while Loui shows it as
+  // an ordinary page. Stops once the page has the screen again by right.
+  tellOut(tab) {
+    const wc = tab.wc;
+    const w = tab.window;
+    const out = () => {
+      if (!wc || wc.isDestroyed() || w.full === tab.id) return;
+      wc.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
+      // The window must not be left full screen on its account either.
+      if (!w.full && !w.wide && !w.win.isDestroyed() && w.win.isFullScreen()) w.win.setFullScreen(false);
+    };
+    out();
+    for (const ms of [150, 400, 1000, 2000]) setTimeout(out, ms);
+  }
+
   // The window's page gives the whole window back: on its own (Esc), or
   // because another tab is to be shown or its tab is going.
   unfull(w, { leave = false } = {}) {
     const tab = this.get(w?.full);
     if (!w?.full) return;
     w.full = null;
-    if (leave && tab?.wc && !tab.wc.isDestroyed()) tab.wc.executeJavaScript('document.exitFullscreen()', true).catch(() => {});
+    if (leave && tab) this.tellOut(tab);
     if (leave && !w.win.isDestroyed() && w.win.isFullScreen() && !w.wide) w.win.setFullScreen(false);
     if (tab?.view) this.place(tab);
     this.emit('change');
@@ -856,6 +865,7 @@ class Tabs extends EventEmitter {
     }
     if (from.id === YOU) this.unstart(tab);
     const left = tab.window;
+    this.emit('handed', tab); // whoever had it lets go of what it left in the page (actions.js)
     // What the tab logged for whoever had it is not the next one's to read.
     tab.console = [];
     tab.network = [];

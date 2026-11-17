@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { launch } = require('./drive');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const { classify, inspectBody } = require('../src/main/guardrails');
 
 // ── the rules, without the app ────────────────────────────────────────────
@@ -647,5 +648,59 @@ test('Share, Reply and Subscribe open things without a question; a sort that pos
   await answer(q, 'block');
   assert.match(await choosing, /The page tried to submit a form to .* The user declined, so Loui stopped it/);
   assert.match((await tabOf('g-everyday')).url, /guard3\.html$/);
+  s.end();
+});
+
+// The watch on what a script left behind must not outlive the session's hold
+// on the tab: in the user's own tab after the panel's script, or in a tab the
+// user has taken over, what the site itself does is the site's again.
+test('the script watch lets go: a while after the panel\'s script in the user\'s tab, and when the user takes over', async () => {
+  const p = await launch({ LOUI_PANEL_WATCH_MS: '700' });
+  try {
+    const out = (id) => p.ui('tab:js', { id, code: "document.getElementById('out').textContent" });
+    const own = (id) => p.ui('tab:js', { id, code: "document.getElementById('buy').click(); 1" }); // the page's own doing: no real input
+    const reset = (id) => p.ui('tab:js', { id, code: "document.getElementById('out').textContent = 'nothing yet'; 1" });
+    const wait = async (what, check) => { for (const end = Date.now() + 8000; Date.now() < end; await sleep(100)) { if (await check()) return; } assert.fail(`timed out waiting for ${what}`); };
+
+    // The user's own tab, where the panel runs a script.
+    await p.ui('go', `${p.base}/guard2.html`);
+    let mine;
+    await wait('the page', async () => { mine = (await p.state()).tabs.find((t) => t.active); return mine.url.endsWith('/guard2.html') && !mine.loading; });
+    await p.ui('panel', { tool: 'evaluate', args: { code: '1 + 1' } });
+    await own(mine.id);
+    await sleep(200);
+    assert.equal(await out(mine.id), 'nothing yet', 'held while the script is recent');
+    await sleep(900);
+    await own(mine.id);
+    await wait('the site\'s own click to go through', async () => (await out(mine.id)) === 'bought');
+
+    // A session's tab the user takes over.
+    const s = p.as('g-watch', 'Claude Code');
+    await s.text('navigate', { url: `${p.base}/guard2.html` });
+    const theirs = (await p.state()).tabs.find((t) => t.group === 'g-watch');
+    await s.text('evaluate', { code: '1 + 1' });
+    await own(theirs.id);
+    await sleep(200);
+    assert.equal(await out(theirs.id), 'nothing yet', 'held while the session has the tab');
+    await p.ui('pause', { group: 'g-watch', on: true });
+    await sleep(300);
+    await reset(theirs.id);
+    await own(theirs.id);
+    await wait('the site\'s own click after the user took over', async () => (await out(theirs.id)) === 'bought');
+    s.end();
+  } finally {
+    await p.close();
+  }
+});
+
+test('a script that calls a handler by its framework name is asked about first', async () => {
+  const s = b.as('g-camel', 'Claude Code');
+  await s.text('navigate', { url: `${b.base}/guard2.html` });
+  const running = s.text('evaluate', { code: "(window.props = { onClick: () => document.getElementById('buy').onclick() }, props.onClick(), 'ran')" });
+  const g = await prompt();
+  assert.match(g.what, /script/);
+  await answer(g, 'block');
+  await assert.rejects(running);
+  assert.equal(await read('g-camel'), 'nothing yet');
   s.end();
 });

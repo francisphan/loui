@@ -248,7 +248,7 @@ test('the menu button has a short menu of its own, one level deep', async () => 
   assert.match(menu.at(-1), /^About Loui \d+\.\d+\.\d+/);
   // The device sizes and the developer tools are here, not in the toolbar.
   assert.equal(await chrome("document.getElementById('devtools')"), null);
-  assert.equal(await chrome("document.getElementById('device').hidden"), true, 'the device button shows only while one is emulated');
+  assert.equal(await chrome("getComputedStyle(document.getElementById('device')).display"), 'none', 'the device button is drawn only while one is emulated');
   const sub = (name) => menu.find((i) => Array.isArray(i) && i[0] === name)[1];
   assert.equal(sub('History')[0], 'Second', 'the page just visited comes first');
   assert.deepEqual(sub('History').slice(-2), ['-', 'Show all history']);

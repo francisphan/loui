@@ -73,13 +73,35 @@ function textOf(raw) {
 const inner = (block, name) => new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i').exec(block)?.[1] ?? null;
 const element = (block, name) => { const raw = inner(block, name); return raw == null ? '' : textOf(raw); };
 
+// The <item> or <entry> blocks of a feed, found by looking for each one's
+// closing tag from where it opens: a feed of unclosed openings must not cost
+// more than one pass (a pattern that scanned to the end from each one froze
+// the browser for over a minute on a hostile 2 MB feed). At most PARSE_MAX
+// characters and BLOCKS_MAX blocks are looked at.
+const PARSE_MAX = 300 * 1024;
+const BLOCKS_MAX = 50;
+function blocks(xml) {
+  const text = xml.length > PARSE_MAX ? xml.slice(0, PARSE_MAX) : xml;
+  const lower = text.toLowerCase();
+  const out = [];
+  const open = /<(item|entry)[\s>]/gi;
+  for (let m; out.length < BLOCKS_MAX && (m = open.exec(text));) {
+    const close = `</${m[1].toLowerCase()}>`;
+    const end = lower.indexOf(close, m.index);
+    if (end < 0) break; // nothing closes from here on
+    out.push(text.slice(m.index, end + close.length));
+    open.lastIndex = end + close.length;
+  }
+  return out;
+}
+
 // An RSS or Atom feed's items: [{ title, url, source, at }], in the feed's order.
 function parseFeed(xml, feedUrl = '') {
   const items = [];
   const first = xml.search(/<(item|entry)[\s>]/i);
   let fallback = element(first < 0 ? xml : xml.slice(0, first), 'title');
   if (!fallback) { try { fallback = new URL(feedUrl).hostname.replace(/^www\./, ''); } catch {} }
-  for (const [block] of xml.matchAll(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi)) {
+  for (const block of blocks(xml)) {
     const title = element(block, 'title').slice(0, 200);
     // Atom: <link href="…"> (the page itself, not rel="self" and the like); RSS: <link>…</link>.
     const links = [...block.matchAll(/<link\b[^>]*>/gi)].map(([tag]) => tag);
