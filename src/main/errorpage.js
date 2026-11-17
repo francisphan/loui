@@ -13,8 +13,15 @@
 // page has no storage of its own, so it is handed the best score when it is
 // drawn, and the main process waits on the page (an executeJavaScript promise
 // that resolves when a round ends with a new best). The page never calls in.
+// "Open anyway" on a certificate error is heard the same way (see certs.js).
+//
+// A page whose process crashed has nothing left to draw in, so the tab is
+// reloaded with that one request refused: Chromium then puts its error
+// document in the page's place in the history, and the crash is explained
+// there. Reload on it opens the address again.
 const fs = require('fs');
 const path = require('path');
+const { requestRules } = require('./requests');
 
 const UI = path.join(__dirname, '../ui');
 const FONT = path.join(__dirname, '../../node_modules/@fontsource-variable/source-sans-3/files/source-sans-3-latin-wght-normal.woff2');
@@ -55,7 +62,8 @@ function source() {
   return script;
 }
 
-function createErrorPage({ tabs, file }) {
+// certs: accepts a certificate when the user says so (certs.js).
+function createErrorPage({ tabs, file, certs }) {
   let best = 0;
   try { best = Math.max(0, Math.floor(JSON.parse(fs.readFileSync(file, 'utf8')).best) || 0); } catch {}
 
@@ -97,10 +105,36 @@ function createErrorPage({ tabs, file }) {
     }, () => {});
   }
 
+  // Waits for "Open anyway" (the page then answers true; null when it goes away).
+  function listenProceed(tab) {
+    const wc = tab.wc;
+    wc.executeJavaScript('window.__louiErrorPage?.proceed()').then((yes) => {
+      if (yes && tab.wc === wc && !certs.proceed(tab)) listenProceed(tab); // refused (Claude was at work): asked again later
+    }, () => {});
+  }
+
+  // ── a page that crashed ─────────────────────────────────────────────────
+  const crashed = new Map(); // page (WebContents id) -> why, until its reload has been refused
+  // Each session: the user's, and each private one (main.js attaches those).
+  const attach = (ses) => requestRules(ses).add((d) =>
+    (d.resourceType === 'mainFrame' && crashed.has(d.webContentsId) ? { cancel: true } : null));
+  tabs.on('crashed', (tab, details) => {
+    const wc = tab.wc;
+    if (!wc || wc.isDestroyed() || !/^https?:/i.test(tab.url)) return;
+    crashed.set(wc.id, details.reason);
+    wc.once('destroyed', () => crashed.delete(wc.id));
+    // After the event: the page gets a new process, and its load is refused (above).
+    setImmediate(() => { if (!wc.isDestroyed()) wc.reload(); });
+  });
+
   let pretended = null; // for the tests: the next failure as if the network were down
   const watched = new WeakSet();
   tabs.on('failed', (tab, { code, reason, url }) => {
     if (pretended) { ({ code, reason } = pretended); pretended = null; }
+    // A session's tab kept from a site whose certificate the user accepted for themselves (certs.js).
+    if (certs?.refuses(tab, url)) { code = -202; reason = 'ERR_CERT_AUTHORITY_INVALID'; }
+    const crash = crashed.get(tab.wc.id) || null;
+    crashed.delete(tab.wc.id);
     // A page that loads replaces the error page (error pages don't fire did-navigate).
     // Watched per page: a tab that slept and woke has a new one.
     if (!watched.has(tab.wc)) {
@@ -111,16 +145,20 @@ function createErrorPage({ tabs, file }) {
     const shown = onScreen(tab);
     const page = {
       url, code, reason, best, shown,
-      game: GAME_CODES.has(code) && /^https?:/i.test(url),
+      game: !crash && GAME_CODES.has(code) && /^https?:/i.test(url),
+      crash, // why the page's process went, if that is what happened
+      // A certificate Chromium could not verify, in the user's own tab: "Open anyway" is offered.
+      cert: !crash && !!certs?.offer(tab, url),
     };
     tab.wc.executeJavaScript(source().replace('__PAGE__', () => JSON.stringify(page))).then((drawn) => {
       if (!drawn) return;
       showing.set(tab, shown);
       if (page.game) listen(tab);
+      if (page.cert) listenProceed(tab);
     }, () => {});
   });
 
-  return { best: () => best, pretend: (code, reason) => { pretended = { code, reason }; } };
+  return { best: () => best, pretend: (code, reason) => { pretended = { code, reason }; }, attach };
 }
 
 module.exports = { createErrorPage, GAME_CODES };

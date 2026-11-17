@@ -4,11 +4,15 @@
 
 // ── suggestions ─────────────────────────────────────────────────────────────
 // The list is drawn by a view in front of the page (src/main/suggest.js); this
-// keeps what it shows. Arrows move the highlight, which puts that page's
-// address in the bar, so Enter (ui.js's submit) opens it.
-let typed = ''; // what the user typed, before arrowing through suggestions
-let offered = []; // the suggestions on show
-let chosen = -1; // the highlighted one, or -1 for none
+// keeps what it shows. The first row is what Enter does: open the address
+// (finished inline from a page visited before, as selected text, so typing on
+// replaces it and Backspace removes it), or search for the words. Arrows move
+// the highlight, which puts that row's address in the bar.
+let typed = ''; // what the user typed, before completion and arrowing through suggestions
+let offered = []; // the rows on show; the first is what Enter does
+let chosen = 0; // the highlighted one
+let fresh = false; // whether the rows answer what is in the bar now
+let erasing = false; // the last edit deleted: nothing is completed until the next character
 
 function drawSuggestions() {
   if (!offered.length) return loui.send('suggest:hide');
@@ -17,21 +21,47 @@ function drawSuggestions() {
 }
 function dismissSuggestions() {
   offered = [];
-  chosen = -1;
+  chosen = 0;
+  fresh = false;
   loui.send('suggest:hide');
 }
+// A row chosen with Enter or a click: an open tab is switched to, anything else opened here.
+function openSuggestion(row) {
+  dismissSuggestions();
+  if (row.tab) {
+    address.value = activeTab()?.url || '';
+    loui.send('tab:reveal', row.tab);
+  } else {
+    address.value = row.url;
+    loui.send('go', row.url);
+  }
+  address.blur();
+}
 
-address.addEventListener('input', () => {
+address.addEventListener('input', (e) => {
   typed = address.value;
+  fresh = false;
+  erasing = /^delete/.test(e.inputType || '');
   if (typed.trim()) loui.send('suggest:query', typed);
   else dismissSuggestions();
 });
 // The list follows the address bar when the window is resized.
 new ResizeObserver(() => { if (offered.length) drawSuggestions(); }).observe(address);
-loui.on('suggestions', ({ text, items }) => {
-  if (text !== typed || document.activeElement !== address) return; // the user has typed on, or left
-  offered = items;
-  chosen = -1;
+const shortUrl = (url) => url.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+loui.on('suggestions', ({ text, items, enter, complete }) => {
+  // The user has typed on, or left.
+  if (text !== typed || address.value !== typed || document.activeElement !== address) return;
+  const fill = !erasing && complete && address.selectionStart === typed.length ? complete : null;
+  const first = fill ? { url: fill.url, title: fill.title, note: fill.title ? `Go to ${shortUrl(fill.url)}` : 'Go to address', fill: fill.text, source: 'enter' }
+    : enter.search ? { url: enter.url, title: `Search ${enter.search} for “${typed.trim()}”`, note: '', source: 'enter' }
+      : { url: enter.url, title: '', note: 'Go to address', source: 'enter' };
+  offered = [first, ...items.filter((s) => s.tab || s.url !== first.url)];
+  chosen = 0;
+  fresh = true;
+  if (fill) {
+    address.value = fill.text;
+    address.setSelectionRange(typed.length, fill.text.length);
+  }
   drawSuggestions();
 });
 
@@ -40,17 +70,29 @@ $('address-form').addEventListener('keydown', (e) => {
   if (!offered.length) return;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
-    // Positions run from "none" (what was typed) through each suggestion and round again.
-    const n = offered.length + 1;
-    chosen = ((chosen + 1 + (e.key === 'ArrowDown' ? 1 : -1) + n) % n) - 1;
-    address.value = chosen < 0 ? typed : offered[chosen].url;
+    const n = offered.length;
+    chosen = (chosen + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    const row = offered[chosen];
+    // Back on the first row the bar shows what was typed again, completed as it was.
+    address.value = chosen ? row.url : row.fill || typed;
+    if (!chosen && row.fill) address.setSelectionRange(typed.length, row.fill.length);
     drawSuggestions();
   } else if (e.key === 'Escape') {
-    e.stopPropagation(); // the first Esc only closes the list
-    address.value = typed;
+    // With suggestions on show the first Esc only closes the list. The row
+    // that says what Enter does is not one: with it alone, Esc leaves the
+    // address bar at once (ui.js).
+    if (offered.length > 1 || chosen) {
+      e.stopPropagation();
+      address.value = typed;
+    }
     dismissSuggestions();
-  } else if (e.key === 'Enter') {
-    dismissSuggestions();
+  } else if (e.key === 'Enter' && !e.isComposing) {
+    // Rows for an earlier text (Enter came before the answer) are not what
+    // the user sees in the bar: what is typed is opened as it is (ui.js).
+    const row = fresh ? offered[chosen] : null;
+    if (!row) return dismissSuggestions();
+    e.preventDefault();
+    openSuggestion(row);
   }
 }, true);
 
@@ -59,12 +101,7 @@ $('address-form').addEventListener('keydown', (e) => {
 address.addEventListener('blur', () => setTimeout(() => {
   if (!document.hasFocus() || document.activeElement !== address) dismissSuggestions();
 }, 150));
-loui.on('suggest:pick', (url) => {
-  dismissSuggestions();
-  address.value = url;
-  loui.send('go', url);
-  address.blur();
-});
+loui.on('suggest:pick', (picked) => openSuggestion(typeof picked === 'string' ? { url: picked } : { url: picked.url, tab: picked.tab }));
 
 // ── history panel ───────────────────────────────────────────────────────────
 // Takes the Claude panel's place while open.

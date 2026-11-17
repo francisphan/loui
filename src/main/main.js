@@ -37,6 +37,7 @@ const { createPrint } = require('./print');
 const { createBookmarks } = require('./bookmarks');
 const { createErrorPage } = require('./errorpage');
 const { createGuardrails } = require('./guardrails');
+const { createCerts } = require('./certs');
 const { createPasswords, createCipher } = require('./passwords');
 const { createIdentity, HONEST } = require('./identity');
 const { createTaskManager } = require('./taskmanager');
@@ -88,6 +89,7 @@ let bookmarks;
 let errorPage;
 let prompts, consent;
 let guardrails;
+let certs;
 let passwords;
 let taskManager, defaultBrowser;
 let reader;
@@ -114,6 +116,7 @@ function broadcast(channel, payload, privateToo = true) {
 }
 
 let stateQueued = false;
+let flashedGuard = null; // the guardrail question whose window was last flashed
 function pushState() {
   if (stateQueued) return;
   stateQueued = true;
@@ -121,7 +124,15 @@ function pushState() {
     stateQueued = false;
     syncMenu();
     for (const w of tabs.windows) {
-      if (!w.win.isDestroyed()) tabs.as(w, () => w.win.webContents.send('state', currentState(w)));
+      if (w.win.isDestroyed()) continue;
+      const s = tabs.as(w, () => currentState(w));
+      w.win.webContents.send('state', s);
+      // A guardrail question about a tab in a window the user is not in: that
+      // window's frame flashes, once, as for a session's other questions.
+      if (s.guard && !s.guard.elsewhere && s.guard.id !== flashedGuard) {
+        flashedGuard = s.guard.id;
+        if (!w.win.isFocused()) w.win.flashFrame(true);
+      }
     }
     pip?.changed(); // the small window watching a session shows its status too
   });
@@ -142,7 +153,7 @@ function promptWindow() {
 const currentState = (w = tabs.window()) => {
   const asks = promptWindow() === w;
   return {
-    window: { id: w.id, private: w.private, windows: tabs.windows.length },
+    window: { id: w.id, private: w.private, windows: tabs.windows.length, closing: w.closing ? lentPrivate(w) : null },
     tabs: tabs.summary(w),
     aimed: w.aim?.id ?? null, // a sleeping tab Ctrl+Tab is passing over (see cycle())
     working: tabs.groups.filter((g) => g.busy > 0).length, // in every window: "Restart to update" asks first
@@ -168,8 +179,19 @@ const currentState = (w = tabs.window()) => {
     ...guardrails.state(),
     ...passwords.state(),
     ...reader.state(),
+    ...certs.state(),
   };
 };
+
+// The private tabs of w's session that Claude sessions hold (the user handed
+// them over). They close with the last private window, so closing it asks
+// first: { tabs, who } or null.
+function lentPrivate(w) {
+  const lent = tabs.list.filter((t) => t.ses === w.ses && t.group !== YOU);
+  if (!w.private || !lent.length || tabs.windows.some((x) => x !== w && x.ses === w.ses)) return null;
+  return { tabs: lent.length, who: [...new Set(lent.map((t) => tabs.group(t.group)?.label || 'a Claude session'))] };
+}
+let quitting = false;
 
 // Where the tabs are: a strip along the top (the default) or a sidebar on the
 // left, which can be collapsed to icons. Both kept in settings.json.
@@ -204,6 +226,8 @@ function privateSession() {
   permissions.attach(ses);
   sleep.attach(ses);
   guardrails.attach(ses);
+  errorPage.attach(ses);
+  certs.attach(ses);
   reader.attach(ses);
   identity.attach(ses);
   privateSes = ses;
@@ -211,6 +235,7 @@ function privateSession() {
 }
 function endPrivate(ses) {
   if (privateSes === ses) privateSes = null;
+  certs.forget(ses);
   downloads.forgetPrivate();
   shields.forgetPrivate();
   ses.clearStorageData().catch(() => {});
@@ -244,7 +269,15 @@ function openWindow({ private: priv = false, blank = true, at } = {}) {
   const first = firstWindow;
   firstWindow = false;
 
-  win.on('close', () => {
+  win.on('close', (e) => {
+    // The last private window, while a Claude session holds a tab of it: the
+    // tab would close under the session, so the window asks first (in its chrome).
+    if (!quitting && !w.sure && lentPrivate(w)) {
+      e.preventDefault();
+      w.closing = true;
+      win.focus();
+      return pushState();
+    }
     if (tabs.windows.length === 1) restore?.stop(); // the last window: written as when quitting
     tabs.removeWindow(w);
     if (priv && !tabs.windows.some((x) => x.ses === w.ses)) endPrivate(w.ses);
@@ -314,8 +347,14 @@ function start() {
     tabs, ses: userSes, settings, permissions, save: () => fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2)),
   });
   history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => broadcast('history:changed') });
-  suggest = createSuggest({ win: first.win, tabs, send, sources: [history] });
-  errorPage = createErrorPage({ tabs, file: path.join(paths.home, 'game.json') });
+  suggest = createSuggest({
+    win: first.win, tabs, send, sources: [history],
+    engine: () => { const s = search.state().search; return s.engines.find((e) => e.id === s.engine)?.label || ''; },
+  });
+  certs = createCerts({ tabs, changed: pushState });
+  errorPage = createErrorPage({ tabs, file: path.join(paths.home, 'game.json'), certs });
+  errorPage.attach(userSes);
+  certs.attach(userSes);
   lockToApp(suggest.webContents);
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), tabs, ses: userSes, send, broadcast, changed: pushState });
   suggest.add(bookmarks);
@@ -458,6 +497,9 @@ const handlers = {
     if (w) w.aim = null;
     tabs.select(id);
   },
+  // "Switch to tab" in the address bar's suggestions: one of the user's own tabs, in whichever
+  // window of the same kind it is (a private window's tabs stay among private windows).
+  'tab:reveal': (id) => { const t = tabs.get(id); if (t && t.group === YOU && t.ses === tabs.window()?.ses) tabs.reveal(id); },
   'tab:close': (id) => tabs.close(id),
   'tab:reopen': () => restore.reopenClosed(),
   'tab:menu': (id) => tabs.tabMenu(id),
@@ -482,6 +524,13 @@ const handlers = {
   'group:menu': (id) => tabs.groupMenu(id),
   'window:new': (choice) => openWindow({ private: !!choice?.private }),
   'window:close': () => tabs.win?.close(),
+  // The answer to "close this private window, and the tabs lent from it?" (see openWindow).
+  'window:close-answer': (yes) => {
+    const w = tabs.window();
+    if (!w?.closing) return;
+    w.closing = false;
+    if (yes) { w.sure = true; w.win.close(); } else pushState();
+  },
   'tabs:layout': (choice) => setTabStrip(choice),
   go: (input) => { active()?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
   back: () => active()?.wc.navigationHistory.goBack(),
@@ -503,6 +552,7 @@ const handlers = {
   'group:end': (id) => { const w = tabs.group(id)?.window; if (w) tabs.as(w, () => send('group:end', id)); },
   'pip:open': (id) => pip.open(id), // watch a session in a small window
   'device:menu': () => deviceMenu(),
+  'device:reset': () => { const tab = active(); if (tab?.wc && tab.device) tabs.setDevice(tab, null); }, // back to the full window
   'relay:set': (settings) => link.configure(settings),
   'update:install': () => updater.install(),
   'chat:send': (message) => { chat.send(message); },
@@ -623,6 +673,13 @@ async function testHook({ ui, arg }) {
   if (ui === 'menu:item') {
     const item = Menu.getApplicationMenu().getMenuItemById(arg);
     return item && { label: item.label, checked: item.checked, enabled: item.enabled };
+  }
+  if (ui === 'tab:crash') { tabs.get(arg)?.wc?.forcefullyCrashRenderer(); return 'ok'; } // as a page's process dying
+  // A real press of the mouse in a tab's page, at a point in it, as the user's own.
+  if (ui === 'tab:press') {
+    const wc = tabs.get(arg.id)?.wc;
+    for (const type of ['mouseDown', 'mouseUp']) wc?.sendInputEvent({ type, x: arg.x, y: arg.y, button: 'left', clickCount: 1 });
+    return 'ok';
   }
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
   // Runs a script in any tab's page, which the tools only allow in a session's own tabs.
@@ -895,7 +952,7 @@ function zoom(step) {
 if (!app.requestSingleInstanceLock({ urls: launched })) {
   app.quit();
 } else {
-  app.on('before-quit', () => { history?.flush(); bookmarks?.flush(); activity?.flush(); });
+  app.on('before-quit', () => { quitting = true; history?.flush(); bookmarks?.flush(); activity?.flush(); });
   app.on('second-instance', (_e, argv, cwd, data) => defaultBrowser?.secondInstance(argv, cwd, data));
   app.whenReady().then(() => {
     // Each request runs with the window whose chrome sent it as the one being served.

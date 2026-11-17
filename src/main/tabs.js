@@ -392,6 +392,7 @@ class Tabs extends EventEmitter {
     wc.on('render-process-gone', (_e, details) => {
       tab.title = `Page crashed (${details.reason})`;
       changed();
+      if (details.reason !== 'clean-exit') this.emit('crashed', tab, details); // errorpage.js draws the page
     });
     // A page's new window becomes a new tab in the same group (and window).
     // Only soon after someone acted in the tab (the user's keys and mouse, or
@@ -757,6 +758,7 @@ class Tabs extends EventEmitter {
     this.relocate(tab, dest);
     this.reorder(id, at);
     this.ensure(left);
+    this.showOther(left); // the blank tab that took a handed-over last tab's place goes on screen
     this.restAll(); // in a session's group a tab runs at full speed; back with the user it rests
     this.emit('change');
   }
@@ -1103,6 +1105,7 @@ class Tabs extends EventEmitter {
       pinned: !!t.pinned,
       window: t.window.id,
       private: !!t.private,
+      lent: !!t.lent, // the user's tab, in a session's group until the session ends
     }));
   }
 }

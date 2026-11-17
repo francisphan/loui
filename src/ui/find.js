@@ -42,6 +42,7 @@
     if (!found.open && document.activeElement === input) input.blur();
     count.textContent = !found.open || !found.text || found.matches == null ? ''
       : found.matches ? `${found.active} of ${found.matches}` : 'No matches';
+    count.classList.toggle('none', count.textContent === 'No matches'); // in the danger colour, as browsers do
     $('find-prev').disabled = $('find-next').disabled = !found.matches;
   });
 })();
