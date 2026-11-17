@@ -50,6 +50,16 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     throw new Error('None of your own tabs is open.');
   }
 
+  // A new tab for the session. The Claude panel's opens beside the user's
+  // current tab, or in the normal window used last: never in a private window,
+  // whichever window happens to be focused.
+  function fresh(session) {
+    if (session.group !== YOU) return tabs.create('', { group: session.group });
+    const window = tabs.current(YOU)?.window || tabs.normalWindow();
+    if (!window || window.private) throw new Error('None of your own windows is open.');
+    return tabs.create('', { group: YOU, window });
+  }
+
   // Call a function from src/page/lib.js inside the tab.
   // A page that has hung would otherwise hold the call (and the session) for
   // good. Pointing is left unbounded: it waits for the user, and has its own limit.
@@ -129,6 +139,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
 
   function mouse(tab, p, { button = 'left', double = false } = {}) {
     const at = toView(tab, p);
+    tab.actedAt = Date.now(); // a page may open a tab on a click (tabs.mayOpen)
     tab.wc.sendInputEvent({ type: 'mouseMove', ...at });
     for (let n = 1; n <= (double ? 2 : 1); n++) {
       tab.wc.sendInputEvent({ type: 'mouseDown', ...at, button, clickCount: n });
@@ -146,6 +157,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     wc.setIgnoreMenuShortcuts(true);
     clearTimeout(tab.keysOwn);
     tab.keysOwn = setTimeout(() => { if (!wc.isDestroyed()) wc.setIgnoreMenuShortcuts(false); }, 1000);
+    tab.actedAt = Date.now();
     tab.wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
     // Text keys and Enter only take effect through a char event.
     const typed = keyCode === 'Enter' ? '\r' : keyCode === 'Space' ? ' ' : keyCode.length === 1 ? keyCode : null;
@@ -248,7 +260,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         }
         const refused = refuse(to);
         if (refused) throw new Error(refused);
-        const tab = new_tab ? tabs.create('', { group: c.session.group }) : c.need();
+        const tab = new_tab ? fresh(c.session) : c.need();
         if (new_tab) tabs.setCurrent(c.session.group, tab.id);
         await guarded(c, tab, guard.judgeUrl(c.session, tab, to)).catch((e) => {
           if (new_tab) tabs.close(tab.id);
@@ -439,7 +451,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       async run({ action, id, url }, c) {
         const group = c.session.group;
         if (action === 'new') {
-          const tab = tabs.create('', { group });
+          const tab = fresh(c.session);
           tabs.setCurrent(group, tab.id);
           if (url) return handlers.navigate.run({ url }, c);
           return text(`Opened tab ${tab.id}.`);

@@ -358,7 +358,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     trusted.delete(id);
     changed();
   }
-  const show = (id) => { const p = pending.find((q) => q.id === id); if (p) tabs.select(p.tabId); };
+  const show = (id) => { const p = pending.find((q) => q.id === id); if (p) tabs.reveal(p.tabId); };
 
   // A session that ends takes its questions and trust with it; so does a tab
   // that closes or goes back to the user.

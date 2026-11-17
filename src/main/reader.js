@@ -286,7 +286,7 @@ function createReader({ tabs, ses, settings, save, changed }) {
     const a = await call(wc, 'extract', { html: true }).catch(() => null);
     if (!a?.html || wc.isDestroyed() || wc.getURL() !== url) return false;
     const id = crypto.randomUUID();
-    articles.set(id, { ...a, url });
+    articles.set(id, { ...a, url, tab: tab.private ? tab.id : null });
     while (articles.size > KEEP) articles.delete(articles.keys().next().value);
     await wc.loadURL(`${SCHEME}:${id}?u=${encodeURIComponent(url)}`).catch(() => {});
     return true;
@@ -367,6 +367,11 @@ function createReader({ tabs, ses, settings, save, changed }) {
     });
   }
   tabs.on('created', hook); // also when a sleeping tab wakes with a new page
+  // A private tab's articles go with it.
+  tabs.on('closing', (tab) => {
+    if (!tab.private) return;
+    for (const [id, article] of articles) if (article.tab === tab.id) articles.delete(id);
+  });
 
   // For the window: what the address bar's book button shows for the tab on screen.
   function state() {
