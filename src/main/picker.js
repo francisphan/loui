@@ -56,8 +56,9 @@ function createPicker({ tabs, page, crop, changed }) {
     for (const p of list) if (p.tabId === tab.id) p.live = false;
     if (current?.tab === tab) cancel();
   });
+  // The user left the tab (in its own window: another window may have focus).
   tabs.on('change', () => {
-    if (current && tabs.active() !== current.tab) cancel();
+    if (current && !tabs.onScreen(current.tab)) cancel();
   });
 
   return {

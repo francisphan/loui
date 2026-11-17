@@ -247,7 +247,8 @@ function createReader({ tabs, ses, settings, save, changed }) {
     try { return new URL(url).searchParams.get('u') || ''; } catch { return ''; }
   };
 
-  ses.protocol.handle(SCHEME, (request) => {
+  // Served in each session a tab can have: the user's, and a private window's (attach).
+  const attach = (s) => s.protocol.handle(SCHEME, (request) => {
     const id = idOf(request.url);
     const a = articles.get(id);
     const html = a ? page(a, prefs()) : gone(originalOf(request.url));
@@ -260,6 +261,7 @@ function createReader({ tabs, ses, settings, save, changed }) {
       },
     });
   });
+  attach(ses);
 
   const web = (url) => /^https?:\/\//i.test(url || '');
   const yours = (tab) => !!tab && tab.group === YOU && !!tab.wc && !tab.wc.isDestroyed();
@@ -376,7 +378,7 @@ function createReader({ tabs, ses, settings, save, changed }) {
   }
 
   return {
-    state, toggle, open, leave, prefs,
+    state, toggle, open, leave, prefs, attach,
     probes: {
       'reader:toggle': () => toggle(),
       'reader:set': (q) => { setPref(q); return prefs(); },

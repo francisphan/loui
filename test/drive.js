@@ -30,6 +30,7 @@ async function launch(env = {}, { home: reuse, args = [] } = {}) {
     env: { ...process.env, LOUI_HOME: home, LOUI_TEST: '1', LOUI_RELAY_URL: '', ...env },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
+  const exited = new Promise((r) => app.once('exit', (code) => r(code))); // for a test that quits it
   const sock = path.join(home, 'loui.sock');
   for (let i = 0; i < 150 && !fs.existsSync(sock); i++) await new Promise((r) => setTimeout(r, 100));
   if (!fs.existsSync(sock)) {
@@ -100,7 +101,7 @@ async function launch(env = {}, { home: reuse, args = [] } = {}) {
       try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
     }
   };
-  return { call, text, as, ui, state, close, base, home };
+  return { call, text, as, ui, state, close, base, home, exited };
 }
 
 // Starts Loui again on the same profile, as Windows does for a link opened in

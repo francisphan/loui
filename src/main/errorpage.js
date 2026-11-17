@@ -55,7 +55,7 @@ function source() {
   return script;
 }
 
-function createErrorPage({ tabs, win, file }) {
+function createErrorPage({ tabs, file }) {
   let best = 0;
   try { best = Math.max(0, Math.floor(JSON.parse(fs.readFileSync(file, 'utf8')).best) || 0); } catch {}
 
@@ -69,7 +69,10 @@ function createErrorPage({ tabs, win, file }) {
   }
 
   const showing = new Map(); // tab -> whether it was last told it is on screen
-  const onScreen = (tab) => tab.id === tabs.activeId && win.isVisible() && !win.isMinimized();
+  const onScreen = (tab) => {
+    const win = tab.window?.win;
+    return tabs.onScreen(tab) && !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized();
+  };
 
   // The page runs its game only while on screen. Tabs are stacked rather than
   // hidden (see tabs.js), so a covered tab still reads as visible to the page
@@ -83,8 +86,7 @@ function createErrorPage({ tabs, win, file }) {
       tab.wc.executeJavaScript(`window.__louiErrorPage?.setShown(${now})`).catch(() => {});
     }
   }
-  tabs.on('change', tell);
-  for (const event of ['minimize', 'restore', 'hide', 'show']) win.on(event, tell);
+  tabs.on('change', tell); // also when a window is minimized, restored, hidden or shown (see tabs.addWindow)
 
   // Waits for new best scores until the page goes away (it then answers null).
   function listen(tab) {

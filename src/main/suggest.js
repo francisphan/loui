@@ -40,9 +40,22 @@ function createSuggest({ win, tabs, send, sources = [] }) {
   });
   view.setBackgroundColor('#00000000');
   let open = false;
+  // One list for all windows: it moves into the window whose address bar
+  // asks for it (a second view would cost a renderer per window).
+  let host = null;
+  const left = new WeakSet();
+  function moveTo(target) {
+    if (host === target) return;
+    if (host && !host.isDestroyed()) host.contentView.removeChildView(view);
+    host = target;
+    target.contentView.addChildView(view);
+    if (left.has(target)) return;
+    left.add(target);
+    target.once('close', () => { if (host === target) { target.contentView.removeChildView(view); host = null; } });
+  }
   // A view only draws if it was in sight while its page loaded (see tabs.js),
   // so it loads as one transparent pixel in the corner and hides afterwards.
-  win.contentView.addChildView(view);
+  moveTo(win);
   view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
   view.webContents.once('did-finish-load', () => { if (!open) view.setVisible(false); });
   view.webContents.loadFile(path.join(__dirname, '../ui/suggestions.html'));
@@ -50,6 +63,7 @@ function createSuggest({ win, tabs, send, sources = [] }) {
   // rect: the address bar, in window coordinates.
   function show({ items, chosen, rect }) {
     if (!items?.length) return hide();
+    moveTo(tabs.win); // the window being served (see tabs.as())
     view.webContents.send('suggest', { items, chosen });
     view.setBounds({
       x: Math.round(rect.x) - MARGIN,
@@ -70,8 +84,9 @@ function createSuggest({ win, tabs, send, sources = [] }) {
   // Tabs re-stack their views when one is selected or loads in the
   // background; the list goes back in front of them.
   function raise() {
-    const children = win.contentView.children;
-    if (open && children[children.length - 1] !== view) win.contentView.addChildView(view);
+    if (!open || !host || host.isDestroyed()) return;
+    const children = host.contentView.children;
+    if (children[children.length - 1] !== view) host.contentView.addChildView(view);
   }
   tabs.on('change', raise);
 
@@ -79,23 +94,24 @@ function createSuggest({ win, tabs, send, sources = [] }) {
   const probes = {
     // Types into the address bar, as if from the keyboard.
     'address:type': async (text) => {
-      win.webContents.focus();
-      await win.webContents.executeJavaScript("document.getElementById('address').focus(); document.getElementById('address').select()");
-      win.webContents.insertText(text);
+      const chrome = tabs.win.webContents; // before the await, which leaves tabs.as()
+      chrome.focus();
+      await chrome.executeJavaScript("document.getElementById('address').focus(); document.getElementById('address').select()");
+      chrome.insertText(text);
       return 'ok';
     },
     'address:key': (key) => {
-      win.webContents.focus();
-      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
-      if (key === 'Enter') win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' });
-      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
+      tabs.win.webContents.focus();
+      tabs.win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
+      if (key === 'Enter') tabs.win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' });
+      tabs.win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
       return 'ok';
     },
     // Runs a line of script in the window chrome.
-    'chrome:eval': (code) => win.webContents.executeJavaScript(code),
+    'chrome:eval': (code) => tabs.win.webContents.executeJavaScript(code),
     // What the suggestions list shows, and whether it is in front of every page.
     suggestions: async () => {
-      const children = win.contentView.children;
+      const children = host?.contentView.children || [];
       return {
         open: open && view.getVisible(),
         inFront: children[children.length - 1] === view,

@@ -96,7 +96,7 @@ const WHY = {
   test: 'Encryption is turned off for this test run.',
 };
 
-function createPasswords({ tabs, win, home, send, changed }) {
+function createPasswords({ tabs, home, send, changed }) {
   const file = path.join(home, 'passwords.json');
   const cipher = createCipher();
   const secret = crypto.randomBytes(24).toString('hex'); // proves a report came from the page script
@@ -147,7 +147,8 @@ function createPasswords({ tabs, win, home, send, changed }) {
   const watched = new Map(); // tab id -> { attempt, user, checking }
   const offers = []; // { id, tabId, origin, username, password, update }
   let seq = 0;
-  const yours = (tab) => !!tab && tab.group === YOU && !!tab.wc && !tab.wc.isDestroyed();
+  // A private window's tabs are never offered a save or a fill.
+  const yours = (tab) => !!tab && tab.group === YOU && !tab.private && !!tab.wc && !tab.wc.isDestroyed();
   const notes = (tab) => {
     if (!watched.has(tab.id)) watched.set(tab.id, {});
     return watched.get(tab.id);
@@ -310,11 +311,11 @@ function createPasswords({ tabs, win, home, send, changed }) {
   }
   function keyMenu({ x, y } = {}) {
     const items = menuItems();
-    if (items.length) Menu.buildFromTemplate(items).popup({ window: win, x: Math.round(x || 0), y: Math.round(y || 0) });
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: tabs.win, x: Math.round(x || 0), y: Math.round(y || 0) });
   }
 
   // ── the Passwords panel ─────────────────────────────────────────────────
-  const showPanel = () => { win.webContents.focus(); send('passwords', { type: 'panel' }); };
+  const showPanel = () => { tabs.win.webContents.focus(); send('passwords', { type: 'panel' }); };
 
   function list() {
     return {
@@ -413,7 +414,7 @@ function createPasswords({ tabs, win, home, send, changed }) {
 
   async function chooseImport() {
     if (!cipher.available) return;
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    const { canceled, filePaths } = await dialog.showOpenDialog(tabs.win, {
       title: 'Import passwords',
       buttonLabel: 'Import',
       filters: [{ name: 'Passwords file', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }],
@@ -430,10 +431,10 @@ function createPasswords({ tabs, win, home, send, changed }) {
     } catch (e) {
       message = `Couldn't import that file: ${e.message}`;
     }
-    const { response } = await dialog.showMessageBox(win, { type: done ? 'warning' : 'info', message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 });
+    const { response } = await dialog.showMessageBox(tabs.win, { type: done ? 'warning' : 'info', message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 });
     if (done && response === 0) {
       try { fs.rmSync(filePaths[0]); } catch (e) {
-        dialog.showMessageBox(win, { type: 'error', message: `Couldn't delete it: ${e.message}`, buttons: ['OK'] });
+        dialog.showMessageBox(tabs.win, { type: 'error', message: `Couldn't delete it: ${e.message}`, buttons: ['OK'] });
       }
     }
   }

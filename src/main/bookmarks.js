@@ -25,7 +25,7 @@ const OPENABLE = /^(https?|file|ftp):/i;
 
 const isFolder = (n) => Array.isArray(n.children);
 
-function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay = 500 }) {
+function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = () => {}, delay = 500 }) {
   const roots = {
     [BAR]: { id: BAR, title: ROOT_TITLES[BAR], children: [] },
     [OTHER]: { id: OTHER, title: ROOT_TITLES[OTHER], children: [] },
@@ -192,7 +192,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
   const importFile = (path) => importHtml(fs.readFileSync(path, 'utf8'));
 
   async function chooseImport() {
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    const { canceled, filePaths } = await dialog.showOpenDialog(tabs.win, {
       title: 'Import bookmarks',
       buttonLabel: 'Import',
       filters: [{ name: 'Bookmarks file', extensions: ['html', 'htm'] }, { name: 'All files', extensions: ['*'] }],
@@ -207,7 +207,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     } catch (e) {
       message = `Couldn't read that file: ${e.message}`;
     }
-    dialog.showMessageBox(win, { type: 'info', message, buttons: ['OK'] });
+    dialog.showMessageBox(tabs.win, { type: 'info', message, buttons: ['OK'] });
   }
 
   // ── icons ───────────────────────────────────────────────────────────────
@@ -287,8 +287,9 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     walk(roots[OTHER], []);
     return { type: 'data', showBar: barShown(), bar: roots[BAR].children.map(brief), other: roots[OTHER].children.length, folders };
   }
-  const publish = () => send('bookmarks', data());
-  win.webContents.on('did-finish-load', publish);
+  // The bar's contents go to every window, and to each new one once its chrome has loaded.
+  const publish = () => broadcast('bookmarks', data());
+  tabs.on('chrome-loaded', publish);
 
   // For the bookmarks panel: the whole tree (without icons), or the bookmarks
   // matching a search.
@@ -309,7 +310,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     const at = byId.get(id);
     if (!at || !at.parent) return;
     const { icon, ...item } = brief(at.node);
-    win.webContents.focus();
+    tabs.win.webContents.focus();
     send('bookmarks', { type: 'edit', item: { ...item, parent: at.parent.id, fresh } });
   }
 
@@ -365,7 +366,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     const n = byId.get(id)?.node;
     if (!n) return;
     if (isFolder(n) && n.children.length) {
-      const { response } = await dialog.showMessageBox(win, {
+      const { response } = await dialog.showMessageBox(tabs.win, {
         type: 'question',
         message: `Delete "${n.title}" and everything in it?`,
         buttons: ['Delete', 'Cancel'], defaultId: 1, cancelId: 1,
@@ -400,14 +401,14 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
       { label: 'Bookmark manager', click: () => send('bookmarks', { type: 'panel' }) },
       { label: 'Import bookmarks…', click: chooseImport },
     );
-    Menu.buildFromTemplate(items).popup({ window: win });
+    Menu.buildFromTemplate(items).popup({ window: tabs.win });
   }
 
   // For the File and View menus in main.js.
   const menuItems = {
     file: () => [
       { label: 'Bookmark this page', accelerator: 'CmdOrCtrl+D', click: star },
-      { label: 'Bookmarks', accelerator: 'CmdOrCtrl+Shift+O', click: () => { win.webContents.focus(); send('bookmarks', { type: 'panel' }); } },
+      { label: 'Bookmarks', accelerator: 'CmdOrCtrl+Shift+O', click: () => { tabs.win.webContents.focus(); send('bookmarks', { type: 'panel' }); } },
       { label: 'Import bookmarks…', click: chooseImport },
     ],
     view: () => [
@@ -430,7 +431,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
         const f = folder(r.id);
         if (!f) return;
         Menu.buildFromTemplate(folderMenu(f.children.slice(r.from || 0)))
-          .popup({ window: win, x: Math.round(r.x), y: Math.round(r.y) });
+          .popup({ window: tabs.win, x: Math.round(r.x), y: Math.round(r.y) });
         return;
       }
       case 'context': return contextMenu(r.id);

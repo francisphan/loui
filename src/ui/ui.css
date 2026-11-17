@@ -688,3 +688,40 @@ body.panel-closed #panel { display: none; }
   #navrow { transition: none; }
   .download .bar span { transition: none; }
 }
+
+/* ── private window ──────────────────────────────────────────────────────── */
+/* A private window is tinted indigo throughout its chrome (never magenta,
+   which is Claude's), and says so beside the address bar. The Claude panel and
+   pointing stay out of it: the panel works only in the user's normal tabs. */
+body.private {
+  --water: #DDDBEB;
+  --paper: #F3F2F9;
+  --rule: #C4C0DA;
+  --shoal: #D2CFE6;
+  --private: #4B3F8F;
+  --on-private: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+  body.private {
+    --water: #17152A;
+    --paper: #221F3A;
+    --rule: #37335A;
+    --shoal: #2E2A4E;
+    --private: #B4AAF2;
+    --on-private: #17152A;
+  }
+}
+#private-label {
+  flex: none;
+  height: 22px;
+  margin: 0 2px 0 6px;
+  padding: 0 10px;
+  border-radius: 11px;
+  background: var(--private);
+  color: var(--on-private);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 22px;
+}
+#private-label[hidden] { display: none; }
+body.private :is(#panel, #panel-toggle, #point, #chips) { display: none; }

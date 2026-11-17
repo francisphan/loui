@@ -48,13 +48,15 @@ function createDownloads({ ses, tabs, home, changed }) {
   const running = new Map(); // id -> DownloadItem
 
   const folder = () => process.env.LOUI_DOWNLOADS || app.getPath('downloads');
+  // A private window's downloads are listed while it is open, never written down.
   const save = () => {
     try {
-      fs.writeFileSync(listFile, JSON.stringify({ ask, items: items.slice(0, KEEP) }, null, 2));
+      fs.writeFileSync(listFile, JSON.stringify({ ask, items: items.filter((d) => !d.private).slice(0, KEEP) }, null, 2));
     } catch {}
   };
 
-  ses.on('will-download', (_e, item, wc) => {
+  // Each session: the user's, and each private one (main.js attaches those).
+  const attach = (s, { private: priv = false } = {}) => s.on('will-download', (_e, item, wc) => {
     const tab = wc && tabs.list.find((t) => t.wc === wc);
     const g = tab && tab.group !== YOU ? tabs.group(tab.group) : null;
     const name = path.basename(item.getFilename() || '') || 'download';
@@ -68,6 +70,7 @@ function createDownloads({ ses, tabs, home, changed }) {
 
     const d = {
       id: ++seq, name: path.basename(file), file, url: item.getURL(), by: g ? g.label : null,
+      private: priv,
       state: 'progressing', received: 0, total: item.getTotalBytes(), at: Date.now(),
     };
     items.unshift(d);
@@ -95,6 +98,7 @@ function createDownloads({ ses, tabs, home, changed }) {
     save();
     changed();
   });
+  attach(ses);
 
   // What the user asked for in the downloads list.
   function act({ id, action }) {
@@ -129,14 +133,23 @@ function createDownloads({ ses, tabs, home, changed }) {
     changed();
   }
 
+  // A private window lists its own downloads, a normal one the others.
   const state = () => ({
     ask,
-    items: items.slice(0, KEEP).map((d) => ({
+    items: items.filter((d) => !!d.private === !!tabs.window()?.private).slice(0, KEEP).map((d) => ({
       id: d.id, name: d.name, by: d.by, state: d.state, received: d.received, total: d.total, gone: !!d.gone, live: running.has(d.id),
     })),
   });
 
-  return { state, act, setAsk, clear };
+  // The last private window closed: its downloads leave the list (finished
+  // files stay on disk; one still running is cancelled, as its session is gone).
+  function forgetPrivate() {
+    for (const d of items) if (d.private) running.get(d.id)?.cancel();
+    items = items.filter((d) => !d.private);
+    changed();
+  }
+
+  return { state, act, setAsk, clear, attach, forgetPrivate };
 }
 
 module.exports = { createDownloads };

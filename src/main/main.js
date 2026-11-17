@@ -4,6 +4,13 @@
 //   Claude sessions anywhere --> relay --> link.js --> sessions.js --> actions.js --> the page
 //   Claude panel (chat.js, Agent SDK) -----------------> sessions.js --> actions.js
 //   tests --> rpc.js (local socket) -------------------> sessions.js --> actions.js
+//
+// Windows (see the note in tabs.js). There can be several, each with its own
+// chrome; the modules below are made once and serve all of them. A request
+// from a window's chrome, and the state drawn for it, run with that window as
+// "the window being served" (tabs.as()), so code that asks for the tab on
+// screen gets that window's. A second window costs a chrome renderer, and a
+// private window an in-memory session; neither exists until the user opens one.
 const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, Menu, ipcMain, session, nativeTheme } = require('electron');
@@ -71,7 +78,7 @@ function setTheme(theme) {
   Menu.setApplicationMenu(appMenu());
 }
 
-let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
+let tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
 let shields;
 let search, brave, print;
 let bookmarks;
@@ -84,11 +91,22 @@ let reader;
 let activity;
 let palette;
 let pip;
+let userSes;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
 
+// To the chrome of the window being served (see tabs.as()).
 function send(channel, payload) {
-  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+  const w = tabs?.window();
+  if (w && !w.win.isDestroyed()) w.win.webContents.send(channel, payload);
+}
+
+// To every window's chrome; with privateToo false, not to private windows
+// (the Claude panel and its feed stay out of them).
+function broadcast(channel, payload, privateToo = true) {
+  for (const w of tabs?.windows || []) {
+    if ((privateToo || !w.private) && !w.win.isDestroyed()) w.win.webContents.send(channel, payload);
+  }
 }
 
 let stateQueued = false;
@@ -97,36 +115,54 @@ function pushState() {
   stateQueued = true;
   setImmediate(() => {
     stateQueued = false;
-    send('state', currentState());
+    for (const w of tabs.windows) {
+      if (!w.win.isDestroyed()) tabs.as(w, () => w.win.webContents.send('state', currentState(w)));
+    }
     pip?.changed(); // the small window watching a session shows its status too
   });
 }
 
-const currentState = () => ({
-  tabs: tabs.summary(),
-  groups: tabs.groups.map((g) => ({
-    id: g.id, label: g.label, source: g.source, busy: g.busy > 0, status: g.status, paused: g.paused,
-  })),
-  asking: sessions.asking(),
-  ...prompts.state(),
-  ...consent.state(),
-  picking: actions.picker.state(),
-  picks: actions.picker.recent().filter((p) => p.group === YOU)
-    .map((p) => ({ id: p.id, name: p.name || p.tag, thumb: p.thumb })),
-  link: link.state(),
-  update: updater.state(),
-  find: find.state(),
-  downloads: downloads.state(),
-  ...permissions.state(),
-  ...shields.state(),
-  ...search.state(),
-  ...brave.state(),
-  ...bookmarks.state(),
-  tabStrip: tabStrip(),
-  ...guardrails.state(),
-  ...passwords.state(),
-  ...reader.state(),
-});
+// Which window a question from a session shows in: "point at something" in
+// the window with the session's tabs, the others in the window the user
+// focused last.
+function promptWindow() {
+  const head = prompts.head();
+  if (!head) return null;
+  const g = head.kind === 'pick' ? tabs.group(head.session.group) : null;
+  return (g && g.id !== YOU && g.window) || tabs.focused;
+}
+
+// What one window's chrome draws. Run inside tabs.as(w), so modules that
+// report on "the tab on screen" report on w's.
+const currentState = (w = tabs.window()) => {
+  const asks = promptWindow() === w;
+  return {
+    window: { id: w.id, private: w.private, windows: tabs.windows.length },
+    tabs: tabs.summary(w),
+    groups: tabs.groups.filter((g) => g.id === YOU || g.window === w).map((g) => ({
+      id: g.id, label: g.label, source: g.source, busy: g.busy > 0, status: g.status, paused: g.paused,
+    })),
+    asking: asks ? sessions.asking() : null,
+    ...(asks ? prompts.state() : { prompt: null, waiting: [] }),
+    ...consent.state(),
+    picking: actions.picker.state(),
+    picks: w.private ? [] : actions.picker.recent().filter((p) => p.group === YOU)
+      .map((p) => ({ id: p.id, name: p.name || p.tag, thumb: p.thumb })),
+    link: link.state(),
+    update: updater.state(),
+    find: find.state(),
+    downloads: downloads.state(),
+    ...permissions.state(),
+    ...shields.state(),
+    ...search.state(),
+    ...brave.state(),
+    ...bookmarks.state(),
+    tabStrip: tabStrip(),
+    ...guardrails.state(),
+    ...passwords.state(),
+    ...reader.state(),
+  };
+};
 
 // Where the tabs are: a strip along the top (the default) or a sidebar on the
 // left, which can be collapsed to icons. Both kept in settings.json.
@@ -139,15 +175,48 @@ function setTabStrip({ vertical, collapsed } = {}) {
   Menu.setApplicationMenu(appMenu());
 }
 
-function createWindow() {
-  const ses = session.fromPartition('persist:loui');
+// ── private windows ──────────────────────────────────────────────────────────
+// The private windows open at one time share one session kept in memory only
+// (a partition without the persist: prefix): no cookies, cache or storage on
+// disk. When the last one closes its data is cleared, and the next private
+// window gets a new session, so nothing carries over.
+let privateSes = null;
+let privateCount = 0;
+function privateSession() {
+  if (privateSes) return privateSes;
+  const ses = session.fromPartition(`loui-private-${++privateCount}`);
+  // The same watchers as the user's session, in the same order: the relay
+  // guard first (tabs.js), then Shields, and the guardrails' hold last.
+  tabs.watchNetwork(ses);
+  shields.attach(ses);
+  downloads.attach(ses, { private: true });
+  permissions.attach(ses);
+  sleep.attach(ses);
+  guardrails.attach(ses);
+  reader.attach(ses);
+  privateSes = ses;
+  return ses;
+}
+function endPrivate(ses) {
+  if (privateSes === ses) privateSes = null;
+  downloads.forgetPrivate();
+  ses.clearStorageData().catch(() => {});
+  ses.clearCache().catch(() => {});
+  ses.clearAuthCache().catch(() => {});
+}
 
-  win = new BrowserWindow({
+// ── windows ─────────────────────────────────────────────────────────────────
+let firstWindow = true;
+// private: a private window. blank: with a new tab of the user's (otherwise
+// the caller fills it). at: a point on screen to open it at (a tab dragged out).
+function openWindow({ private: priv = false, blank = true, at } = {}) {
+  const win = new BrowserWindow({
     width: 1440,
     height: 940,
+    ...(at ? { x: Math.round(at.x - 120), y: Math.round(at.y - 20) } : {}),
     minWidth: 720,
     minHeight: 480,
-    title: 'Loui',
+    title: priv ? 'Loui · Private' : 'Loui',
     icon: path.join(__dirname, '../ui/icon.png'),
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF',
@@ -156,36 +225,99 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
-
   lockToApp(win.webContents);
-  search = createSearch({ settings, save: saveSettings, changed: pushState });
-  tabs = new Tabs(win, ses);
-  shields = createShields({ ses, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first
-  brave = createBrave({ tabs, settings, save: saveSettings, changed: pushState });
-  print = createPrint({ win, active: () => tabs.active() });
-  restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
-  downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
-  permissions = createPermissions({ ses, tabs, home: paths.home, changed: pushState });
-  sleep = createSleep({
-    tabs, ses, settings, permissions, save: () => fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2)),
+  const w = tabs.addWindow(win, { private: priv, ses: priv ? privateSession() : userSes });
+  const first = firstWindow;
+  firstWindow = false;
+
+  win.on('close', () => {
+    if (tabs.windows.length === 1) restore?.stop(); // the last window: written as when quitting
+    tabs.removeWindow(w);
+    if (priv && !tabs.windows.some((x) => x.ses === w.ses)) endPrivate(w.ses);
+    pushState();
+    Menu.setApplicationMenu(appMenu());
   });
-  history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => send('history:changed') });
-  suggest = createSuggest({ win, tabs, send, sources: [history] });
-  errorPage = createErrorPage({ tabs, win, file: path.join(paths.home, 'game.json') });
+  win.on('closed', () => { if (!tabs.windows.length) app.quit(); }); // closing the last window quits, as always
+  win.webContents.on('did-finish-load', () => {
+    tabs.emit('chrome-loaded', w);
+    pushState();
+    if (first) setTimeout(serve, 10000); // last resort: the window reports its layout as soon as its script runs
+    else if (blank) win.webContents.send('focus-address'); // Ctrl+N: ready to type, as a new tab is
+  });
+  if (process.env.LOUI_DEBUG) {
+    win.webContents.on('console-message', (e) => console.error('[ui]', e.message, `(${e.sourceId}:${e.lineNumber})`));
+  }
+  win.loadFile(path.join(__dirname, '../ui/index.html'));
+  if (blank) tabs.create('', { window: w, show: true });
+  if (!first) Menu.setApplicationMenu(appMenu());
+  return w;
+}
+
+// The window whose bounds hold a point on screen (where a dragged tab was let go).
+const windowAt = ({ x, y }) => tabs.windows.find((w) => {
+  if (w.win.isDestroyed() || w.win.isMinimized()) return false;
+  const b = w.win.getBounds();
+  return x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height;
+});
+
+// A tab (or a session's group) dragged out of the tab strip and let go at a
+// point on screen: into the window there, or a new window at that point.
+function detach({ id, group, x, y } = {}) {
+  const tab = tabs.get(id);
+  const groupId = group || (tab && tab.group !== YOU ? tab.group : null);
+  const from = groupId ? tabs.group(groupId)?.window : tab?.window;
+  if (!from || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  const there = windowAt({ x, y });
+  if (there === from) return;
+  if (groupId) {
+    if (there) return tabs.groupToWindow(groupId, there);
+    return tabs.groupToWindow(groupId, openWindow({ at: { x, y } }));
+  }
+  if (there) return tabs.toWindow(id, there);
+  tabs.toWindow(id, openWindow({ private: tab.private, blank: false, at: { x, y } }));
+}
+
+function start() {
+  userSes = session.fromPartition('persist:loui');
+  search = createSearch({ settings, save: saveSettings, changed: pushState });
+  tabs = new Tabs(userSes);
+  tabs.openWindow = openWindow;
+  const first = openWindow({ blank: false });
+  shields = createShields({ ses: userSes, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first
+  brave = createBrave({ tabs, settings, save: saveSettings, changed: pushState });
+  print = createPrint({ win: () => tabs.win, active: () => tabs.active() });
+  restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json'), openWindow: () => openWindow({ blank: false }) });
+  downloads = createDownloads({ ses: userSes, tabs, home: paths.home, changed: pushState });
+  permissions = createPermissions({ ses: userSes, tabs, home: paths.home, changed: pushState });
+  sleep = createSleep({
+    tabs, ses: userSes, settings, permissions, save: () => fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2)),
+  });
+  history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => broadcast('history:changed') });
+  suggest = createSuggest({ win: first.win, tabs, send, sources: [history] });
+  errorPage = createErrorPage({ tabs, file: path.join(paths.home, 'game.json') });
   lockToApp(suggest.webContents);
-  bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), win, tabs, ses, send, changed: pushState });
+  bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), tabs, ses: userSes, send, broadcast, changed: pushState });
   suggest.add(bookmarks);
-  passwords = createPasswords({ tabs, win, home: paths.home, send, changed: pushState });
-  reader = createReader({ tabs, ses, settings, save: saveSettings, changed: pushState });
-  prompts = createPrompts({ changed: () => { pushState(); if (prompts.head() && !win.isFocused()) win.flashFrame(true); } });
+  passwords = createPasswords({ tabs, home: paths.home, send, changed: pushState });
+  prompts = createPrompts({
+    changed: () => {
+      pushState();
+      const win = prompts.head() && promptWindow()?.win;
+      if (win && !win.isDestroyed() && !win.isFocused()) win.flashFrame(true);
+    },
+  });
+  reader = createReader({ tabs, ses: userSes, settings, save: saveSettings, changed: pushState });
   activity = createActivity({
-    dir: path.join(paths.home, 'activity'), tabs, settings, save: saveSettings, changed: () => send('activity', { type: 'changed' }),
+    dir: path.join(paths.home, 'activity'), tabs, settings, save: saveSettings,
+    changed: () => broadcast('activity', { type: 'changed' }, false),
   });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState, decided: activity.consent });
-  sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id), activity });
-  guardrails = createGuardrails({ ses, tabs, sessions, home: paths.home, changed: pushState, asked: activity.guard });
+  sessions = createSessions({
+    tabs, changed: pushState, feed: (entry) => broadcast('feed', entry, false), prompts, ended: (id) => consent.forget(id), activity,
+  });
+  guardrails = createGuardrails({ ses: userSes, tabs, sessions, home: paths.home, changed: pushState, asked: activity.guard });
   actions = createActions({ tabs, sessions, prompts, changed: pushState, refuse: brave.refuse, guard: guardrails });
-  find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
+  find = createFind({ tabs, changed: pushState, focus: () => { tabs.win?.webContents.focus(); send('focus-find'); } });
   handle = rpc.createHandler({ run: actions.run, sessions, admit: consent.admit, extra: process.env.LOUI_TEST ? testHook : null });
   link = createLink({
     home: paths.home, version: app.getVersion(), handle, sessions, changed: pushState,
@@ -207,11 +339,11 @@ function createWindow() {
     picker: actions.picker,
     describePick: actions.describePick,
     cwd: paths.home,
-    emit: (event) => send('chat', event),
+    emit: (event) => broadcast('chat', event, false),
   });
 
   palette = createPalette({
-    win, tabs, settings, save: saveSettings, sources: { bookmarks, history },
+    win: first.win, tabs, settings, save: saveSettings, sources: { bookmarks, history },
     // Shields has no menu item of its own (its menu is the toolbar's).
     extras: () => {
       const s = shields.state().shields;
@@ -224,34 +356,51 @@ function createWindow() {
 
   taskManager = createTaskManager({
     tabs, sleep, lockToApp,
-    pages: () => [{ label: 'Window chrome', wc: win.webContents }, { label: 'Address suggestions', wc: suggest.webContents }, { label: 'Command palette', wc: palette.webContents }],
+    pages: () => [
+      ...tabs.windows.map((w, i) => ({
+        label: w.private ? 'Private window chrome' : tabs.windows.length > 1 ? `Window chrome ${i + 1}` : 'Window chrome',
+        wc: w.win.webContents,
+      })),
+      { label: 'Address suggestions', wc: suggest.webContents },
+      { label: 'Command palette', wc: palette.webContents },
+    ],
     claude: () => chat.process(),
-    focusMain: () => { if (win.isMinimized()) win.restore(); win.focus(); },
+    focusMain: (tab) => {
+      const win = (tab?.window || tabs.window())?.win;
+      if (!win || win.isDestroyed()) return;
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    },
   });
-  defaultBrowser = createDefaultBrowser({ getWin: () => win, tabs });
+  defaultBrowser = createDefaultBrowser({ getWin: () => (tabs.normalWindow() || tabs.window())?.win, tabs });
   pip = createPip({
     tabs, settings, save: saveSettings, lockToApp,
     pause: (group, on) => handlers.pause({ group, on }),
-    focusMain: () => { if (win.isMinimized()) win.restore(); win.focus(); },
+    focusMain: () => {
+      const win = (tabs.normalWindow() || tabs.window())?.win;
+      if (!win) return;
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    },
   });
 
   tabs.on('change', pushState);
+  tabs.on('focus', pushState); // questions follow the window the user is in
   tabs.on('point', (tab, point) => actions.picker.at(tab, point));
-  win.on('closed', () => app.quit());
-  win.webContents.on('did-finish-load', () => {
-    pushState();
-    setTimeout(serve, 10000); // last resort: the window reports its layout as soon as its script runs
+  // A window left without tabs (its last one moved away) closes.
+  tabs.on('empty', (w) => setImmediate(() => { if (!w.win.isDestroyed()) w.win.close(); }));
+  // "Move to new window" in a tab's menu, for a tab or a session's group.
+  tabs.on('to-new-window', ({ tab, group }) => {
+    if (group) tabs.groupToWindow(group, openWindow());
+    else if (tab && tabs.get(tab.id)) tabs.toWindow(tab.id, openWindow({ private: tab.private, blank: false }));
   });
-  if (process.env.LOUI_DEBUG) {
-    win.webContents.on('console-message', (e) => console.error('[ui]', e.message, `(${e.sourceId}:${e.lineNumber})`));
-  }
 
-  win.loadFile(path.join(__dirname, '../ui/index.html'));
-  if (!restore.reopenSaved() && !launched.length) tabs.create(process.env.LOUI_START_URL || '', { show: true });
+  if (!restore.reopenSaved(first) && !launched.length) tabs.create(process.env.LOUI_START_URL || '', { show: true, window: first });
   if (launched.length) defaultBrowser.open(launched);
 }
 
 // ── requests from the window chrome ─────────────────────────────────────────
+// Each runs with its window as the window being served (see the bottom).
 const active = () => tabs.active();
 
 let serving = false;
@@ -278,13 +427,18 @@ const handlers = {
   'tab:nudge': (step) => active() && tabs.nudge(active().id, step), // Ctrl+Shift+PageUp/PageDown
   'tab:move': ({ id, group, index, pinned } = {}) => tabs.drop(id, group, index, { pinned }), // dragged in the tab strip
   'tab:pin': ({ id, on } = {}) => tabs.pin(id, on),
+  'tab:detach': (where) => detach(where), // dragged out of the tab strip
+  'group:detach': (where) => detach(where),
+  'group:menu': (id) => tabs.groupMenu(id),
+  'window:new': (choice) => openWindow({ private: !!choice?.private }),
+  'window:close': () => tabs.win?.close(),
   'tabs:layout': (choice) => setTabStrip(choice),
   go: (input) => { active()?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
   back: () => active()?.wc.navigationHistory.goBack(),
   forward: () => active()?.wc.navigationHistory.goForward(),
   reload: () => { const wc = active()?.wc; if (wc?.isLoading()) wc.stop(); else wc?.reload(); },
   devtools: () => active()?.wc.toggleDevTools(),
-  'pick:start': () => { const tab = active(); if (tab) actions.picker.start(tab); },
+  'pick:start': () => { const tab = active(); if (tab && !(tab.private && tab.group === YOU)) actions.picker.start(tab); },
   'pick:cancel': () => actions.picker.cancel(),
   'pick:remove': (id) => actions.picker.remove(id),
   // Take over, or hand back, the session working in a tab group.
@@ -341,8 +495,11 @@ const handlers = {
 // The Sessions panel (src/ui/activity.js). Only the window chrome reaches
 // the activity log: no tool reads it.
 async function activityRequest({ do: what, id, url, days } = {}) {
-  if (what === 'list') send('activity', { type: 'list', ...(await activity.list()) });
-  else if (what === 'open') send('activity', { type: 'session', id, log: await activity.get(id) });
+  // The answer goes to the window that asked, which an await would forget (tabs.as()).
+  const w = tabs.window();
+  const reply = (payload) => tabs.as(w, () => send('activity', payload));
+  if (what === 'list') reply({ type: 'list', ...(await activity.list()) });
+  else if (what === 'open') reply({ type: 'session', id, log: await activity.get(id) });
   else if (what === 'delete') await activity.remove(id);
   else if (what === 'clear') await activity.clear();
   else if (what === 'keep') activity.keep(days);
@@ -350,10 +507,27 @@ async function activityRequest({ do: what, id, url, days } = {}) {
   else if (what === 'visit' && /^https?:\/\//i.test(url || '')) tabs.create(url, { show: true });
 }
 
+// For the tests: every window, as the window chrome cannot see the others.
+const describeWindows = () => tabs.windows.map((w) => ({
+  id: w.id, private: w.private, focused: tabs.focused === w, active: w.activeId,
+  tabs: tabs.list.filter((t) => t.window === w).map((t) => t.id),
+  groups: tabs.groups.filter((g) => g.id !== YOU && g.window === w).map((g) => g.id),
+}));
+const windowById = (id) => tabs.windows.find((w) => w.id === id) || null;
+
 // Lets the test suite do what only the window chrome can (allow a hand-over,
 // take over a group) and read the window's state. Off unless LOUI_TEST is set.
 async function testHook({ ui, arg }) {
-  if (ui === 'state') return currentState();
+  if (ui === 'state') return { ...currentState(), windows: describeWindows() };
+  // Runs another hook with a given window as the one being served, as its chrome would.
+  if (ui === 'in-window') return tabs.as(windowById(arg.window), () => testHook({ ui: arg.ui, arg: arg.arg }));
+  if (ui === 'windows') return describeWindows();
+  if (ui === 'window:new') return openWindow({ private: !!arg?.private }).id;
+  if (ui === 'window:focus') { tabs.focus(windowById(arg)); return 'ok'; }
+  if (ui === 'window:close') { windowById(arg)?.win.close(); return 'ok'; }
+  if (ui === 'tab:to-window') { tabs.toWindow(arg.id, windowById(arg.window)); return 'ok'; }
+  if (ui === 'group:to-window') { tabs.groupToWindow(arg.group, windowById(arg.window)); return 'ok'; }
+  if (ui === 'to-new-window') { tabs.emit('to-new-window', { tab: tabs.get(arg.id), group: arg.group }); return 'ok'; }
   if (suggest.probes[ui]) return suggest.probes[ui](arg);
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
   // Runs a script in any tab's page, which the tools only allow in a session's own tabs.
@@ -379,9 +553,10 @@ async function testHook({ ui, arg }) {
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
   if (ui === 'chrome-navigate') {
-    await win.webContents.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});
+    const chrome = tabs.win.webContents;
+    await chrome.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});
     await new Promise((r) => setTimeout(r, 500));
-    return win.webContents.getURL();
+    return chrome.getURL();
   }
   handlers[ui](arg);
   return 'ok';
@@ -397,31 +572,44 @@ function deviceMenu() {
     item('Full window', null, !tab.device),
     ...Object.entries(PRESETS).map(([key, p]) =>
       item(`${p.label}  ${p.width}×${p.height}`, key, tab.device === p)),
-  ]).popup({ window: win });
+  ]).popup({ window: tab.window.win });
+}
+
+// Menu items act in the window they were chosen in.
+function inWindow(items) {
+  return items.map((i) => ({
+    ...i,
+    ...(i.click ? { click: (item, win, e) => tabs.as(tabs.windows.find((w) => w.win === win), () => i.click(item, win, e)) } : {}),
+    ...(Array.isArray(i.submenu) ? { submenu: inWindow(i.submenu) } : {}),
+  }));
 }
 
 function appMenu() {
   const cycle = (step) => {
-    const i = tabs.list.indexOf(active());
-    const next = tabs.list[(i + step + tabs.list.length) % tabs.list.length];
+    const list = tabs.list.filter((t) => t.window === tabs.window());
+    const i = list.indexOf(active());
+    const next = list[(i + step + list.length) % list.length];
     if (next) tabs.select(next.id);
   };
   const togglePause = () => {
     const g = tabs.group(active()?.group);
     if (g) handlers.pause({ group: g.id, on: !g.paused });
   };
-  return Menu.buildFromTemplate([
+  return Menu.buildFromTemplate(inWindow([
     {
       label: 'File',
       submenu: [
         { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => handlers['tab:new']() },
+        { label: 'New window', accelerator: 'CmdOrCtrl+N', click: () => openWindow() },
+        { label: 'New private window', accelerator: 'CmdOrCtrl+Shift+N', click: () => openWindow({ private: true }) },
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: handlers['tab:close-active'] },
+        { label: 'Close window', accelerator: 'CmdOrCtrl+Shift+W', click: handlers['window:close'] },
         { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
-        { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
+        { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { tabs.win.webContents.focus(); send('focus-address'); } },
         { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
         { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
         { label: 'Site permissions…', click: () => send('show-permissions') },
-        { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { win.webContents.focus(); send('show-history'); } },
+        { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { tabs.win.webContents.focus(); send('show-history'); } },
         ...bookmarks.menuItems.file(),
         ...passwords.fileMenu(),
         { type: 'separator' },
@@ -455,6 +643,7 @@ function appMenu() {
         { label: 'Pin or unpin tab', click: () => active() && tabs.pin(active().id, !active().pinned) },
         { label: 'Command palette…', id: 'palette', accelerator: 'CmdOrCtrl+K', click: () => palette.show() },
         { label: 'Search tabs…', id: 'palette-tabs', accelerator: 'CmdOrCtrl+Shift+A', click: () => palette.show('tabs') },
+        { label: 'Move tab to new window', click: () => active() && tabs.emit('to-new-window', { tab: active() }) },
         { type: 'separator' },
         {
           label: 'Vertical tabs', type: 'checkbox', checked: tabStrip().vertical,
@@ -483,12 +672,12 @@ function appMenu() {
         { label: 'Point at something', accelerator: 'CmdOrCtrl+Shift+C', click: handlers['pick:start'] },
         { label: 'Show or hide the Claude panel', accelerator: 'CmdOrCtrl+Shift+L', click: () => send('toggle-panel') },
         { label: 'Take over / let Claude continue', accelerator: 'CmdOrCtrl+Shift+.', click: togglePause },
-        { label: 'Claude sessions…', click: () => { win.webContents.focus(); send('show-activity'); } },
+        { label: 'Claude sessions…', click: () => { tabs.win.webContents.focus(); send('show-activity'); } },
         { type: 'separator' },
         { label: 'Connection to other Claude sessions…', click: () => send('show-relay') },
       ],
     },
-  ]);
+  ]));
 }
 
 // File menu items for updates, in installed copies only.
@@ -522,8 +711,11 @@ if (!app.requestSingleInstanceLock({ urls: launched })) {
   app.on('before-quit', () => { history?.flush(); bookmarks?.flush(); activity?.flush(); });
   app.on('second-instance', (_e, argv, cwd, data) => defaultBrowser?.secondInstance(argv, cwd, data));
   app.whenReady().then(() => {
-    for (const [name, fn] of Object.entries(handlers)) ipcMain.on(name, (_e, arg) => fn(arg));
-    createWindow();
+    // Each request runs with the window whose chrome sent it as the one being served.
+    for (const [name, fn] of Object.entries(handlers)) {
+      ipcMain.on(name, (e, arg) => tabs.as(tabs.windowOf(e.sender), () => fn(arg)));
+    }
+    start();
     Menu.setApplicationMenu(appMenu()); // after the window: some items come from modules it creates
   });
 }

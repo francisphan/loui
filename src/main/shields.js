@@ -123,7 +123,7 @@ function createShields({ ses, tabs, home, changed }) {
     return tab?.wc?.getURL() || d.referrer || '';
   };
 
-  requestRules(ses).add((d) => {
+  const block = (d) => {
     if (!engine || !/^(https?|wss?):/.test(d.url)) return null;
     const tab = tabOf(d.webContentsId);
     const top = topOf(d, tab);
@@ -138,7 +138,10 @@ function createShields({ ses, tabs, home, changed }) {
       later();
     }
     return redirect ? { redirectURL: redirect.dataUrl } : { cancel: true };
-  });
+  };
+  // Each session: the user's, and each private one (main.js attaches those).
+  const attach = (s) => requestRules(s).add(block);
+  attach(ses);
 
   // ── hiding what the ads leave behind ──
   // first: the page has just been parsed; the site's rules go in too.
@@ -241,7 +244,7 @@ function createShields({ ses, tabs, home, changed }) {
   setTimeout(check, 60000);
   setInterval(check, RETRY);
 
-  return { state, set, menu };
+  return { state, set, menu, attach };
 }
 
 module.exports = { createShields };

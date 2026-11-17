@@ -41,7 +41,8 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
   const keepAwake = () => (Array.isArray(settings.keepAwake) ? settings.keepAwake : []);
   const hostOf = (url) => { try { return new URL(url).host; } catch { return ''; } };
 
-  ses.on('will-download', (_e, item, wc) => {
+  // Each session: the user's, and each private one (main.js attaches those).
+  const attach = (s) => s.on('will-download', (_e, item, wc) => {
     if (!wc) return;
     downloading.set(wc, (downloading.get(wc) || 0) + 1);
     item.once('done', () => {
@@ -50,12 +51,13 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
       else downloading.delete(wc);
     });
   });
+  attach(ses);
 
   // What can be told without asking the page. Asked by the user (the tab
   // menu), only these apply.
   function mayRest(tab) {
     return !tab.asleep && !!tab.wc && !tab.wc.isDestroyed() &&
-      tab.id !== tabs.activeId && tab.group === YOU && !tab.pinned &&
+      !tabs.onScreen(tab) && tab.group === YOU && !tab.pinned &&
       !tab.loading && !tab.peeking && !tab.wc.isCurrentlyAudible() &&
       !permissions.asking(tab.id) && !downloading.has(tab.wc);
   }
@@ -72,8 +74,7 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
   let checking = false;
   async function check() {
     const now = Date.now();
-    const active = tabs.active();
-    if (active) active.seenAt = now;
+    for (const tab of tabs.list) if (tabs.onScreen(tab)) tab.seenAt = now; // on screen in any window
     for (const tab of tabs.list) if (tab.group !== YOU) tab.seenAt = now; // in a session's hands
     tabs.restAll(); // a tab the Claude panel was busy in goes back to rest
     const limit = minutes() * 60000;
@@ -122,7 +123,7 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
     }
   });
 
-  return { check, sleepNow, mayRest };
+  return { check, sleepNow, mayRest, attach };
 }
 
 module.exports = { createSleep };

@@ -148,7 +148,8 @@ function createPermissions({ ses, tabs, home, changed }) {
       // Screen sharing is asked again next time, unless the user said no.
       for (const k of p.kinds) if (k !== 'screen' || !ok) visit.get(tab.id).set(`${p.origin} ${k}`, ok);
     }
-    if (remember && p.kinds.every((k) => REMEMBERED.has(k))) {
+    // A private window's answers last only while its page is open: nothing is written down.
+    if (remember && !tab?.private && p.kinds.every((k) => REMEMBERED.has(k))) {
       saved[p.origin] = { ...saved[p.origin] };
       for (const k of p.kinds) saved[p.origin][k] = ok ? 'allow' : 'block';
       save();
@@ -175,9 +176,13 @@ function createPermissions({ ses, tabs, home, changed }) {
     for (const p of pending.filter((q) => !yours(tabs.get(q.tabId)))) settle(p, false);
   });
 
-  ses.setPermissionRequestHandler(onRequest);
-  ses.setPermissionCheckHandler(onCheck);
-  ses.setDisplayMediaRequestHandler(onDisplayMedia);
+  // Each session: the user's, and each private one (main.js attaches those).
+  function attach(s) {
+    s.setPermissionRequestHandler(onRequest);
+    s.setPermissionCheckHandler(onCheck);
+    s.setDisplayMediaRequestHandler(onDisplayMedia);
+  }
+  attach(ses);
 
   // For the window chrome: the question for the tab on screen, and the
   // remembered answers for review.
@@ -189,7 +194,7 @@ function createPermissions({ ses, tabs, home, changed }) {
         site: siteOf(p.origin),
         within: p.top && p.top !== p.origin ? siteOf(p.top) : null,
         wants: wants(p.kinds),
-        canRemember: p.kinds.every((k) => REMEMBERED.has(k)),
+        canRemember: !tabs.get(p.tabId)?.private && p.kinds.every((k) => REMEMBERED.has(k)),
       } : null,
       sitePermissions: Object.entries(saved).filter(([origin]) => originOf(origin) === origin).flatMap(([origin, kinds]) =>
         Object.entries(kinds || {}).map(([kind, choice]) => ({
@@ -201,7 +206,7 @@ function createPermissions({ ses, tabs, home, changed }) {
   // Whether a tab has a question waiting (such a tab is not put to sleep).
   const asking = (tabId) => pending.some((p) => p.tabId === tabId);
 
-  return { state, answer, forget, asking };
+  return { state, answer, forget, asking, attach };
 }
 
 module.exports = { createPermissions };

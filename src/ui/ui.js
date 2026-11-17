@@ -181,6 +181,8 @@ function drawTabs() {
     name.title = g.paused ? `${g.label} is paused` : g.busy ? `${g.label} is ${g.status}` : `${g.label}'s tabs`;
     const current = tabs.find((t) => t.current) || tabs[0];
     name.onclick = () => current && loui.send('tab:select', current.id);
+    // Its menu moves the group to another window (as dragging it out of the strip does).
+    name.oncontextmenu = (e) => { e.preventDefault(); loui.send('group:menu', g.id); };
     const close = el('button', 'close');
     close.type = 'button';
     close.title = `Close ${g.label}'s tabs`;
@@ -189,6 +191,7 @@ function drawTabs() {
     close.onclick = () => loui.send('group:close', g.id);
     const tag = el('div', 'group-tag');
     tag.title = name.title;
+    tag.draggable = true;
     // The sidebar has room for what the session is doing; along the top the helm says it.
     const status = el('span', 'group-status', g.paused ? 'Paused' : g.busy ? g.status : '');
     tag.append(name, status, close);
@@ -205,7 +208,10 @@ function drawTabs() {
 // another session. Dropped among the pinned tabs a tab is pinned, and among
 // the others unpinned. The main process applies the same rules (tabs.drop).
 // The keyboard does the same with Ctrl+Shift+PageUp/PageDown and the tab menu.
-let dragging = null; // { id, group } while a tab is dragged
+// Let go outside this window, a tab goes to the Loui window there or to a new
+// window (a private tab only to a private one); a session's group, dragged by
+// its name, goes along whole, and its tabs stay in its group wherever it is.
+let dragging = null; // { id, group } while a tab is dragged; { group, whole: true } for a group
 let marked = [];
 
 function clearDrop() {
@@ -217,7 +223,7 @@ const flag = (node, cls) => { node.classList.add(cls); marked.push(node); };
 // Where the pointer would drop the tab: { zone, group, index, before, last } or null.
 function dropSpot(e) {
   const zone = e.target.closest?.('[data-group]');
-  if (!zone || !dragging) return null;
+  if (!zone || !dragging || dragging.whole) return null; // a group only goes to another window
   const group = zone.dataset.group;
   if (group !== dragging.group && group !== YOU && dragging.group !== YOU) return null;
   const pinning = zone.classList.contains('pins');
@@ -239,6 +245,13 @@ function dropSpot(e) {
 
 const tabsBox = $('tabs');
 tabsBox.addEventListener('dragstart', (e) => {
+  const tag = e.target.closest?.('.group-tag');
+  if (tag) {
+    dragging = { group: tag.parentElement.dataset.group, whole: true };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-loui-group', dragging.group);
+    return;
+  }
   const node = e.target.closest?.('.tab');
   const t = node && state.tabs.find((x) => x.id === +node.dataset.id);
   if (!t) return;
@@ -267,10 +280,18 @@ tabsBox.addEventListener('drop', (e) => {
   e.preventDefault();
   loui.send('tab:move', { id: dragging.id, group: spot.group, index: spot.index, pinned: spot.pinned });
 });
-tabsBox.addEventListener('dragend', () => {
+// Whether a point on screen lies outside this window.
+const outside = (x, y) => x < window.screenX || y < window.screenY ||
+  x >= window.screenX + window.outerWidth || y >= window.screenY + window.outerHeight;
+tabsBox.addEventListener('dragend', (e) => {
+  const was = dragging;
   dragging = null;
   clearDrop();
   drawTabs(); // also puts back the tab that was drawn as being dragged
+  // Let go where nothing took it, outside this window (a real drag, not a script's).
+  if (!was || !e.isTrusted || e.dataTransfer.dropEffect !== 'none' || !outside(e.screenX, e.screenY)) return;
+  if (was.whole) loui.send('group:detach', { group: was.group, x: e.screenX, y: e.screenY });
+  else loui.send('tab:detach', { id: was.id, x: e.screenX, y: e.screenY });
 });
 
 // A collapsed sidebar opens while the pointer rests on it, as Brave's does.
@@ -481,7 +502,11 @@ loui.on('state', (next) => {
   $('device-label').textContent = tab?.device || '';
   $('device').classList.toggle('on', !!tab?.device);
   $('point').classList.toggle('on', !!state.picking.active);
-  document.title = tab?.title ? `${tab.title} · Loui` : 'Loui';
+  // A private window is tinted and labelled, and says so in its title.
+  const priv = !!state.window?.private;
+  document.body.classList.toggle('private', priv);
+  $('private-label').hidden = !priv;
+  document.title = (tab?.title ? `${tab.title} · Loui` : 'Loui') + (priv ? ' · Private' : '');
   // Pointing at something is usually followed by saying something about it.
   if (fresh && panelOpen()) $('prompt').focus();
   setSend();

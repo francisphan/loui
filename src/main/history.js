@@ -1,6 +1,7 @@
 // History: the pages the user visits in their own tabs. Pages that Claude
 // sessions open in their tab groups are left out: they are the session's
 // work, not the user's browsing.
+// Private windows record nothing.
 //
 // One entry per URL (title, visit count, first and last visit), kept in
 // memory and saved to history.json in the profile. Saves are batched and run
@@ -52,7 +53,11 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
   const worthKeeping = (url) => /^https?:\/\//i.test(url);
   // Only tabs in the user's own group. A tab the user handed to a session
   // belongs to the session until it comes back.
-  const usersTab = (wc) => tabs.list.find((t) => t.wc === wc)?.group === YOU;
+  // Nor a private window's tabs, which keep no history.
+  const usersTab = (wc) => {
+    const tab = tabs.list.find((t) => t.wc === wc);
+    return tab?.group === YOU && !tab.private;
+  };
 
   function visit(url, title) {
     if (!worthKeeping(url)) return;

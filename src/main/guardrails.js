@@ -274,7 +274,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
 
   // Layer 2: requests a tab makes while Claude acts in it.
   const WRITES = new Set(['POST', 'PUT', 'PATCH']);
-  requestRules(ses).add((d) => {
+  const hold = (d) => {
     if (!conf.on || !WRITES.has(d.method) || !d.uploadData?.length) return null;
     const tab = tabs.list.find((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === d.webContentsId);
     const session = tab && actorOf(tab);
@@ -296,7 +296,10 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
       if (nav && tab.wc && !tab.wc.isDestroyed()) tab.wc.stop();
       return { cancel: true };
     });
-  });
+  };
+  // Each session: the user's, and each private one (a tab of it can be handed to a session).
+  const attach = (s) => requestRules(s).add(hold);
+  attach(ses);
 
   // A small picture of the page, for prompts that have no element to show.
   async function picture(tab) {
@@ -368,10 +371,12 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     }
   });
 
+  // The question shows in the window that holds its tab (the window being served, see tabs.as()).
   function state() {
     const p = pending[0];
+    const here = !!p && tabs.get(p.tabId)?.window === tabs.window();
     return {
-      guard: p ? {
+      guard: here ? {
         id: p.id, who: who(p.session), kind: p.kind, site: p.site, what: p.what, image: p.image,
         canAlways: !!p.origin, onScreen: tabs.activeId === p.tabId, more: pending.length - 1,
       } : null,
@@ -389,7 +394,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
 
   return {
     applies, begin, end, drain, takeNotes, judge, judgeUrl, judgeScript, confirm,
-    answer, set, addSite, removeSite, forget, untrust, show, state,
+    answer, set, addSite, removeSite, forget, untrust, show, state, attach,
   };
 }
 
