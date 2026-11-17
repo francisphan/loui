@@ -1,0 +1,155 @@
+# Checks Loui as it is shipped and used, which the per-commit tests (test.yml)
+# cannot: the Windows installer, the installed app, an update and the
+# uninstaller on a Windows runner; a whole session through a relay running on
+# its own; and, nightly, the few things that depend on other people's servers.
+# See "Testing" in the README.
+#
+# Slow (the Windows job is about a quarter of an hour), so not on pull
+# requests: on main, on a release tag (the same commit the release is built
+# from; the release does not wait for this), and by hand:
+#
+#   gh workflow run integration.yml                 # Windows and relay
+#   gh workflow run integration.yml -f job=windows  # or relay, or live
+name: Integration
+
+on:
+  push:
+    branches: [main, integration-tests]
+    tags: ['v*']
+  schedule:
+    - cron: '23 7 * * *' # the live checks, nightly
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which to run
+        type: choice
+        default: integration
+        options: [integration, windows, relay, live]
+
+permissions:
+  contents: read
+
+jobs:
+  # The installer exactly as release.yml builds it (on Linux, `npm run
+  # dist:win`), and a second one from the same commit with the next version
+  # number, for the first to update to.
+  installers:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["integration", "windows"]'), inputs.job))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build the installer for this commit
+        run: |
+          npm run dist:win
+          mkdir -p installers/current installers/update
+          mv dist/Loui-Setup-*.exe dist/Loui-Setup-*.exe.blockmap dist/latest.yml installers/current/
+          rm -rf dist
+      - name: Build the same again as the next version
+        run: |
+          npm version patch --no-git-tag-version
+          npm run dist:win
+          mv dist/Loui-Setup-*.exe dist/Loui-Setup-*.exe.blockmap dist/latest.yml installers/update/
+          ls -l installers/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers
+          path: installers
+          retention-days: 3
+          compression-level: 0
+
+  # Installs, drives, updates and uninstalls it on a machine that is thrown
+  # away afterwards (test/integration/windows.test.js; never run those steps
+  # on a machine anyone uses).
+  windows:
+    needs: installers
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: installers
+          path: installers
+      # The test file needs nothing from node_modules: it talks to the installed app.
+      - name: Install, drive, update, uninstall
+        shell: bash
+        run: |
+          set -o pipefail
+          out="$(cygpath -u "$RUNNER_TEMP")/loui-out"
+          mkdir -p "$out"
+          export LOUI_INTEGRATION_INSTALLER="$(cygpath -w "$(ls "$PWD"/installers/current/Loui-Setup-*.exe)")"
+          export LOUI_INTEGRATION_UPDATE="$(cygpath -w "$PWD/installers/update")"
+          export LOUI_INTEGRATION_OUT="$(cygpath -w "$out")"
+          npm run test:integration:windows 2>&1 | tee "$out/test.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-logs-and-screenshots
+          path: ${{ runner.temp }}/loui-out
+          if-no-files-found: ignore
+
+  # A real MCP client, the relay as a process of its own, a real Loui.
+  relay:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["integration", "relay"]'), inputs.job))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node -e "console.log(require('electron'))"
+      - run: npm run test:integration
+
+  # Against the real sites. A failure here is a site that changed, not a
+  # broken commit: on main it opens an issue named for the check (or adds to
+  # the one already open) and the run stays green; run by hand from a branch,
+  # it just fails.
+  live:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.job == 'live')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node -e "console.log(require('electron'))"
+      - name: Live checks
+        id: checks
+        continue-on-error: true
+        run: npm run test:live
+        env:
+          LOUI_LIVE_REPORT: ${{ runner.temp }}/live.json
+      - name: Open or update an issue for each check that failed
+        if: steps.checks.outcome == 'failure' && github.ref_name == github.event.repository.default_branch
+        run: node test/integration/report-live.js "$RUNNER_TEMP/live.json" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Fail, when run from a branch
+        if: steps.checks.outcome == 'failure' && github.ref_name != github.event.repository.default_branch
+        run: exit 1

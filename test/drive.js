@@ -24,31 +24,65 @@ function serveFixture() {
 // env: extra environment for the app (for example the relay to connect to).
 // args: more command-line arguments (links to open, as another app would pass),
 // or a function of the fixture server's address that returns them.
-async function launch(env = {}, { home: reuse, args = [] } = {}) {
+// exe: an installed or packaged Loui to start instead of this checkout (the
+// integration tests, test/integration/).
+async function launch(env = {}, { home: reuse, args = [], exe } = {}) {
   const home = reuse || fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
   const server = await serveFixture();
   const base = `http://127.0.0.1:${server.address().port}`;
-  const app = spawn(require('electron'), [root, '--no-sandbox', ...(typeof args === 'function' ? args(base) : args)], {
+  const more = typeof args === 'function' ? args(base) : args;
+  const app = spawn(exe || require('electron'), exe ? more : [root, '--no-sandbox', ...more], {
     env: { ...process.env, LOUI_HOME: home, LOUI_TEST: '1', LOUI_RELAY_URL: '', ...env },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   const exited = new Promise((r) => app.once('exit', (code) => r(code))); // for a test that quits it
   const sock = socketFor(home);
-  for (let i = 0; i < 150 && !fs.existsSync(sock); i++) await new Promise((r) => setTimeout(r, 100));
-  if (!fs.existsSync(sock)) {
+  // A Windows named pipe is not a file to look for: there the wait is spent connecting (attach).
+  const isFile = process.platform !== 'win32';
+  for (let i = 0; isFile && i < 150 && !fs.existsSync(sock); i++) await new Promise((r) => setTimeout(r, 100));
+  let control;
+  try {
+    if (isFile && !fs.existsSync(sock)) throw new Error('no control socket');
+    control = await attach(home);
+  } catch (e) {
     app.kill();
     server.close();
-    throw new Error('Loui did not start (no control socket). Run with LOUI_DEBUG=1 to see why.');
+    throw new Error(`Loui did not start (${e.message}). Run with LOUI_DEBUG=1 to see why.`);
   }
-  // The socket file appears a moment before the app accepts connections on
-  // it, so a refused connection is retried for a while.
+  // Stops the app, even if it already exited (then there is no exit event to
+  // wait for) or does not respond to SIGTERM.
+  const close = async () => {
+    control.hangUp();
+    server.close();
+    if (app.exitCode === null && app.signalCode === null) {
+      const exited = new Promise((r) => app.once('exit', r));
+      app.kill();
+      const timer = setTimeout(() => app.kill('SIGKILL'), 5000);
+      await exited;
+      clearTimeout(timer);
+    }
+    // Chromium's helper processes can still be closing files for a moment.
+    if (!reuse) {
+      try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+    }
+  };
+  return { ...control, close, base, exited };
+}
+
+// Connects to the control socket of the profile in a directory, whoever
+// started the Loui that serves it, and returns what the tests drive it with.
+// The socket appears a moment before the app accepts connections on it (and
+// a named pipe only once the app is up), so connecting is retried for a while.
+async function attach(home, ms = process.platform === 'win32' ? 30000 : 5000) {
+  const sock = socketFor(home);
   let conn;
-  for (let tries = 0; ; tries++) {
+  for (const end = Date.now() + ms; ;) {
     conn = net.connect(sock);
     const error = await new Promise((ok) => conn.once('connect', () => ok(null)).once('error', ok));
     if (!error) break;
     conn.destroy();
-    if (tries >= 50 || error.code !== 'ECONNREFUSED') throw error;
+    const notYet = error.code === 'ECONNREFUSED' || (process.platform === 'win32' && error.code === 'ENOENT');
+    if (Date.now() >= end || !notYet) throw error;
     await new Promise((r) => setTimeout(r, 100));
   }
   conn.setEncoding('utf8');
@@ -86,24 +120,9 @@ async function launch(env = {}, { home: reuse, args = [] } = {}) {
   // What only the window chrome can do: ui('pause', {...}), and the window's state.
   const ui = (name, arg) => ask({ ui: name, arg });
   const state = () => ui('state');
-  // Stops the app, even if it already exited (then there is no exit event to
-  // wait for) or does not respond to SIGTERM.
-  const close = async () => {
-    conn.destroy();
-    server.close();
-    if (app.exitCode === null && app.signalCode === null) {
-      const exited = new Promise((r) => app.once('exit', r));
-      app.kill();
-      const timer = setTimeout(() => app.kill('SIGKILL'), 5000);
-      await exited;
-      clearTimeout(timer);
-    }
-    // Chromium's helper processes can still be closing files for a moment.
-    if (!reuse) {
-      try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
-    }
-  };
-  return { call, text, as, ui, state, close, base, home, exited };
+  // closed: the app hung up (it quit). hangUp: this end does.
+  const closed = new Promise((r) => conn.once('close', r));
+  return { call, text, as, ui, state, home, closed, hangUp: () => conn.destroy() };
 }
 
 // Starts Loui again on the same profile, as Windows does for a link opened in
@@ -117,4 +136,4 @@ function again(home, args = []) {
   return new Promise((r) => second.once('exit', (code) => { clearTimeout(timer); r(code); }));
 }
 
-module.exports = { launch, again };
+module.exports = { launch, again, attach, serveFixture };

@@ -8,6 +8,9 @@
     "start": "electron .",
     "relay": "node relay/server.js",
     "test": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=90000 --test-force-exit test/*.test.js",
+    "test:integration": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=240000 --test-force-exit test/integration/relay-e2e.test.js",
+    "test:integration:windows": "node --test --test-concurrency=1 --test-timeout=900000 --test-force-exit test/integration/windows.test.js",
+    "test:live": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=300000 --test-force-exit test/integration/live.test.js",
     "dist:win": "USE_SYSTEM_WINE=true PATH=\"$PWD/scripts/nowine:$PATH\" electron-builder --win --x64 --publish never"
   },
   "dependencies": {

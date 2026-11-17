@@ -438,6 +438,80 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
 and publishes it with `latest.yml` as a GitHub release, which installed copies
 then update to.
 
+## Testing
+
+Three layers, from every commit to once a night.
+
+**The suite, on every pull request.** `npm test` runs `test/*.test.js`: each
+file starts the real app from this checkout on a throwaway profile, under a
+virtual display, and drives it through its local control socket
+(`test/drive.js`), with a real relay where the test needs one. Nothing in it
+touches the network. One file at a time: `xvfb-run -a node --test
+--test-force-exit test/tabstrip.test.js`. `.github/workflows/test.yml` runs it
+on every pull request and on main; `release.yml` runs it before a release.
+
+**The integration suite, on main and on a release tag.** What the suite cannot
+reach is Loui as it is shipped and used (`test/integration/`,
+`.github/workflows/integration.yml`):
+
+- *Windows, packaged* (`windows.test.js`). The workflow builds the installer
+  the way a release does, and a second one from the same commit with the next
+  version number. On a Windows runner the first is installed silently and
+  checked (files, the entry under Installed apps, the uninstaller's own
+  checksum, the Start menu shortcut and its app id, the browser registration);
+  the installed `Loui.exe` is driven over its named pipe (a session working in
+  a background tab, the activity log, picture in picture, the palette,
+  windows, reader view, full screen, tab icons, Settings); a saved password
+  and the relay key are checked to be encrypted by Windows itself and to read
+  back after a restart, with the tabs; then the app finds the second installer
+  on a local server, downloads it, and *Restart to update* is expected to end
+  with the new version running on the same profile; last, the uninstaller
+  runs and must leave the profile. Logs, and a screenshot of each failure, are
+  kept as the run's artifacts.
+- *Relay, end to end* (`relay-e2e.test.js`). The relay as a process of its
+  own, a real Loui signed in to it with the key, and real MCP clients: Claude
+  Code with the key, then Claude's connector through the whole OAuth flow
+  (discovery, registration, the approval page, tokens, a refresh) over plain
+  HTTP as claude.ai does it; navigating, typing, clicking, a screenshot,
+  `read_article`, a guardrail question answered in the window, take over and
+  hand back, a tab handed over, and the group closing when the session ends.
+
+```bash
+npm run test:integration                 # the relay story, here (Linux)
+gh workflow run integration.yml          # both, on GitHub; -f job=windows or -f job=relay for one
+```
+
+The Windows file installs, updates and uninstalls the real per-user copy of
+Loui, so it does those only on a GitHub-hosted runner, and checks that itself:
+on a PC in use, a test of the uninstaller once deleted the installed Loui. On
+your own Windows machine it will only *drive* a copy you point it at, on a
+temporary profile, with the updater pointed at nothing:
+
+```bat
+set LOUI_INTEGRATION_ALLOW=1
+set LOUI_INTEGRATION_EXE=C:\path\to\win-unpacked\Loui.exe
+npm run test:integration:windows
+```
+
+Without `LOUI_INTEGRATION_ALLOW=1` (or CI) it refuses to run at all, and it
+refuses `LOUI_INTEGRATION_INSTALLER` and `LOUI_INTEGRATION_UPDATE` anywhere
+but on a hosted runner. A release does not wait for this workflow: it runs
+beside `release.yml` on the same tag.
+
+**Live checks, nightly.** `live.test.js` is the only test that uses other
+people's servers: Google's sign-in still accepts Loui (a made-up address must
+get "Couldn't find this account", not the "may not be secure" page), Shields'
+filter lists still download and build into an engine that blocks, and the
+start page's default news feed still downloads and parses. It runs on a
+schedule and by hand, never on a pull request; a check that fails on main
+opens an issue named for it (or comments on the one already open) and fails
+nothing else.
+
+```bash
+npm run test:live
+gh workflow run integration.yml -f job=live
+```
+
 ## Downloads
 
 Files are saved to your Downloads folder without asking (`LOUI_DOWNLOADS`
