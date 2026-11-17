@@ -182,3 +182,14 @@ test("Loui's own window can't be turned into a web page", async () => {
   const state = await b.state();
   assert.equal(state.tabs.length, before, 'the chrome still answers, with the same tabs');
 });
+
+test('with nothing open, the page sits right under the toolbar', async () => {
+  // No find bar, downloads list, permission question or bookmarks bar is
+  // showing, so nothing should take room between the toolbar and the page.
+  const gap = await b.ui('chrome:eval', `(() => {
+    const nav = document.getElementById('navrow').getBoundingClientRect();
+    const stage = document.getElementById('stage').getBoundingClientRect();
+    return Math.round(stage.top - nav.bottom);
+  })()`);
+  assert.equal(gap, 0);
+});
