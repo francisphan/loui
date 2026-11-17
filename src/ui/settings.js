@@ -929,7 +929,13 @@ document.addEventListener('keydown', (e) => {
 });
 
 loui.onState(draw);
-loui.onShow((id) => { show(id); tabs.get(id)?.focus(); });
+// A section, or "section/Group title" for one of its groups.
+loui.onShow((to) => {
+  const [id, group] = String(to).split('/');
+  show(id);
+  tabs.get(id)?.focus();
+  if (group) [...document.querySelectorAll(`#section-${id} h3`)].find((h) => h.textContent === group)?.scrollIntoView();
+});
 arrange();
 search.focus();
 

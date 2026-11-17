@@ -216,9 +216,10 @@ function createSettingsWindow({
 
   const backdrop = () => (nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF');
 
-  // One window: asked for again, it comes to the front. section: one to show.
-  function open(section) {
-    const show = SECTIONS.includes(section) ? section : null;
+  // One window: asked for again, it comes to the front. section: one to show;
+  // group: the title of a group in it to bring into sight.
+  function open(section, group) {
+    const show = SECTIONS.includes(section) ? (group ? `${section}/${group}` : section) : null;
     if (win) {
       if (win.isMinimized()) win.restore();
       win.focus();

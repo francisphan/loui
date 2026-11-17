@@ -28,13 +28,14 @@ body {
   font: 14px/1.4 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
   cursor: default;
 }
-main { flex: 1; width: 100%; max-width: 640px; padding-top: clamp(24px, 9vh, 96px); }
+main { flex: 1; width: 100%; max-width: 640px; padding-top: clamp(20px, 6vh, 64px); }
 a { color: inherit; text-decoration: none; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-.brand { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0 0 26px; user-select: none; }
-.brand img { display: block; width: 96px; height: 96px; }
-.brand h1 { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -.01em; line-height: 1.1; }
+/* Louis, large, and the name under him to scale; both give way in a small window. */
+.brand { --louis: clamp(104px, min(22vw, 20vh), 160px); display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 0 0 28px; user-select: none; }
+.brand img { display: block; width: var(--louis); height: var(--louis); }
+.brand h1 { margin: 0; font-size: calc(var(--louis) * .28); font-weight: 650; letter-spacing: -.015em; line-height: 1.1; }
 .brand .private { padding: 2px 10px; border-radius: 10px; background: var(--focus); color: var(--water); font-size: 12.5px; font-weight: 650; }
 
 form { margin: 0 auto; max-width: 560px; }

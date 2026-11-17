@@ -90,6 +90,14 @@ $('menu').onclick = () => {
   loui.send('menu:show', { x: r.left, y: r.bottom + 2 });
 };
 loui.on('show-menu', () => $('menu').click()); // Alt+F, F10
+// Louis, at the top left, drops Loui's own menu: how it looks and is set up.
+$('brand').onclick = () => {
+  const r = $('brand').firstElementChild.getBoundingClientRect();
+  $('brand').setAttribute('aria-expanded', 'true');
+  loui.send('louis:menu', { x: r.left, y: r.bottom + 2 });
+};
+loui.on('show-louis', () => $('brand').click()); // Alt+L
+loui.on('louis:closed', () => $('brand').setAttribute('aria-expanded', 'false'));
 
 const address = $('address');
 $('address-form').onsubmit = (e) => {
@@ -244,13 +252,13 @@ function placeTabs() {
   if (!vertical && box.parentElement !== $('tabrow')) $('tabs-back').after(box);
   // The top row of the window is the tab strip; with the tabs in the sidebar it
   // is the toolbar, which then holds what else the tab row had.
-  if (vertical && $('brand').parentElement !== $('navrow')) {
-    $('navrow').prepend($('brand'), $('sidebar-toggle'));
+  if (vertical && $('sidebar-toggle').parentElement !== $('navrow')) {
+    $('navrow').prepend($('sidebar-toggle'));
     $('reload').after($('private-label'));
     $('address-form').after($('helm'));
   }
   if (!vertical && $('private-label').parentElement !== $('tabrow')) {
-    $('tabrow').prepend($('brand'), $('sidebar-toggle'), $('private-label'));
+    $('tabrow').prepend($('sidebar-toggle'), $('private-label'));
     $('tabrow').append($('helm'));
   }
   box.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
@@ -796,6 +804,10 @@ function placeHelm() {
   if (!fits && inRow) $('helmrow').append(helm);
 }
 new ResizeObserver(placeHelm).observe($('navrow'));
+// With the tabs in the sidebar, the strips under the toolbar (the bookmarks
+// bar, a question's row) take up some of the room Louis has below it: the
+// sidebar starts lower by the rest (ui.css).
+new ResizeObserver(() => document.body.style.setProperty('--strips', `${$('bar').offsetHeight}px`)).observe($('bar'));
 
 function drawChips() {
   $('chips').replaceChildren(...state.picks.map((p) => {

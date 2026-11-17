@@ -130,6 +130,32 @@ test('the first tab and a new tab show the start page: no address, "New tab", Lo
   }
 });
 
+// Louis and what is under him, as drawn in a tab's start page.
+const header = (id, app = b) => js(id, `(() => { const r = (s) => document.querySelector(s).getBoundingClientRect();
+  return { louis: [Math.round(r('.brand img').width), Math.round(r('.brand img').height)], name: parseFloat(getComputedStyle(document.querySelector('.brand h1')).fontSize),
+    under: r('.brand h1').top >= r('.brand img').bottom && r('input').top >= r('.brand h1').bottom, box: Math.round(r('input').bottom),
+    high: innerHeight, wide: innerWidth, fits: document.documentElement.scrollWidth <= innerWidth }; })()`, app);
+const resize = async (width, height, ui = b.ui) => {
+  await ui('chrome:eval', `window.resizeTo(${width}, ${height})`);
+  await until(`the window is ${width} wide`, async () => Math.abs(await ui('chrome:eval', 'window.innerWidth') - width) < 4);
+};
+
+test('Louis is large on it, his name under him to scale, and the search box well above the fold; he shrinks in a small window', async () => {
+  const tab = await started();
+  await resize(1400, 900);
+  const big = await until('the page is laid out at 1400 wide', async () => { const h = await header(tab.id); return h.wide > 900 && h; });
+  assert.deepEqual(big.louis, [160, 160]);
+  assert.ok(big.name >= 42 && big.name <= 48, `"Loui" is ${big.name}px`);
+  assert.ok(big.under, 'Louis, then the name, then the search box');
+  assert.ok(big.box < big.high * 0.6, `the search box ends at ${big.box} of ${big.high}`);
+  await resize(720, 900);
+  const small = await until('the page is laid out at 720 wide', async () => { const h = await header(tab.id); return h.wide < 500 && h; });
+  assert.ok(small.louis[0] >= 104 && small.louis[0] < 160 && small.louis[0] === small.louis[1], `Louis is ${small.louis}`);
+  assert.ok(small.name < big.name && small.name >= 28, `"Loui" is ${small.name}px`);
+  assert.ok(small.under && small.fits && small.box < small.high * 0.6, JSON.stringify(small));
+  await resize(1400, 900);
+});
+
 test('most visited comes from history, most visited first, and the bookmarks bar\'s bookmarks show while the bar is hidden', async () => {
   const tab = await fresh();
   assert.deepEqual(await names(tab.id), ['b.example', 'a.example', 'c.example']);
@@ -292,6 +318,9 @@ test("a private window's start page shows no history and no bookmarks", async ()
   const text = await words(tab.id);
   assert.match(text, /Private window/);
   assert.match(text, /keeps no history/);
+  await resize(1400, 900, inWindow.ui);
+  const head = await until('its page is laid out at 1400 wide', async () => { const h = await header(tab.id); return h.wide > 900 && h; });
+  assert.deepEqual([head.louis, head.under, head.box < head.high * 0.6], [[160, 160], true, true], 'Louis is as large there');
   assert.doesNotMatch(text, SITES);
   assert.doesNotMatch(text, /Most visited|Bookmarks\n|Claude sessions/);
   assert.match(text, /Mendoza, Argentina/, 'the weather says nothing about the user, and shows');

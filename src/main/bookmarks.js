@@ -477,7 +477,7 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   };
 
   return {
-    suggest, handle, flush, probes, menuItems, barShown,
+    suggest, handle, flush, probes, menuItems, barShown, setBar,
     bar: () => roots[BAR].children.filter((n) => !isFolder(n)).map(brief), // the bar's own bookmarks, for the start page
     state: () => ({ bookmark: byUrl.get(tabs.active()?.url)?.id || null }),
   };

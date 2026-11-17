@@ -61,7 +61,7 @@ function assets() {
   const louis = nativeImage.createFromPath(path.join(UI, 'icon.png'));
   parts = {
     style: font + fs.readFileSync(path.join(UI, 'startpage.css'), 'utf8'),
-    louis: louis.resize({ width: 192, height: 192, quality: 'best' }).toDataURL(), // drawn at 96px
+    louis: louis.toDataURL(), // whole (256px): drawn at up to 160px
     icon: { type: 'image/png', bytes: louis.resize({ width: 32, height: 32, quality: 'best' }).toPNG() }, // for the tab strip
   };
   return parts;
