@@ -12,7 +12,14 @@
 // kept ("weatherPlace", "weatherAt"); Loui never asks where the machine is.
 // Feeds are read by a small parser of its own: titles, links, sources and
 // dates only, as text. A link that is not http or https is dropped.
+//
+// Only the open web is fetched: an address on this machine or its network is
+// refused, wherever a feed's address or a redirect from it points (get). And
+// a private window's start page causes no fetch at all: it shows what is
+// already kept, or nothing.
 const { app } = require('electron');
+const dns = require('dns');
+const net = require('net');
 
 const WEATHER_MS = 30 * 60 * 1000;
 const NEWS_MS = 15 * 60 * 1000;
@@ -37,10 +44,46 @@ const SKY = {
   95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with hail',
 };
 
-// The body of an http(s) address as text: within TIMEOUT_MS, and MAX_BYTES at most.
+// Addresses that are this machine or its network, not the web: loopback,
+// private, link-local, carrier-grade NAT, multicast, and "no address".
+const LOCAL = new net.BlockList();
+for (const [a, n] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
+  ['172.16.0.0', 12], ['192.168.0.0', 16], ['224.0.0.0', 3]]) LOCAL.addSubnet(a, n, 'ipv4');
+for (const [a, n] of [['::', 127], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]]) LOCAL.addSubnet(a, n, 'ipv6');
+const local = (ip) => LOCAL.check(ip, net.isIPv6(ip) ? 'ipv6' : 'ipv4'); // an IPv4 address written as IPv6 is checked as IPv4
+// For the tests only: the stand-ins' own host:port (comma-separated), which are on 127.0.0.1.
+const stubs = () => (testing('LOUI_FEEDS_LOCAL') || '').split(',').filter(Boolean);
+
+// The address as a URL if it is http(s) and on the open web; throws if not.
+// The name is looked up first, so a public name for a private address is
+// refused as well.
+async function web(url) {
+  let u;
+  try { u = new URL(url); } catch { throw new Error('not a web address'); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error('not a web address');
+  if (stubs().includes(u.host)) return u;
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  const found = /(^|\.)localhost\.?$/i.test(host) ? [] : net.isIP(host) ? [{ address: host }] : await dns.promises.lookup(host, { all: true });
+  if (!found.length || found.some((a) => local(a.address))) throw new Error('an address on this machine or its network');
+  return u;
+}
+
+// The body of an http(s) address as text: within TIMEOUT_MS, and MAX_BYTES at
+// most. Redirects are followed by hand, REDIRECTS at most, each one checked
+// like the first address.
+const REDIRECTS = 5;
 async function get(url) {
-  if (!/^https?:\/\//i.test(url)) throw new Error('not a web address');
-  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'follow', headers: { accept: '*/*' } });
+  const signal = AbortSignal.timeout(TIMEOUT_MS);
+  let res;
+  for (let hops = 0; ; hops++) {
+    const u = await web(url);
+    res = await fetch(u, { signal, redirect: 'manual', headers: { accept: '*/*' } });
+    const to = res.status >= 300 && res.status < 400 && res.headers.get('location');
+    if (!to) break;
+    res.body?.cancel().catch(() => {});
+    if (hops >= REDIRECTS) throw new Error('too many redirects');
+    url = new URL(to, u).href;
+  }
   if (!res.ok) throw new Error(`status ${res.status}`);
   const parts = [];
   let size = 0;
@@ -134,6 +177,8 @@ function kept(ms, load) {
       });
       return pending;
     },
+    // What is kept for k, however old, without asking for anything.
+    peek: (k) => (k === key && value && !value.failed ? value : null),
     forget() { key = null; value = null; },
   };
 }
@@ -184,8 +229,10 @@ function createFeeds({ settings, save }) {
     units, feeds,
     place: () => place()?.name || '',
     // For a start page being served: null when there is no place yet, { failed } when it could not be had.
-    weather: () => (place() ? weather.get(`${place().lat},${place().lon},${units()}`) : Promise.resolve(null)),
-    news: () => (feeds().length ? news.get(feeds().join('\n')) : Promise.resolve(null)),
+    // kept: only what is already here, with no fetch (a private window's start page).
+    weather: (kept = false) => (!place() ? Promise.resolve(null)
+      : weather[kept ? 'peek' : 'get'](`${place().lat},${place().lon},${units()}`)),
+    news: (kept = false) => (!feeds().length ? Promise.resolve(null) : news[kept ? 'peek' : 'get'](feeds().join('\n'))),
     // A place name as typed -> its coordinates, kept. False if no such place was found.
     async setPlace(name) {
       const text = String(name || '').trim().slice(0, 100);

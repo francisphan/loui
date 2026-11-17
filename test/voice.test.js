@@ -101,6 +101,7 @@ test.before(async () => {
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ readBackVoice: 'A Voice', readBackRate: 1.3 }));
   b = await launch({
     LOUI_VOICE_HOST: `http://127.0.0.1:${host.address().port}`,
+    LOUI_VOICE_STALL_MS: '3000',
     ...(process.env.LOUI_VOICE_DIR ? {} : { LOUI_VOICE_DIR: path.join(home, 'voice', 'whisper-base') }),
   }, { home });
   await chrome(FAKES);
@@ -299,7 +300,18 @@ test('the speech model is fetched on first use, with progress on the button and 
   assert.match((await mic()).note, /could not be fetched: the model host answered 503\..*try again.*Win\+H/);
   assert.equal((await mic()).cls, 'idle');
 
+  // A connection that goes quiet is given up, and leaves nothing behind.
   serving = 'hold';
+  await press('mic');
+  await wait('the download to show', async () => (await mic()).cls === 'getting');
+  await wait('the stalled download to be given up', async () => (await mic()).trouble);
+  assert.match((await mic()).note, /could not be fetched: the download stalled\..*press the microphone to try again/);
+  assert.equal((await mic()).cls, 'idle');
+  assert.equal((await b.state()).voice.model, 'missing');
+  const dir = (await b.ui('voice:state')).dir;
+  assert.deepEqual(fs.readdirSync(dir, { recursive: true }).filter((f) => String(f).endsWith('.part')), []);
+  for (const res of held.splice(0)) res.destroy();
+
   await press('mic');
   await wait('the download to show', async () => (await mic()).cls === 'getting');
   assert.match((await mic()).text, /^\d+%$/);
@@ -319,6 +331,14 @@ test('the speech model is fetched on first use, with progress on the button and 
   assert.equal(state.onDisk, true);
   assert.equal(fs.readFileSync(path.join(state.dir, 'onnx', 'encoder_model_quantized.onnx'), 'utf8'), 'partrest');
   assert.equal(fs.readdirSync(state.dir).some((f) => f.endsWith('.part')), false);
+});
+
+test('the hidden speech page has no way out over WebRTC, and still loads', async () => {
+  const lock = await b.ui('voice:lockdown');
+  assert.equal(lock.webrtc, 'disable_non_proxied_udp');
+  assert.equal(lock.proxy, 'PROXY 127.0.0.1:9');
+  assert.match(lock.loaded, /^(loaded|ran)/, 'its own address is served past the proxy');
+  await b.ui('voice:close');
 });
 
 test('only a normal window\'s chrome gets the microphone, and only the microphone', async () => {

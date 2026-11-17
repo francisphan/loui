@@ -22,7 +22,7 @@ const hostOf = (url) => { try { return new URL(url).host; } catch { return ''; }
 
 function createHints({ win, tabs }) {
   const view = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true },
+    webPreferences: { preload: path.join(__dirname, 'hint-preload.js'), sandbox: true, contextIsolation: true },
   });
   view.setBackgroundColor('#00000000');
   // One view for all windows: it moves into the window that has something to say.

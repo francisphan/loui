@@ -50,3 +50,18 @@ test('the app tells Windows the id its shortcut has', () => {
   const { build } = require('../package.json');
   assert.ok(main.includes(`app.setAppUserModelId('${build.appId}')`), build.appId);
 });
+
+// Only a window's chrome gets the chrome's bridge. Loui's small views (its
+// notes, the suggestion list) get one of their own with the one or two
+// channels they need.
+test('the small views do not borrow the window chrome\'s bridge', () => {
+  const main = path.join(__dirname, '../src/main');
+  const src = (f) => fs.readFileSync(path.join(main, f), 'utf8');
+  const borrowers = fs.readdirSync(main).filter((f) => f !== 'main.js' && /'preload\.js'/.test(src(f)));
+  assert.deepEqual(borrowers, []);
+  const channels = (f) => [...src(f).matchAll(/ipcRenderer\.(send|on|invoke)\('([^']+)'/g)].map((m) => `${m[1]} ${m[2]}`).sort();
+  assert.match(src('hints.js'), /'hint-preload\.js'/);
+  assert.deepEqual(channels('hint-preload.js'), ['on hint']);
+  assert.match(src('suggest.js'), /'suggest-preload\.js'/);
+  assert.deepEqual(channels('suggest-preload.js'), ['on suggest', 'send suggest:pick']);
+});

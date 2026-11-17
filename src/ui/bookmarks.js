@@ -302,6 +302,17 @@
       drawList(m);
     } else if (m.type === 'panel') {
       showBookmarks(!bookmarksOpen());
+    } else if (m.type === 'icon') {
+      // An icon as a page or a file gave it: drawn small here, where a page's
+      // bytes may be read, and handed back for the main process to keep.
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        canvas.getContext('2d').drawImage(img, 0, 0, 32, 32);
+        loui.send('bookmarks', { do: 'icon', id: m.id, icon: canvas.toDataURL('image/png') });
+      };
+      img.src = m.icon;
     }
   });
 })();

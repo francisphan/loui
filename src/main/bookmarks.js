@@ -10,8 +10,8 @@
 //
 // Folders on the bar open as native menus: they draw over the page, which
 // the window chrome's own HTML cannot, and cost nothing until opened.
-// Icons are small data: URLs, taken from an imported file or fetched once
-// for a bookmarked page the user has open; the bar never goes to the network.
+// Icons are small data: URLs, taken from an imported file or once from a
+// bookmarked page the user has open; the bar never goes to the network.
 const fs = require('fs');
 const { Menu, dialog, nativeImage } = require('electron');
 const { YOU, toUrl } = require('./tabs');
@@ -20,12 +20,13 @@ const BAR = 'bar';
 const OTHER = 'other';
 const ROOT_TITLES = { [BAR]: 'Bookmarks bar', [OTHER]: 'Other bookmarks' };
 const ICON_MAX = 6000; // characters of a data: URL; a 32-pixel PNG is well under
+const RAW_MAX = 300 * 1024; // of an icon as a page gave it, sent to the window chrome to be drawn small
 const BOOKMARK = 1e9; // a bookmark outranks any page from history that matches as well
 const OPENABLE = /^(https?|file|ftp):/i;
 
 const isFolder = (n) => Array.isArray(n.children);
 
-function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = () => {}, delay = 500 }) {
+function createBookmarks({ file, tabs, send, broadcast = send, changed = () => {}, delay = 500 }) {
   const roots = {
     [BAR]: { id: BAR, title: ROOT_TITLES[BAR], children: [] },
     [OTHER]: { id: OTHER, title: ROOT_TITLES[OTHER], children: [] },
@@ -187,6 +188,7 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
       else merge([item], roots[OTHER]);
     }
     save();
+    for (const n of byUrl.values()) if (n.icon && !n.drawn) draw(n, n.icon);
     return { added, skipped };
   }
   const importFile = (path) => importHtml(fs.readFileSync(path, 'utf8'));
@@ -211,47 +213,33 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   }
 
   // ── icons ───────────────────────────────────────────────────────────────
-  // A bookmarked page the user has open gives its icon once: fetched through
-  // the tabs' own session (normally straight from its cache), shrunk, and kept.
+  // A bookmarked page the user has open gives its icon once. What a page (or
+  // an imported file) gives as an icon is never decoded in this process: the
+  // window chrome, a sandboxed page, draws it at 32 pixels and hands back that
+  // small copy, which is what is kept (drawn: true) and what the menus show.
   const tried = new Set();
-  async function iconFrom(url) {
-    if (url.startsWith('data:image/')) {
-      if (url.length <= ICON_MAX) return url;
-      // A tab's icon as the page gave it: shrunk to keep, if it can be read here.
-      const img = nativeImage.createFromDataURL(url);
-      const icon = img.isEmpty() ? '' : img.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
-      return icon && icon.length <= ICON_MAX ? icon : null;
-    }
-    if (!/^https?:/i.test(url)) return null;
-    try {
-      const res = await ses.fetch(url, { cache: 'force-cache' });
-      if (!res.ok) return null;
-      const bytes = Buffer.from(await res.arrayBuffer());
-      const img = nativeImage.createFromBuffer(bytes);
-      if (!img.isEmpty()) {
-        const icon = img.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
-        return icon.length <= ICON_MAX ? icon : null;
-      }
-      // Formats nativeImage cannot read here (SVG, and ICO outside Windows), if small.
-      const type = (res.headers.get('content-type') || '').split(';')[0];
-      const icon = `data:${type};base64,${bytes.toString('base64')}`;
-      return type.startsWith('image/') && icon.length <= ICON_MAX ? icon : null;
-    } catch {
-      return null;
-    }
+  const asked = new Set(); // ids whose icon the chrome has been asked to draw
+  function draw(node, raw) {
+    if (!/^data:image\//.test(raw || '') || raw.length > RAW_MAX || asked.has(node.id)) return;
+    asked.add(node.id);
+    send('bookmarks', { type: 'icon', id: node.id, icon: raw });
+  }
+  // The chrome's answer.
+  function drawn(id, icon) {
+    const node = byId.get(id)?.node;
+    if (!asked.delete(id) || !node || isFolder(node)) return;
+    if (typeof icon !== 'string' || icon.length > ICON_MAX || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(icon)) return;
+    node.icon = icon;
+    node.drawn = true;
+    save();
   }
   tabs.on('change', () => {
     const tab = tabs.active();
     if (!tab || tab.group !== YOU || !tab.icon || tab.loading) return;
     const node = byUrl.get(tab.url);
-    if (!node || node.icon || tried.has(node.url)) return;
+    if (!node || (node.icon && node.drawn) || tried.has(node.url)) return;
     tried.add(node.url);
-    iconFrom(tabs.iconData(tab) || '').then((icon) => {
-      if (icon && byId.has(node.id) && !node.icon) {
-        node.icon = icon;
-        save();
-      }
-    });
+    draw(node, tabs.iconData(tab));
   });
 
   // ── reading ─────────────────────────────────────────────────────────────
@@ -343,7 +331,7 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
     editing(node.id, true);
     if (tab.icon) {
       tried.add(node.url);
-      iconFrom(tabs.iconData(tab) || '').then((icon) => { if (icon && byId.has(node.id)) { node.icon = icon; save(); } });
+      draw(node, tabs.iconData(tab));
     }
   }
 
@@ -354,6 +342,9 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   };
   const iconOf = (n) => {
     if (!n.icon) return undefined;
+    // Only the copy the window chrome drew is read here. One from an imported
+    // file, or kept before there was such a copy, is sent to be drawn first.
+    if (!n.drawn) { draw(n, n.icon); return undefined; }
     const img = nativeImage.createFromDataURL(n.icon);
     return img.isEmpty() ? undefined : img.resize({ width: 16, height: 16 });
   };
@@ -444,6 +435,7 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
       case 'folder': return editing(addFolder({ parent: r.parent }).id);
       case 'bar': return setBar(r.show);
       case 'import': return chooseImport();
+      case 'icon': return drawn(r.id, r.icon);
       case 'list': return send('bookmarks', { type: 'list', query: r.query || '', items: list(r.query) });
       // The editor closed: the page the user was reading takes the keyboard back.
       case 'closed': return tabs.active()?.wc.focus();
@@ -459,6 +451,8 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
       const names = (items) => items.map((i) => (i.submenu ? { [i.label]: names(i.submenu) } : i.label));
       return names(folderMenu(folder(id)?.children || []));
     },
+    // The bookmarks in a folder whose menu rows would carry an icon.
+    'bookmarks:menu-icons': (id) => folderMenu(folder(id)?.children || []).filter((i) => i.icon).map((i) => i.label),
     // Runs an item of the app menu by its shortcut, as the keyboard would.
     'menu:key': (accelerator) => {
       const find = (menu) => {

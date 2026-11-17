@@ -23,7 +23,7 @@ async function until(what, fn, tries = 80) {
 }
 
 // ── stand-ins for Open-Meteo and a news feed ────────────────────────────────
-const hits = { forecast: 0, geocode: 0, feed: 0, bad: 0 };
+const hits = { forecast: 0, geocode: 0, feed: 0, atom: 0, bad: 0, inner: 0 };
 let weatherDown = false;
 const item = (title, link, source = 'The Gazette') =>
   `<item><title>${title}</title><link>${link}</link><pubDate>${new Date(Date.now() - 3 * 3600e3).toUTCString()}</pubDate><source url="https://gazette.example">${source}</source></item>`;
@@ -54,10 +54,16 @@ const stub = http.createServer((req, res) => {
       ? { results: [{ name: 'Mendoza', latitude: -32.89, longitude: -68.83, country: 'Argentina', country_code: 'AR', admin1: 'Mendoza' }] } : {}));
   }
   if (url.pathname === '/feed') { hits.feed++; return res.end(FEED); }
-  if (url.pathname === '/atom') return res.end(ATOM);
+  if (url.pathname === '/atom') { hits.atom++; return res.end(ATOM); }
+  if (url.pathname === '/moved') return res.writeHead(302, { location: '/feed' }).end();
+  if (url.pathname === '/inward') return res.writeHead(302, { location: `${within}/secret` }).end();
   hits.bad++;
   res.writeHead(500).end('no');
 });
+
+// Something else on this machine, which no feed may reach: Loui is not told it is a stand-in.
+const inner = http.createServer((req, res) => { hits.inner++; res.end(FEED); });
+let within;
 
 const now = Date.now();
 const entry = (url, visits) => ({ url, title: url, visits, first: now - 1e9, last: now - 1e6 });
@@ -79,17 +85,20 @@ function profile(dir, settings = {}) {
   fs.writeFileSync(path.join(dir, 'history.json'), JSON.stringify(HISTORY));
   fs.writeFileSync(path.join(dir, 'bookmarks.json'), JSON.stringify(BOOKMARKS));
 }
-const env = () => ({ LOUI_WEATHER_URL: `${at}/forecast`, LOUI_GEOCODE_URL: `${at}/geocode` });
+const env = () => ({ LOUI_WEATHER_URL: `${at}/forecast`, LOUI_GEOCODE_URL: `${at}/geocode`, LOUI_FEEDS_LOCAL: new URL(at).host });
 
 test.before(async () => {
   await new Promise((r) => stub.listen(0, '127.0.0.1', r));
   at = `http://127.0.0.1:${stub.address().port}`;
+  await new Promise((r) => inner.listen(0, '127.0.0.1', r));
+  within = `http://127.0.0.1:${inner.address().port}`;
   profile(home);
   b = await launch(env(), { home });
 });
 test.after(async () => {
   await b?.close();
   stub.close();
+  inner.close();
   try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
 });
 
@@ -329,6 +338,40 @@ test("a private window's start page shows no history and no bookmarks", async ()
   await b.ui('window:close', w);
   await until('the private window closes', async () => (await b.ui('windows')).length === 1);
   await b.ui('window:focus', (await b.ui('windows'))[0].id);
+});
+
+test("a private window's start page asks the web for nothing: it shows what is already kept, or nothing", async () => {
+  await act('start:units', 'c'); // nothing kept answers for these
+  await act('start:feed-add', `${at}/atom`);
+  const before = { ...hits };
+  const w = await b.ui('window:new', { private: true });
+  const inWindow = { ui: (name, arg) => b.ui('in-window', { window: w, ui: name, arg }), state: () => b.ui('in-window', { window: w, ui: 'state' }) };
+  const tab = await started(inWindow);
+  const text = await words(tab.id);
+  assert.match(text, /Private window/);
+  assert.doesNotMatch(text, /Weather|News|Mendoza|headline/);
+  await wait(300);
+  assert.deepEqual(hits, before, 'nothing was fetched for it');
+  await b.ui('window:close', w);
+  await until('the private window closes', async () => (await b.ui('windows')).length === 1);
+  await b.ui('window:focus', (await b.ui('windows'))[0].id);
+  await act('start:units', 'f');
+  await act('start:feed-remove', `${at}/atom`);
+});
+
+test('a feed is fetched from the web only: not from this machine, directly or by a redirect', async () => {
+  await act('start:feed-remove', `${at}/feed`);
+  for (const feed of [`${at}/inward`, `${within}/secret`, `${within.replace('127.0.0.1', 'localhost')}/secret`, `${within.replace('127.0.0.1', '[::ffff:127.0.0.1]')}/secret`]) await act('start:feed-add', feed);
+  const refused = await fresh();
+  assert.match(await words(refused.id), /Couldn't load the news\./);
+  assert.equal(hits.inner, 0, 'nothing on this machine was asked');
+  for (const feed of saved().newsFeeds) await act('start:feed-remove', feed);
+  // A redirect to somewhere allowed is followed.
+  await act('start:feed-add', `${at}/moved`);
+  const tab = await fresh();
+  assert.match(await words(tab.id), /Harvest starts early & well/);
+  await act('start:feed-remove', `${at}/moved`);
+  await act('start:feed-add', `${at}/feed`);
 });
 
 test("a session's new tab is blank, and the footer counts the sessions open", async () => {

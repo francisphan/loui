@@ -348,9 +348,18 @@
     if (/\bone-time-code\b/.test(ac)) return 'otp';
     return null;
   }
+  // The open shadow roots under a root (a web component's insides), and
+  // querySelectorAll that looks inside them too.
+  function shadowsIn(root, out = []) {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) { out.push(el.shadowRoot); shadowsIn(el.shadowRoot, out); }
+    }
+    return out;
+  }
+  const deepAll = (root, sel) => [root, ...shadowsIn(root)].flatMap((r) => [...r.querySelectorAll(sel)]);
   function fieldsIn(root) {
     const has = {};
-    for (const f of root.querySelectorAll('input')) {
+    for (const f of deepAll(root, 'input')) {
       const k = fieldKind(f);
       if (k) has[k] = true;
     }
@@ -450,9 +459,12 @@
   // see it, and kept for the main process to judge. It asks the user, then
   // lets it through (release) or leaves it stopped. Everything else passes
   // untouched. So does what the page does by itself right after real input
-  // (a click of the user's or of a tool's), and after an action the user has
+  // (a click of the user's or of a tool's) to the control that input went to
+  // or to its form or dialog (follows), and after an action the user has
   // just allowed (pass): a Send button whose handler finishes the job by
   // clicking a hidden submit button is the page's doing, not the script's.
+  // Real input anywhere else says nothing: a key pressed with nothing in
+  // focus must not let a timer's click on Delete through.
   //
   // What cannot be seen from here: a script calling a handler directly
   // (button.onclick()) sends no event. guardrails.js asks before a script
@@ -462,7 +474,7 @@
   let watch = null; // { words }
   const caught = []; // { el, type, e, submitter, info }
   let taken = 0;
-  let realUntil = 0; // real input a moment ago: what the page does about it is its own
+  let real = null; // { at, el }: real input a moment ago; what the page does about it, where it landed, is its own
   let passUntil = 0; // the user has just allowed an action in this page
   let passing = false;
   const listening = new WeakSet();
@@ -472,18 +484,36 @@
     (info.submits && (info.form.card || info.form.password || info.form.otp)) ||
     (info.beside || []).some((n) => words.test(plain(n)));
 
+  // Whether an event a script sends to el follows from the real input just
+  // before: it goes to what that input went to (or to something around it),
+  // to something inside the control it went to, or to its form or dialog.
+  const CONTROL = 'button,a[href],label,summary,[role=button],[role=link],[role=menuitem],[onclick]';
+  const DIALOG = 'dialog,[role=dialog],[role=alertdialog],[aria-modal=true]';
+  const formOf = (n) => n.form || n.closest('form');
+  function follows(el) {
+    if (!real || Date.now() - real.at >= REAL_MS) return false;
+    const t = real.el;
+    if (holds(el, t)) return true;
+    const control = t.closest(CONTROL);
+    if (control && holds(control, el)) return true;
+    const form = formOf(t), dialog = t.closest(DIALOG);
+    return (!!form && form === formOf(el)) || (!!dialog && dialog === el.closest(DIALOG));
+  }
+
+  const MODIFIER = /^(Shift|Control|Alt|AltGraph|Meta|CapsLock)$/;
   function onScriptEvent(e) {
     if (passing) return;
-    if (e.isTrusted && e.type !== 'submit') {
-      realUntil = Date.now() + REAL_MS;
-      return;
-    }
-    if (!watch || Date.now() < realUntil || Date.now() < passUntil || e.type === 'keypress') return;
-    const key = e.type === 'keydown' || e.type === 'keyup';
-    if (key && e.key !== 'Enter') return;
     let el = e.composedPath()[0];
     if (el?.nodeType !== 1) el = el?.parentElement;
-    if (!el) return;
+    if (e.isTrusted && e.type !== 'submit') {
+      // A modifier key by itself asks nothing of a page.
+      if (el && !(e.type.startsWith('key') && MODIFIER.test(e.key))) real = { at: Date.now(), el };
+      return;
+    }
+    if (!watch || Date.now() < passUntil || e.type === 'keypress') return;
+    const key = e.type === 'keydown' || e.type === 'keyup';
+    if (key && e.key !== 'Enter') return;
+    if (!el || follows(el)) return;
     let info;
     if (e.type === 'submit') {
       const by = e.submitter || el.querySelector('button:not([type]),button[type=submit],input[type=submit],input[type=image]');
@@ -497,14 +527,21 @@
     if (caught.length - taken < 100) caught.push({ el, type: e.type, e, submitter: e.submitter || null, info });
   }
 
-  // This window and the frames of the same site inside it.
+  // This window and the frames of the same site inside it, and the open
+  // shadow roots in each: an event a script sends inside one need not leave
+  // it (composed: false), so the window never hears of it.
   const WATCHED = ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keypress', 'keyup', 'submit'];
   function listen(win) {
     if (!listening.has(win.document)) {
       listening.add(win.document);
       for (const type of WATCHED) win.addEventListener(type, onScriptEvent, true);
     }
-    for (const f of win.document.querySelectorAll('iframe,frame')) {
+    for (const root of shadowsIn(win.document)) {
+      if (listening.has(root)) continue;
+      listening.add(root);
+      for (const type of WATCHED) root.addEventListener(type, onScriptEvent, true);
+    }
+    for (const f of deepAll(win.document, 'iframe,frame')) {
       try { if (f.contentDocument) listen(f.contentWindow); } catch {}
     }
   }
@@ -513,7 +550,8 @@
   // or allowed action came just before.
   function watchScript({ words }) {
     watch = { words: new RegExp(words) };
-    realUntil = passUntil = 0;
+    real = null;
+    passUntil = 0;
     listen(window);
     return true;
   }
@@ -537,6 +575,7 @@
 
   // What has been stopped since the last call.
   function caughtByScript() {
+    if (watch) listen(window); // shadow roots and frames added since
     const list = [];
     for (; taken < caught.length; taken++) {
       const c = caught[taken];
@@ -569,7 +608,7 @@
   function guardControls({ words }) {
     const re = new RegExp(words);
     const list = [];
-    const all = document.querySelectorAll(
+    const all = deepAll(document,
       'button,a[href],input[type=submit],input[type=button],input[type=image],summary,[role=button],[role=link],[role=menuitem],[onclick]');
     for (const el of all) {
       const info = guardOf(el);
