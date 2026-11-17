@@ -245,6 +245,10 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 #update { color: var(--focus); font-weight: 650; }
 #update[hidden] { display: none; }
 #point.on { background: var(--claude-wash); }
+#shields { font-variant-numeric: tabular-nums; }
+#shields:has(#shields-count:empty) { padding-right: 8px; }
+#shields.on { color: var(--focus); }
+#shields:disabled { opacity: .35; background: none; color: var(--ink-2); }
 
 /* ── find bar ────────────────────────────────────────────────────────────── */
 /* A strip under the toolbar: the page area shrinks to make room for it. */

@@ -10,6 +10,7 @@ const SEND = new Set([
   'download:act', 'download:ask', 'download:clear',
   'permission:answer', 'permission:forget',
   'suggest:query', 'suggest:show', 'suggest:hide', 'suggest:pick', 'history:list', 'history:remove', 'history:clear',
+  'shields:menu', 'shields:set',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',

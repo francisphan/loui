@@ -1,0 +1,5 @@
+! A small filter list for the tests, in EasyList syntax.
+/shields-tracker.js
+/shields-pixel.png$image
+##.ad-box
+127.0.0.1##.house-ad
