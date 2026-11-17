@@ -295,11 +295,25 @@ test('controls that are not plain short-named buttons are classified too', () =>
   assert.equal(button('Sí', { near: '¿Eliminar la cuenta?' })?.kind, 'confirm');
   assert.equal(button('Confirm', { near: 'Choose a language' }), null);
   assert.equal(button('Cancel', { near: 'Delete 3 files?' }), null);
-  for (const name of ['Subscribe', 'Order now', 'Book now', 'Reserve', 'Upgrade to Pro', 'Suscribirse', 'Suscribite', 'Reservar', 'Pedir ahora']) {
+  for (const name of ['Order now', 'Book now', 'Reserve', 'Reservar', 'Pedir ahora']) {
     assert.equal(button(name)?.kind, 'pay', name);
   }
-  for (const name of ['Post', 'Post comment', 'Publish', 'Share', 'Reply', 'Publicar', 'Compartir', 'Responder']) {
+  for (const name of ['Post', 'Post comment', 'Publish', 'Publicar']) {
     assert.equal(button(name)?.kind, 'send', name);
+  }
+  // Everyday controls that mostly open something (a share menu, a reply box,
+  // a free newsletter, a page of plans) ask only where they finish the job:
+  // on a form's own submit button, or in a dialog.
+  for (const [names, kind] of [
+    [['Subscribe', 'Upgrade to Pro', 'Suscribirse', 'Suscribite', 'Mejorar plan'], 'pay'],
+    [['Share', 'Reply', 'Compartir', 'Responder'], 'send'],
+  ]) {
+    for (const name of names) {
+      assert.equal(button(name), null, name);
+      assert.equal(classify({ role: 'span', name, clickable: true, form: {} }), null, `${name}, something that takes clicks`);
+      assert.equal(button(name, { submits: true })?.kind, kind, `${name}, submitting a form`);
+      assert.equal(button(name, { near: 'Share this album with your family' })?.kind, kind, `${name}, in a dialog`);
+    }
   }
   for (const name of ['Unsubscribe', 'Discard', 'Discard draft', 'Empty trash', 'Cancel subscription', 'Darse de baja', 'Descartar', 'Vaciar papelera']) {
     assert.equal(button(name)?.kind, 'delete', name);
@@ -365,11 +379,13 @@ test('a click is judged again if the page changed while the user was asked', asy
 test('a click a script makes on a consequential control is held and asked about', async () => {
   const s = b.as('g-script', 'Claude Code');
   await s.text('navigate', { url: `${b.base}/guard2.html` });
-  // A harmless one runs at once, as before.
-  assert.equal(await s.text('evaluate', { code: "(document.getElementById('next').click(), document.getElementById('out').textContent)" }), '"next"');
+  // A harmless one runs at once, as before. (press: a click the script's own
+  // text does not show, so the script is not asked about before it runs.)
+  const press = (id) => `document.getElementById('${id}')['cl' + 'ick']()`;
+  assert.equal(await s.text('evaluate', { code: `(${press('next')}, document.getElementById('out').textContent)` }), '"next"');
   await noPrompt();
 
-  const running = s.text('evaluate', { code: "(document.getElementById('buy').click(), 'ran')" });
+  const running = s.text('evaluate', { code: `(${press('buy')}, 'ran')` });
   const g = await prompt();
   assert.equal(g.what, 'click "Buy now"');
   assert.equal(await read('g-script'), 'next', 'the click did not reach the page');
@@ -377,17 +393,17 @@ test('a click a script makes on a consequential control is held and asked about'
   await assert.rejects(running, /declined/);
   assert.equal(await read('g-script'), 'next');
 
-  const allowed = s.text('evaluate', { code: "(document.getElementById('buy').click(), 'ran')" });
+  const allowed = s.text('evaluate', { code: `(${press('buy')}, 'ran')` });
   await answer(await promptAfter(g), 'once');
   assert.match(await allowed, /Loui held the script's attempt to click "Buy now" until the user allowed it\.\n"ran"/);
   assert.equal(await read('g-script'), 'bought', 'and then it went through');
 
   // One left for later is stopped, and the session is told with its next call.
   await js('g-script', "document.getElementById('out').textContent = 'reset'");
-  assert.equal(await s.text('evaluate', { code: "(setTimeout(() => document.getElementById('buy').click(), 300), 1)" }), '1');
+  assert.equal(await s.text('evaluate', { code: `(setTimeout(() => ${press('buy')}, 300), 1)` }), '1');
   await new Promise((r) => setTimeout(r, 800));
   assert.equal(await read('g-script'), 'reset');
-  assert.match(await s.text('snapshot'), /A script you ran earlier tried to click "Buy now" after it returned\. Loui stopped it/);
+  assert.match(await s.text('snapshot'), /After a script you ran in this page had returned, something \(a timer it left, or the page itself\) tried to click "Buy now" without real input\. Loui stopped it/);
   await noPrompt();
   s.end();
 });
@@ -403,7 +419,7 @@ test('a form a script submits, and a select that acts when changed, are asked ab
   assert.equal(await read('g-auto'), 'nothing yet');
 
   // form.submit() fires no event: it is caught when the page is posted.
-  const running = s.text('evaluate', { code: "document.getElementById('msg').submit()" });
+  const running = s.text('evaluate', { code: "document.getElementById('msg')['sub' + 'mit']()" });
   const q = await promptAfter(g);
   assert.equal(q.what, `submit a form to ${site}`);
   await answer(q, 'block');
@@ -489,5 +505,147 @@ test('a listed site is asked about however the page gets there', async () => {
   await submitting;
   assert.match((await tabOf('g-ways')).url, /^http:\/\/localhost:\d+\/second\.html/);
   await b.ui('guard:site-remove', 'localhost');
+  s.end();
+});
+
+// ── the script watch, both ways ────────────────────────────────────────────
+// press: a click the script's own text does not show (so it is not asked about before it runs).
+const press = (id) => `document.getElementById('${id}')['cl' + 'ick']()`;
+const reset = (group) => js(group, "document.getElementById('out').textContent = 'nothing yet'");
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('what the page does about a click the user allowed is not put down to an earlier script', async () => {
+  const s = b.as('g-follow', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/guard3.html` });
+  assert.equal(await s.text('evaluate', { code: '1 + 1' }), '2');
+  // Send: asked, allowed; its handler finishes a second and a half later by clicking a hidden submit button.
+  const clicking = s.text('click', { ref: ref(page, 'button "Send"') });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Send"');
+  await answer(g, 'once');
+  assert.doesNotMatch(await clicking, /Loui stopped it/);
+  await wait('the message to go', async () => (await read('g-follow')) === 'mailed');
+  assert.doesNotMatch(await s.text('snapshot'), /Loui stopped it/, 'and no earlier script is blamed');
+  // A plain button that does the same a moment after a real click: the page's own doing.
+  await reset('g-follow');
+  assert.doesNotMatch(await s.text('click', { ref: ref(page, 'button "Continue"') }), /Loui stopped it/);
+  await wait('the message to go', async () => (await read('g-follow')) === 'mailed');
+  await noPrompt();
+  // None of which lets a script of the session's through: one that runs right after is watched afresh.
+  await reset('g-follow');
+  const running = s.text('evaluate', { code: `(${press('del')}, 'ran')` });
+  const q = await promptAfter(g);
+  assert.equal(q.what, 'click "Delete account"');
+  await answer(q, 'block');
+  await assert.rejects(running, /declined/);
+  assert.equal(await read('g-follow'), 'nothing yet');
+  s.end();
+});
+
+test('the script watch holds for other events than a click, for a DELETE, and for as long as the page stays', async () => {
+  const s = b.as('g-ways2', 'Claude Code');
+  await s.text('navigate', { url: `${b.base}/guard3.html` });
+  // A control that acts when the mouse goes down.
+  const down = "document.getElementById('down')['dispatch' + 'Event'](new MouseEvent('mousedown'))";
+  const pressing = s.text('evaluate', { code: down });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Delete everything"');
+  assert.equal(await read('g-ways2'), 'nothing yet');
+  await answer(g, 'block');
+  await assert.rejects(pressing, /declined/);
+  assert.equal(await read('g-ways2'), 'nothing yet');
+  // Allowed, the same event goes on to the page.
+  const again = s.text('evaluate', { code: down });
+  const g2 = await promptAfter(g);
+  await answer(g2, 'once');
+  assert.match(await again, /Loui held the script's attempt to click "Delete everything" until the user allowed it/);
+  assert.equal(await read('g-ways2'), 'wiped');
+  await reset('g-ways2');
+
+  // A DELETE needs no body to delete.
+  const fetching = s.text('evaluate', { code: "fetch('/done.html', { method: 'DELETE' }).then(() => 'gone', () => 'refused')" });
+  const g3 = await promptAfter(g2);
+  assert.equal(g3.kind, 'delete');
+  assert.equal(g3.what, `send a DELETE request to ${site}`);
+  await answer(g3, 'block');
+  const told = await fetching;
+  assert.match(told, /The page tried to send a DELETE request to .* The user declined, so Loui stopped it/);
+  assert.match(told, /"refused"/);
+
+  // Waiting out ten seconds no longer ends the watch.
+  assert.equal(await s.text('evaluate', { code: `(setTimeout(() => ${press('del')}, 11000), 1)` }), '1');
+  await pause(11800);
+  assert.equal(await read('g-ways2'), 'nothing yet', 'the click, eleven seconds on, did not reach the page');
+  assert.match(await s.text('snapshot'), /tried to click "Delete account" without real input\. Loui stopped it/);
+  await noPrompt();
+  s.end();
+});
+
+test('a script that reads like one that clicks, submits or calls a handler is asked about first', async () => {
+  const s = b.as('g-reads', 'Claude Code');
+  await s.text('navigate', { url: `${b.base}/guard3.html` });
+  let last = { id: 0 };
+  // A handler called directly sends no event that could be held later.
+  for (const code of [
+    "document.getElementById('del').onclick()",
+    "document.getElementById('del')['onclick'].call(null)",
+    "document.getElementById('del').click()",
+    "document.getElementById('del').dispatchEvent(new MouseEvent('click'))",
+    "document.getElementById('mail').requestSubmit()",
+    "document.getElementById('mail').submit()",
+  ]) {
+    const running = s.text('evaluate', { code });
+    last = await promptAfter(last);
+    assert.equal(last.kind, 'script', code);
+    assert.equal(last.what, 'run a script that clicks or submits, on a page with "Send"', code);
+    await answer(last, 'block');
+    await assert.rejects(running, /declined/);
+    assert.equal(await read('g-reads'), 'nothing yet', code);
+  }
+  // Allowed, the script runs; a click of its is still asked about by name.
+  const running = s.text('evaluate', { code: "(document.getElementById('del').click(), 'ran')" });
+  last = await promptAfter(last);
+  await answer(last, 'once');
+  last = await promptAfter(last);
+  assert.equal(last.what, 'click "Delete account"');
+  await answer(last, 'block');
+  await assert.rejects(running, /declined/);
+  assert.equal(await read('g-reads'), 'nothing yet');
+  // Reading the page, or setting a handler, is not asked about; nor is a click on a page with nothing to ask about.
+  assert.equal(await s.text('evaluate', { code: "document.getElementById('del').textContent" }), '"Delete account"');
+  assert.equal(await s.text('evaluate', { code: "(document.body.onclick = null, 1)" }), '1');
+  await s.text('navigate', { url: `${b.base}/second.html` });
+  assert.equal(await s.text('evaluate', { code: "(document.body.click(), 2)" }), '2');
+  await noPrompt();
+  s.end();
+});
+
+test('Share, Reply and Subscribe open things without a question; a sort that posts back is not a form sent', async () => {
+  const s = b.as('g-everyday', 'Claude Code');
+  let page = await s.text('navigate', { url: `${b.base}/guard3.html` });
+  for (const [name, does] of [['Share', 'share menu'], ['Reply', 'reply box'], ['Subscribe', 'newsletter']]) {
+    await s.text('click', { ref: ref(page, `button "${name}"`) });
+    assert.equal(await read('g-everyday'), does, name);
+  }
+  await noPrompt();
+  // On a form's own button the same word sends.
+  const replying = s.text('click', { ref: ref(page, 'button "Responder"') });
+  const g = await prompt();
+  assert.equal(g.what, 'click "Responder"');
+  await answer(g, 'block');
+  await assert.rejects(replying, /declined/);
+
+  // A drop-down whose form holds nothing else posts back: sorting, not sending.
+  await s.text('select_option', { ref: ref(page, 'select "Sort"'), value: 'Oldest' });
+  await wait('the page the sort posts to', async () => /second\.html$/.test((await tabOf('g-everyday')).url));
+  await noPrompt();
+  // One in a form with something filled in beside it is still asked about.
+  page = await s.text('navigate', { url: `${b.base}/guard3.html` });
+  const choosing = s.text('select_option', { ref: ref(page, 'select "Folder"'), value: 'Archive' });
+  const q = await promptAfter(g);
+  assert.equal(q.what, `submit a form to ${site}`);
+  await answer(q, 'block');
+  assert.match(await choosing, /The page tried to submit a form to .* The user declined, so Loui stopped it/);
+  assert.match((await tabOf('g-everyday')).url, /guard3\.html$/);
   s.end();
 });

@@ -325,7 +325,7 @@ function relayWords(link) {
   const n = link.sessions;
   return link.status === 'connected' ? `Connected as ${link.device}. ${n === 1 ? '1 session is' : `${n} sessions are`} using this browser.`
     : link.status === 'refused' ? `The relay refused this browser: ${link.detail}`
-      : link.status === 'off' ? 'Not connected. Only the Claude panel can use this browser.'
+      : link.status === 'off' ? link.detail || 'Not connected. Only the Claude panel can use this browser.'
         : link.status === 'offline' ? `Offline, retrying${link.detail ? `: ${link.detail}` : '.'}`
           : link.detail || 'Connecting…';
 }

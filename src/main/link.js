@@ -87,6 +87,8 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
       ws = null;
       old.close();
     }
+    // An address without its key (a new one, or one the address was changed to: see configure).
+    if (config.url && !config.key && config.on !== false) return set('off', 'This address has no relay key yet. Enter the key to connect.');
     if (!config.url || !config.key || config.on === false) return set('off');
     let sock;
     try {
@@ -146,8 +148,13 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
     sessions.end(id, 'lost');
   }
 
+  // An empty key keeps the one saved, for the relay it was saved for: at
+  // another address (another origin) it is dropped, never sent there.
+  const relayOf = (url) => { try { return new URL(deviceUrl(url)).origin; } catch { return url; } };
   function configure({ url, key, on }) {
-    config = { url: (url || '').trim(), key: (key || '').trim() || config.key, on: on !== false };
+    url = (url || '').trim();
+    const moved = !!config.url && relayOf(url) !== relayOf(config.url);
+    config = { url, key: (key || '').trim() || (moved ? '' : config.key), on: on !== false };
     store();
     attempt = 0;
     connect();

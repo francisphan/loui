@@ -245,7 +245,7 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     try { u = new URL(to); } catch { return; }
     if (u.host === 'go') {
       const text = (u.searchParams.get('q') || '').trim();
-      if (text) tab.wc.loadURL(toUrl(text)).catch(() => {});
+      if (text) tabs.byUser(tab).wc.loadURL(toUrl(text)).catch(() => {}); // typed in the page's box, as in the address bar
     } else if (u.host === 'hide' && !tab.private) {
       const host = u.searchParams.get('h') || '';
       if (!host || hidden().includes(host)) return;

@@ -45,11 +45,7 @@ function createIdentity({ tabs, full, plain, hosts = HONEST }) {
       setImmediate(() => {
         if (wc.isDestroyed()) return;
         wc.setUserAgent(want);
-        // The page's redirect, not the user's doing: it does not count as an
-        // address Loui was asked to load (tabs.recent).
-        const was = tab.loadedAt;
         wc.loadURL(d.url).catch(() => {});
-        tab.loadedAt = was;
       });
     });
     // The last word, for what the above cannot catch (a redirect that keeps

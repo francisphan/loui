@@ -124,7 +124,13 @@ class Tabs extends EventEmitter {
     // Leaving full screen by any road (F11, Esc, the system) gives Loui's own parts back.
     win.on('leave-full-screen', () => {
       w.wide = false;
-      this.unfull(w);
+      // This can arrive late: the window leaving F11 after a page has already
+      // taken the screen for itself. Then it is about what came before, and
+      // the page keeps the screen. Otherwise the page is told to let go too:
+      // a window out of full screen with its page still "in" would show that
+      // page as an ordinary one, stuck.
+      const held = this.get(w.full);
+      if (!held || Date.now() - (held.fullAt || 0) > 1500) this.unfull(w, { leave: true });
       const tab = this.get(w.activeId);
       if (tab?.view) this.place(tab);
       this.emit('change');
@@ -428,11 +434,6 @@ class Tabs extends EventEmitter {
       // The pointer at the top edge of a page that has the whole window (fullscreen.js says how to leave).
       else if (mouse.type === 'mouseMove' && mouse.y <= 2 && this.isFull(tab)) this.emit('pointer-top', tab);
     });
-    // An address Loui itself loads into the tab (the address bar, a bookmark,
-    // a session's navigate, a new tab's first page), as opposed to one the
-    // page went to: see recent().
-    const load = wc.loadURL.bind(wc);
-    wc.loadURL = (...args) => { tab.loadedAt = Date.now(); return load(...args); };
     wc.setWindowOpenHandler(({ url: to, disposition }) => {
       if (/^https?:|^about:blank/i.test(to) && this.mayOpen(tab)) {
         const opened = this.create(to, {
@@ -469,6 +470,7 @@ class Tabs extends EventEmitter {
         return;
       }
       tab.window.full = tab.id;
+      tab.fullAt = Date.now();
       this.place(tab);
       tab.window.win.contentView.addChildView(tab.view); // in front of everything of Loui's
       changed();
@@ -479,9 +481,17 @@ class Tabs extends EventEmitter {
     this.emit('created', tab);
   }
 
+  // The user asked for the address this tab now loads: the address bar, a
+  // bookmark, the palette, a link from another app, a tab of theirs opened
+  // or restored. Not an address a session or a page had it load. Returns the tab.
+  byUser(tab) {
+    if (tab) tab.loadedAt = Date.now();
+    return tab;
+  }
+
   // Whether what the tab's page does now can be put down to someone: an action
-  // in the tab (keys, mouse, a session's) or an address Loui loaded into it,
-  // within ms. Downloads and hand-overs to the other browser ask this.
+  // in the tab (keys, mouse, a session's) or an address the user had it load
+  // (byUser), within ms. Downloads and hand-overs to the other browser ask this.
   recent(tab, ms = OPEN_WITHIN) {
     return Date.now() - Math.max(tab.actedAt || 0, tab.loadedAt || 0) <= ms;
   }
@@ -1042,17 +1052,25 @@ class Tabs extends EventEmitter {
   // Right-click inside a page: what was clicked first (a link, an image, the
   // selection, a text field), then the page. In a session's tab nothing here
   // takes a page out of the session's group: what opens, opens in the group.
+  // Only addresses on the web are opened from here: a page can name any
+  // address in a link (file:, view-source:), and in a session's group the
+  // session could then read what opened.
   pageMenuItems(tab, p) {
     const wc = tab.wc;
     const mine = tab.group === YOU;
     const items = [];
     const rule = () => { if (items.length && items[items.length - 1].type !== 'separator') items.push({ type: 'separator' }); };
-    const openTab = (url, show = false) => this.create(url, { group: tab.group, window: tab.window, show });
+    // In the user's own tab what they open from here is theirs (byUser); in a session's it is not.
+    const openTab = (url, show = false) => {
+      const opened = this.create(url, { group: tab.group, window: tab.window, show });
+      return mine ? this.byUser(opened) : opened;
+    };
+    const web = (url) => /^https?:/i.test(url || '');
     if (p.linkURL) {
-      items.push({ label: 'Open link in new tab', click: () => openTab(p.linkURL) });
+      if (web(p.linkURL)) items.push({ label: 'Open link in new tab', click: () => openTab(p.linkURL) });
       // A private tab's link stays private.
-      if (mine) items.push({ label: 'Open link in new window', click: () => this.emit('open-window', { url: p.linkURL, private: tab.private }) });
-      if (mine && !tab.private) items.push({ label: 'Open link in private window', click: () => this.emit('open-window', { url: p.linkURL, private: true }) });
+      if (mine && web(p.linkURL)) items.push({ label: 'Open link in new window', click: () => this.emit('open-window', { url: p.linkURL, private: tab.private }) });
+      if (mine && !tab.private && web(p.linkURL)) items.push({ label: 'Open link in private window', click: () => this.emit('open-window', { url: p.linkURL, private: true }) });
       items.push({ label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) });
       // Asks where to save, as for an image below.
       if (/^https?:/i.test(p.linkURL)) items.push({ label: mine ? 'Save link as…' : 'Save link', click: () => { tab.saveAs = mine; wc.downloadURL(p.linkURL); } });
@@ -1060,7 +1078,7 @@ class Tabs extends EventEmitter {
     }
     if (p.mediaType === 'image' && p.srcURL) {
       items.push(
-        { label: 'Open image in new tab', click: () => openTab(p.srcURL) },
+        ...(web(p.srcURL) ? [{ label: 'Open image in new tab', click: () => openTab(p.srcURL) }] : []),
         // Asks where to save; a session's tab never opens a dialog (downloads.js).
         { label: mine ? 'Save image as…' : 'Save image', click: () => { tab.saveAs = mine; wc.downloadURL(p.srcURL); } },
         { label: 'Copy image', click: () => wc.copyImageAt(p.x, p.y) },
@@ -1095,8 +1113,12 @@ class Tabs extends EventEmitter {
       // The page as its address serves it, through the downloads list like any other file.
       ...(/^https?:/i.test(tab.url) ? [{ label: mine ? 'Save page as…' : 'Save page', click: () => { tab.saveAs = mine; wc.downloadURL(tab.url); } }] : []),
       { label: 'Print…', click: () => this.emit('print', tab) },
-      ...(/^https?:/i.test(tab.url) ? [{ label: 'View page source', click: () => openTab(`view-source:${tab.url}`, true) }] : []),
-      ...(p.isEditable ? [] : [{ label: 'Select all', click: () => wc.selectAll() }]),
+      ...(mine && web(tab.url) ? [{ label: 'View page source', click: () => openTab(`view-source:${tab.url}`, true) }] : []),
+      ...(p.isEditable ? [] : [{ label: 'Select all', click: () => {
+        // Through the page, so it does not hang on whether the page has the keyboard just now.
+        wc.focus();
+        wc.executeJavaScript('getSelection().selectAllChildren(document.documentElement)', true).catch(() => wc.selectAll());
+      } }]),
       { type: 'separator' },
       // The Claude panel stays out of private windows.
       ...(tab.private && tab.group === YOU ? [] : [{ label: 'Point Claude at this', click: () => this.emit('point', tab, { x: p.x, y: p.y }) }]),

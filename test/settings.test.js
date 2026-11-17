@@ -259,6 +259,21 @@ test('Claude: the relay (its key is never shown), guardrails, the session log, t
   assert.equal(await js("document.getElementById('set-relay-key').type"), 'password');
   // The same words as the relay form in the window chrome.
   await until(async () => (await row('relay-status')).value === await chrome("document.getElementById('relay-status').textContent"), 'the same status words');
+  // The key is for the relay it was given for. Another path there keeps it;
+  // another address does not get it, and both places say the key is needed.
+  await use('relay-url', 'http://127.0.0.1:9/loui');
+  await until(async () => (await b.state()).link.url === 'http://127.0.0.1:9/loui', 'the path to be set');
+  assert.equal((await b.state()).link.hasKey, true);
+  await use('relay-url', 'http://127.0.0.1:10');
+  await until(async () => (await b.state()).link.url === 'http://127.0.0.1:10', 'the new address to be set');
+  assert.equal((await b.state()).link.hasKey, false, 'the saved key is not kept for a new address');
+  assert.ok(!fs.readFileSync(path.join(b.home, 'relay.json'), 'utf8').includes(KEY), 'nor left in the file');
+  await until(async () => (await row('relay-key')).value === 'Not set.', 'Settings to say the key is not set');
+  assert.equal((await row('relay-status')).value, 'This address has no relay key yet. Enter the key to connect.');
+  assert.equal(await chrome("document.getElementById('relay-status').textContent"), (await row('relay-status')).value);
+  await use('relay-key-replace');
+  await js(`(() => { const i = document.getElementById('set-relay-key'); i.value = ${JSON.stringify(KEY)}; i.form.requestSubmit(); })()`);
+  await until(async () => (await b.state()).link.hasKey && (await b.state()).link.status !== 'off', 'the key to be saved again');
   await use('relay-on');
   await until(async () => (await b.state()).link.status === 'off', 'the relay to be turned off');
   assert.equal((await row('relay-status')).value, 'Not connected. Only the Claude panel can use this browser.');

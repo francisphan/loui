@@ -9,7 +9,11 @@
 //     consequential one waits for the user's answer before anything reaches
 //     the page. classify() holds the rules. A click is judged on what it will
 //     land on, and again just before it is sent; what a script of Claude's
-//     clicks or submits is held in the page and judged the same way.
+//     clicks or submits is held in the page and judged the same way, from
+//     its first run until the page is left. A script that reads like one
+//     that clicks, submits or calls a handler is asked about before it runs
+//     on a page with such a control (a handler called directly sends no
+//     event to hold).
 //  2. While a session is acting in a tab (and for a few seconds after), every
 //     POST, PUT, PATCH or DELETE the tab makes is read for card numbers,
 //     passwords and one-time codes, whatever started it: a "Next" button whose
@@ -57,19 +61,28 @@ const DEFAULT_SITES = ['paypal.com', 'checkout.stripe.com', 'mercadopago.com', '
 // lowercased and without accents, only for short names: a long name is a
 // sentence about something, not a verb on a button. Verbs that are also
 // everyday nouns (order, book, post, share) only count at the start.
-const PAY = /\b(pay|buy|purchase|place (my |your )?order|submit (my )?(payment|order)|complete (my )?(purchase|order|payment)|confirm (and pay|purchase|payment|order|booking|reservation)|checkout|check out|transfer|donate|subscribe|pagar|comprar|finalizar (la )?compra|realizar (el )?pedido|confirmar (la |el )?(compra|pago|pedido|reserva)|transferir|abonar|donar|suscribirse|suscribirme|suscribete|suscribite)\b|^(order|book|reserve|pedir|reservar|ordenar)( now| ahora| ya)?$|^(upgrade|mejorar (mi |el |tu )?plan)\b/;
+const PAY = /\b(pay|buy|purchase|place (my |your )?order|submit (my )?(payment|order)|complete (my )?(purchase|order|payment)|confirm (and pay|purchase|payment|order|booking|reservation)|checkout|check out|transfer|donate|pagar|comprar|finalizar (la )?compra|realizar (el )?pedido|confirmar (la |el )?(compra|pago|pedido|reserva)|transferir|abonar|donar)\b|^(order|book|reserve|pedir|reservar|ordenar)( now| ahora| ya)?$/;
 // A button may say more than six words when it starts with one of these
 // ("Pay $45.00 now with the card ending 4242").
-const PAY_START = /^(pay|buy|purchase|place (my |your )?order|donate|subscribe|pagar|comprar|abonar|donar)\b/;
+const PAY_START = /^(pay|buy|purchase|place (my |your )?order|donate|pagar|comprar|abonar|donar)\b/;
 const DELETE = /\b(delete|remove (my |the |this )?account|close (my )?account|unsubscribe|cancel (my |the )?subscription|empty (the )?(trash|bin)|eliminar|borrar|darse de baja|darme de baja|cancelar (mi |la )?suscripcion|vaciar (la )?papelera)\b|^(discard|descartar)\b/;
-const SEND = /\b(send|enviar)\b|^(post|publish|share|reply|tweet|publicar|compartir|responder)\b/;
+const SEND = /\b(send|enviar)\b|^(post|publish|tweet|publicar)\b/;
+// Everyday controls that mostly open something (a share menu, a reply box, a
+// page of plans, a free newsletter): they only count where they finish the
+// job, on a form's own submit button or in a dialog.
+const PAY_LAST = /\b(subscribe|suscribirse|suscribirme|suscribete|suscribite)\b|^(upgrade|mejorar (mi |el |tu )?plan)\b/;
+const SEND_LAST = /^(share|reply|compartir|responder)\b/;
 const CONFIRM = /^(confirm|confirmar)\b/;
 // In a dialog about paying or deleting, Yes confirms as well.
 const YES = /^(yes|si)\b/;
 // A button beside a text box that Enter in the box would press (a chat's Send).
 const ENTER_SEND = /\b(send|enviar)\b|^(post|reply|comment|tweet|publicar|responder|comentar)\b/;
 // Any of them: lib.js picks out with it what a script's click may set off, to be judged here.
-const WORDS = [PAY, DELETE, SEND, CONFIRM, YES, ENTER_SEND].map((r) => r.source).join('|');
+const WORDS = [PAY, DELETE, SEND, PAY_LAST, SEND_LAST, CONFIRM, YES, ENTER_SEND].map((r) => r.source).join('|');
+// A script that reads like one that clicks, submits, sends an event, or reads
+// a handler (on<event>) other than to set it. Not proof either way: it only
+// decides whether the user is asked first (judgeScript).
+const PRESSES = /\.\s*click\s*\(|\.\s*submit\s*\(|requestSubmit\s*\(|dispatchEvent\s*\(|(\.|\[\s*['"`])on[a-z]{4,}\b(?!\s*=(?!=))/;
 const BUTTONS = new Set(['button', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch']);
 
 const plain = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -111,8 +124,11 @@ function classify(info, sites = []) {
   const button = BUTTONS.has(info.role) || info.submits;
   const press = button || info.clickable;
   const form = info.form || {};
+  const near = plain(info.near);
+  const last = info.submits || !!near; // it finishes something: see PAY_LAST
   if (info.submits && form.card) return { kind: 'pay', what: `submit a payment form (${said})` };
   if (PAY.test(name) && (short ? press : button && PAY_START.test(name))) return { kind: 'pay', what: `click ${said}` };
+  if (short && button && last && PAY_LAST.test(name)) return { kind: 'pay', what: `click ${said}` };
   // A link named Delete can be a plain GET that deletes; a link named Buy or
   // Send normally leads to the page with the real button.
   if (short && (press || info.role === 'link') && DELETE.test(name)) return { kind: 'delete', what: `click ${said}` };
@@ -120,11 +136,11 @@ function classify(info, sites = []) {
     return { kind: 'sign-in', what: `submit a form with a ${form.password ? 'password' : 'one-time code'} (${said})` };
   }
   if (short && press && SEND.test(name)) return { kind: 'send', what: `click ${said}` };
+  if (short && button && last && SEND_LAST.test(name)) return { kind: 'send', what: `click ${said}` };
   const sends = (info.beside || []).find((n) => plain(n).split(' ').length <= 6 && ENTER_SEND.test(plain(n)));
   if (sends) return { kind: 'send', what: `press Enter in ${said} (next to "${shorten(sends.trim())}")` };
   // Confirm on a form's own button, or in a dialog that speaks of paying or
   // deleting (those are run by script and submit nothing).
-  const near = plain(info.near);
   const grave = !!near && (PAY.test(near) || DELETE.test(near));
   if (short && ((info.submits && CONFIRM.test(name)) || (press && grave && (CONFIRM.test(name) || YES.test(name))))) {
     return { kind: 'confirm', what: `click ${said}` };
@@ -206,11 +222,15 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     a.script = false;
     acting.set(session.id, a);
   }
-  // The call in flight runs a script of Claude's in the page (evaluate,
-  // select_option): until its next call, a form the tab posts is asked about.
-  function scripting(session) {
+  // The call in flight runs a script of Claude's in the page (evaluate, a
+  // select_option in a form that holds more than the select): until its next
+  // call, a form the tab posts is asked about.
+  // What it sends is its own: an action the user allowed in an earlier call
+  // does not cover it. posts: false for a select that is all its form holds.
+  function scripting(session, posts = true) {
     const a = acting.get(session.id);
-    if (a) a.script = true;
+    if (a) a.script = posts;
+    if (passes.get(session.id)?.until !== Infinity) passes.delete(session.id);
   }
   // What lib.js needs to pick out the clicks of such a script that may matter.
   const hints = () => ({ words: WORDS });
@@ -233,7 +253,9 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
 
   // The session acting in a tab right now, if any. In the user's own tabs only
   // the panel acts, and only while a call of its is running in that tab; a
-  // tab the user has taken over is theirs.
+  // tab the user has taken over is theirs. A session's tab whose page a
+  // script of the session's ran in (tab.watched, actions.js) stays acted in
+  // until that page is left: what the script left behind may act at any time.
   function actorOf(tab) {
     if (tab.group === YOU) {
       const a = acting.get(sessions.panel.id);
@@ -241,7 +263,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     }
     const g = tabs.group(tab.group);
     const a = acting.get(tab.group);
-    if (!g || g.paused || !a || (a.n === 0 && Date.now() > a.until)) return null;
+    if (!g || g.paused || !a || (a.n === 0 && Date.now() > a.until && !tab.watched)) return null;
     return sessions.get(tab.group) || null;
   }
 
@@ -302,11 +324,18 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     const origin = originOf(url);
     return remembered(origin, 'site') ? null : { kind: 'site', what: `open ${hostOf(url)}`, site: hostOf(url), origin };
   }
-  function judgeScript(session, tab, fields) {
-    if (!applies(session) || !fields || !(fields.card || fields.password || fields.otp)) return null;
-    if (remembered(originOf(tab.url), 'script')) return null;
-    const holds = fields.card ? 'card' : fields.password ? 'password' : 'one-time code';
-    return { kind: 'script', what: `run a script on a page with a ${holds} field` };
+  // Whether a script reads like one that clicks, submits or calls a handler.
+  const presses = (code) => PRESSES.test(String(code));
+  // controls: for such a script, the page's controls that may matter (lib.js guardControls).
+  function judgeScript(session, tab, fields, controls) {
+    if (!applies(session) || remembered(originOf(tab.url), 'script')) return null;
+    if (fields && (fields.card || fields.password || fields.otp)) {
+      const holds = fields.card ? 'card' : fields.password ? 'password' : 'one-time code';
+      return { kind: 'script', what: `run a script on a page with a ${holds} field` };
+    }
+    const grave = (controls || []).find((info) => { const f = classify(info); return f && f.kind !== 'site'; });
+    if (!grave) return null;
+    return { kind: 'script', what: `run a script that clicks or submits, on a page with "${shorten((grave.name || '').trim())}"` };
   }
 
   // Layer 2: requests a tab makes while Claude acts in it.
@@ -351,6 +380,11 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
     // something, whatever it holds.
     const scripted = nav && acting.get(session.id)?.script && !remembered(origin, 'send');
     const parts = d.uploadData || [];
+    // A DELETE says what it does without a body: asked about from a page a
+    // script of Claude's ran in (fetch(url, { method: 'DELETE' })).
+    if (!parts.length && d.method === 'DELETE' && tab.watched && !remembered(origin, 'delete')) {
+      return stop({ kind: 'delete', what: `send a DELETE request to ${hostOf(d.url)}` });
+    }
     if (!parts.length && !scripted) return null;
     const found = (kind) => {
       if (kind && !remembered(origin, kind)) {
@@ -384,6 +418,8 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   // Each session: the user's, and each private one (a tab of it can be handed to a session).
   const attach = (s) => requestRules(s).add(hold);
   attach(ses);
+  // The watch on what a script left behind (tab.watched) ends with its page.
+  tabs.on('created', (tab) => tab.wc.on('did-navigate', () => { tab.watched = false; }));
 
   // A small picture of the page, for prompts that have no element to show.
   async function picture(tab) {
@@ -487,7 +523,7 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   }
 
   return {
-    applies, begin, end, drain, takeNotes, judge, judgeUrl, judgeScript, confirm, scripting, hints, reads,
+    applies, begin, end, drain, takeNotes, judge, judgeUrl, judgeScript, presses, confirm, scripting, hints, reads,
     answer, set, addSite, removeSite, forget, untrust, show, state, attach,
   };
 }

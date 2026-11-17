@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Guard 3</title></head>
+<body>
+  <p id="out">nothing yet</p>
+  <!-- A Send button whose handler finishes the job later, by clicking a hidden submit button. -->
+  <form id="mail" onsubmit="out.textContent = 'mailed'; return false">
+    <label>To <input name="to" value="ada"></label>
+    <button type="button" id="send" onclick="setTimeout(() => document.getElementById('really').click(), 1500)">Send</button>
+    <button type="button" id="continue" onclick="setTimeout(() => document.getElementById('really').click(), 300)">Continue</button>
+    <button id="really" hidden>Send</button>
+  </form>
+  <button id="del" onclick="out.textContent = 'deleted'">Delete account</button>
+  <!-- Acts when the mouse goes down, not on the click. -->
+  <div role="button" id="down" onmousedown="out.textContent = 'wiped'">Delete everything</div>
+  <!-- Everyday controls that open something. -->
+  <button onclick="out.textContent = 'share menu'">Share</button>
+  <button onclick="out.textContent = 'reply box'">Reply</button>
+  <button onclick="out.textContent = 'newsletter'">Subscribe</button>
+  <!-- The same word where it finishes the job. -->
+  <form id="answer" onsubmit="out.textContent = 'replied'; return false">
+    <label>Answer <input name="a"></label>
+    <button>Responder</button>
+  </form>
+  <!-- A sort that posts back, and a select in a form that holds more. -->
+  <form method="post" action="/second.html">
+    <input type="hidden" name="__VIEWSTATE" value="abc">
+    <select aria-label="Sort" name="sort" onchange="this.form.submit()"><option>Newest</option><option>Oldest</option></select>
+  </form>
+  <form method="post" action="/second.html">
+    <label>Note <input name="note" value="hello"></label>
+    <select aria-label="Folder" name="folder" onchange="this.form.submit()"><option>Inbox</option><option>Archive</option></select>
+  </form>
+</body></html>

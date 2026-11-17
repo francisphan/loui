@@ -543,7 +543,9 @@ function start() {
   tabs.on('bookmark-tab', (tab) => tabs.as(tab.window, () => { tabs.select(tab.id); bookmarks.handle({ do: 'star' }); }));
   tabs.on('reopen-closed', (w) => tabs.as(w, () => restore.reopenClosed()));
   tabs.on('print', (tab) => tabs.as(tab.window, () => print.print()));
-  tabs.on('open-window', ({ url, private: priv }) => tabs.create(url, { window: openWindow({ private: !!priv, blank: false }), show: true }));
+  tabs.on('open-window', ({ url, private: priv }) => {
+    if (/^https?:/i.test(url || '')) tabs.byUser(tabs.create(url, { window: openWindow({ private: !!priv, blank: false }), show: true }));
+  });
   // A window left without tabs (its last one moved away) closes.
   tabs.on('empty', (w) => setImmediate(() => { if (!w.win.isDestroyed()) w.win.close(); }));
   // "Move to new window" in a tab's menu, for a tab or a session's group.
@@ -552,7 +554,7 @@ function start() {
     else if (tab && tabs.get(tab.id)) tabs.toWindow(tab.id, openWindow({ private: tab.private, blank: false }));
   });
 
-  if (!restore.reopenSaved(first) && !launched.length) tabs.create(process.env.LOUI_START_URL || '', { show: true, window: first });
+  if (!restore.reopenSaved(first) && !launched.length) tabs.byUser(tabs.create(process.env.LOUI_START_URL || '', { show: true, window: first }));
   if (launched.length) defaultBrowser.open(launched);
 }
 
@@ -574,7 +576,7 @@ const handlers = {
     tabs.setArea(area);
     serve();
   },
-  'tab:new': (url) => { tabs.create(url || '', { show: true }); if (!url) send('focus-address'); },
+  'tab:new': (url) => { tabs.byUser(tabs.create(url || '', { show: true })); if (!url) send('focus-address'); },
   'tab:select': (id) => {
     const w = tabs.window();
     clearTimeout(w?.aim?.timer); // a tab chosen by hand: Ctrl+Tab's aim (see cycle()) is off
@@ -618,7 +620,7 @@ const handlers = {
     if (yes) { w.sure = true; w.win.close(); } else pushState();
   },
   'tabs:layout': (choice) => setTabStrip(choice),
-  go: (input) => { active()?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
+  go: (input) => { tabs.byUser(active())?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
   back: () => active()?.wc.navigationHistory.goBack(),
   forward: () => active()?.wc.navigationHistory.goForward(),
   reload: () => { const wc = active()?.wc; if (wc?.isLoading()) wc.stop(); else wc?.reload(); },
@@ -709,7 +711,7 @@ async function activityRequest({ do: what, id, url, days, have } = {}) {
   else if (what === 'clear') await activity.clear();
   else if (what === 'keep') activity.keep(days);
   // A page a session visited opens in a new tab of the user's own.
-  else if (what === 'visit' && /^https?:\/\//i.test(url || '')) tabs.create(url, { show: true });
+  else if (what === 'visit' && /^https?:\/\//i.test(url || '')) tabs.byUser(tabs.create(url, { show: true }));
 }
 
 // For the tests: every window, as the window chrome cannot see the others.

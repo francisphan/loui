@@ -444,33 +444,43 @@
   }
 
   // ── what a script of Claude's sets off (evaluate, select_option) ────────
-  // While such a script runs, and for ten seconds after, a click, a submit or
-  // an Enter that script (not real input) sends to a control that may pay,
-  // send or delete is stopped before the page's handlers see it, and kept for
-  // the main process to judge. It asks the user, then lets it through
-  // (release) or leaves it stopped. Everything else passes untouched.
+  // From the first such script until the page is left, a click, a press of
+  // the mouse, a submit or an Enter that a script (not real input) sends to a
+  // control that may pay, send or delete is stopped before the page's handlers
+  // see it, and kept for the main process to judge. It asks the user, then
+  // lets it through (release) or leaves it stopped. Everything else passes
+  // untouched. So does what the page does by itself right after real input
+  // (a click of the user's or of a tool's), and after an action the user has
+  // just allowed (pass): a Send button whose handler finishes the job by
+  // clicking a hidden submit button is the page's doing, not the script's.
+  //
+  // What cannot be seen from here: a script calling a handler directly
+  // (button.onclick()) sends no event. guardrails.js asks before a script
+  // that reads like one that does (judgeScript).
   const plain = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-  let watch = null; // { words, until }
-  const caught = []; // { el, type, submitter, info }
+  const REAL_MS = 1000;
+  let watch = null; // { words }
+  const caught = []; // { el, type, e, submitter, info }
   let taken = 0;
-  let real = false; // inside a real click or key press: what the page does about it is its own
+  let realUntil = 0; // real input a moment ago: what the page does about it is its own
+  let passUntil = 0; // the user has just allowed an action in this page
   let passing = false;
   const listening = new WeakSet();
 
   // A superset of what guardrails.js asks about; it decides.
-  const mayMatter = (info) => watch.words.test(plain(info.name)) ||
+  const matters = (words, info) => words.test(plain(info.name)) ||
     (info.submits && (info.form.card || info.form.password || info.form.otp)) ||
-    (info.beside || []).some((n) => watch.words.test(plain(n)));
+    (info.beside || []).some((n) => words.test(plain(n)));
 
   function onScriptEvent(e) {
     if (passing) return;
     if (e.isTrusted && e.type !== 'submit') {
-      real = true;
-      setTimeout(() => { real = false; }, 0);
+      realUntil = Date.now() + REAL_MS;
       return;
     }
-    if (real || !watch || Date.now() > watch.until || e.type === 'keypress') return;
-    if (e.type === 'keydown' && e.key !== 'Enter') return;
+    if (!watch || Date.now() < realUntil || Date.now() < passUntil || e.type === 'keypress') return;
+    const key = e.type === 'keydown' || e.type === 'keyup';
+    if (key && e.key !== 'Enter') return;
     let el = e.composedPath()[0];
     if (el?.nodeType !== 1) el = el?.parentElement;
     if (!el) return;
@@ -478,40 +488,49 @@
     if (e.type === 'submit') {
       const by = e.submitter || el.querySelector('button:not([type]),button[type=submit],input[type=submit],input[type=image]');
       info = by ? guardOf(by) : { role: 'button', name: '', submits: true, form: fieldsIn(el) };
-    } else info = guardOf(el, e.type === 'keydown' ? 'enter' : 'click');
-    if (!mayMatter(info)) return;
+    } else info = guardOf(el, key ? 'enter' : 'click');
+    if (!matters(watch.words, info)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    caught.push({ el, type: e.type, submitter: e.submitter || null, info });
+    caught.push({ el, type: e.type, e, submitter: e.submitter || null, info });
   }
 
   // This window and the frames of the same site inside it.
+  const WATCHED = ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keypress', 'keyup', 'submit'];
   function listen(win) {
     if (!listening.has(win.document)) {
       listening.add(win.document);
-      for (const type of ['click', 'keydown', 'keypress', 'submit']) win.addEventListener(type, onScriptEvent, true);
+      for (const type of WATCHED) win.addEventListener(type, onScriptEvent, true);
     }
     for (const f of win.document.querySelectorAll('iframe,frame')) {
       try { if (f.contentDocument) listen(f.contentWindow); } catch {}
     }
   }
 
+  // A script is about to run. What it sends is its own, whatever real input
+  // or allowed action came just before.
   function watchScript({ words }) {
-    watch = { words: new RegExp(words), until: Infinity };
+    watch = { words: new RegExp(words) };
+    realUntil = passUntil = 0;
     listen(window);
     return true;
   }
 
-  // What has been stopped since the last call. done: the script has returned;
-  // what it left running is watched for ten seconds more.
-  function caughtByScript({ done } = {}) {
-    if (done && watch) watch.until = Date.now() + 10000;
+  // The user has just allowed an action in this page: what the page does
+  // about it in the next moments is not stopped.
+  function pass({ ms }) {
+    passUntil = Date.now() + ms;
+    return true;
+  }
+
+  // What has been stopped since the last call.
+  function caughtByScript() {
     const list = [];
     for (; taken < caught.length; taken++) {
       const c = caught[taken];
       list.push({ i: taken, info: c.info, rect: c.el.isConnected ? rectOf(c.el) : null });
     }
-    return { list, on: !!watch && Date.now() <= watch.until };
+    return { list, on: !!watch };
   }
 
   function release({ i }) {
@@ -522,15 +541,40 @@
     try {
       if (c.type === 'click') c.el.click();
       else if (c.type === 'submit') c.el.requestSubmit(c.submitter || undefined);
-      else {
+      else if (c.type === 'keydown') {
         c.el.dispatchEvent(new KeyboardEvent('keydown', {
           key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true,
         }));
-      }
+      } else c.el.dispatchEvent(new c.e.constructor(c.type, c.e)); // the same event again
     } finally {
       passing = false;
     }
     return true;
+  }
+
+  // The controls on the page that may pay, send or delete (a superset; see
+  // matters), for a script that reads like one that clicks or submits.
+  function guardControls({ words }) {
+    const re = new RegExp(words);
+    const list = [];
+    const all = document.querySelectorAll(
+      'button,a[href],input[type=submit],input[type=button],input[type=image],summary,[role=button],[role=link],[role=menuitem],[onclick]');
+    for (const el of all) {
+      const info = guardOf(el);
+      if (matters(re, info)) list.push(info);
+      if (list.length >= 40) break;
+    }
+    return list;
+  }
+
+  // Whether the form a <select> is in holds anything else the user (or
+  // Claude) filled in: posting it then sends more than the choice. A select
+  // outside any form: not known, so yes.
+  function filledBeside({ ref }) {
+    const el = elOf(ref);
+    if (!el?.form) return true;
+    return [...el.form.elements].some((f) => f !== el && !!f.value && (f.tagName === 'TEXTAREA' ||
+      (f.tagName === 'INPUT' && TEXT_INPUT.test((f.getAttribute('type') || '').toLowerCase()))));
   }
 
   // ── Claude's pointer ────────────────────────────────────────────────────
@@ -825,6 +869,6 @@
 
   globalThis.__loui = {
     snapshot, locate, pointAt, overlay, pick, cancelPick, pickAt, focus, choose, scroll, calm,
-    hasText, guardAt, guardFocus, guardPage, watchScript, caughtByScript, release,
+    hasText, guardAt, guardFocus, guardPage, guardControls, filledBeside, watchScript, pass, caughtByScript, release,
   };
 })();

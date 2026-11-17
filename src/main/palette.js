@@ -298,8 +298,8 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
     const open = (url) => () => {
       const tab = tabs.active();
       // A session's tab on screen is the session's work: the page opens beside it.
-      if (tab?.group !== YOU) return tabs.create(url, { show: true });
-      tabs.use(tab)?.wc?.loadURL(url).catch(() => {});
+      if (tab?.group !== YOU) return tabs.byUser(tabs.create(url, { show: true }));
+      tabs.byUser(tabs.use(tab))?.wc?.loadURL(url).catch(() => {});
     };
     const pageRows = (source, kind, limit, skip) => (source?.suggest(q, limit + skip.size) || [])
       .filter((s) => !skip.has(s.url)).slice(0, limit)
