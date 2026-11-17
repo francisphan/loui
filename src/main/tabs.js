@@ -42,7 +42,7 @@
 // Code that asks about "the tab on screen" without naming a window (active(),
 // activeId) gets the window being served: the one whose chrome sent the
 // request, or whose state is being drawn (see as()), else the focused one.
-const { WebContentsView, View, Menu, clipboard, nativeTheme, nativeImage } = require('electron');
+const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
 const { EventEmitter } = require('events');
 const path = require('path');
 const { requestRules } = require('./requests');
@@ -50,7 +50,8 @@ const { searchFor } = require('./search');
 
 const YOU = 'you';
 const LOG_LIMIT = 500;
-const ICON_MAX = 6000; // characters of a data: URL; a 32-pixel PNG is well under
+const ICON_BYTES = 150 * 1024; // the most a page's icon may weigh
+const ICON_MS = 5000; // and the longest fetching it may take
 const OPEN_WITHIN = 5000; // a page may open a tab this long after an action in it
 const OPEN_MAX = 10; // and this many in a minute
 const clipped = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
@@ -96,6 +97,7 @@ class Tabs extends EventEmitter {
     this.groups = [{ id: YOU, label: 'You', source: null, current: null, busy: 0, status: '', paused: false }];
     this.seq = 0;
     this.relayOrigins = new Set();
+    this.iconSeq = 0;
     this.setMaxListeners(50); // every module listens for changes
     this.watchNetwork(ses);
   }
@@ -356,7 +358,9 @@ class Tabs extends EventEmitter {
     wc.on('did-navigate', (_e, to) => {
       tab.url = to;
       tab.favicon = null;
+      tab.icon = null;
       tab.iconUrl = null;
+      tab.actedAt = 0; // an action on the page left does not let the new one open tabs
       tab.pointer = null;
       tab.history = null; // the page keeps its own history from here (see wake())
       const mark = { mark: true, text: `navigated to ${to}`, at: Date.now() };
@@ -372,6 +376,7 @@ class Tabs extends EventEmitter {
       tab.url = failedUrl;
       tab.title = "Can't open this page";
       tab.favicon = null;
+      tab.icon = null;
       tab.iconUrl = null;
       this.emit('failed', tab, { code, reason, url: failedUrl }); // errorpage.js draws the page
       changed();
@@ -424,30 +429,61 @@ class Tabs extends EventEmitter {
     return true;
   }
 
-  // The page's icon, as a small data: URL fetched through the tab's own
-  // session: the window chrome loads nothing from the web, and a private
-  // tab's icon never passes through another session's cache or cookies.
+  // The page's icon. Its bytes are fetched through the tab's own session (a
+  // private tab's never pass through another session's cache or cookies) and
+  // kept here; the window chrome shows them through loui-icon: (iconResponse),
+  // so it loads nothing from the web and it, a sandboxed page, does the
+  // decoding. At most ICON_BYTES and ICON_MS: the address is the page's choice.
   async icon(tab, url) {
     tab.iconUrl = url;
     let icon = null;
-    if (url && /^data:image\//i.test(url)) icon = url.length <= ICON_MAX ? url : null;
-    else if (url && /^https?:/i.test(url)) {
+    if (url && /^data:image\//i.test(url)) {
+      const m = url.length <= ICON_BYTES * 2 && /^data:([^;,]*)[^,]*?(;base64)?,(.*)$/is.exec(url);
       try {
-        const res = await tab.ses.fetch(url, { cache: 'force-cache' });
-        const bytes = res.ok ? Buffer.from(await res.arrayBuffer()) : null;
-        const img = bytes && nativeImage.createFromBuffer(bytes);
-        if (img && !img.isEmpty()) icon = img.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
-        else if (bytes) {
-          // Formats nativeImage cannot read here (SVG, and ICO outside Windows), if small.
-          const type = (res.headers.get('content-type') || '').split(';')[0];
-          const data = `data:${type};base64,${bytes.toString('base64')}`;
-          if (type.startsWith('image/') && data.length <= ICON_MAX) icon = data;
-        }
+        if (m) icon = { type: m[1].toLowerCase(), bytes: m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) };
       } catch {}
+    } else if (url && /^https?:/i.test(url) && !this.relayOrigins.has(new URL(url).origin)) {
+      const stop = new AbortController();
+      const timer = setTimeout(() => stop.abort(), ICON_MS);
+      try {
+        const res = await tab.ses.fetch(url, { cache: 'force-cache', signal: stop.signal });
+        if (res.ok && !(Number(res.headers.get('content-length')) > ICON_BYTES)) {
+          const parts = [];
+          let size = 0;
+          for await (const part of res.body) {
+            size += part.length;
+            if (size > ICON_BYTES) { stop.abort(); break; }
+            parts.push(part);
+          }
+          if (size && size <= ICON_BYTES) {
+            icon = { type: (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase(), bytes: Buffer.concat(parts) };
+          }
+        }
+      } catch {} finally {
+        clearTimeout(timer);
+      }
     }
+    if (icon?.bytes.length > ICON_BYTES || !icon?.bytes.length) icon = null;
     if (tab.iconUrl !== url || !this.list.includes(tab)) return; // the page moved on meanwhile
-    tab.favicon = icon;
+    tab.icon = icon;
+    tab.favicon = icon ? `loui-icon://tab/${tab.id}/${++this.iconSeq}` : null;
     this.emit('change');
+  }
+
+  // For the loui-icon: protocol of the window chrome (main.js): a tab's icon.
+  iconResponse(url) {
+    const id = Number(/^loui-icon:\/\/tab\/(\d+)\//.exec(url)?.[1]);
+    const icon = this.get(id)?.icon;
+    if (!icon) return new Response('', { status: 404 });
+    // Only pictures are served as what they say they are; anything else is left to the <img> to sniff.
+    const type = /^image\/[\w.+-]+$/.test(icon.type) ? icon.type : 'application/octet-stream';
+    return new Response(icon.bytes, { headers: { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
+  }
+
+  // A tab's icon as a data: URL (for a bookmark of its page), or null.
+  iconData(tab) {
+    const icon = tab?.icon;
+    return icon && /^image\//.test(icon.type) ? `data:${icon.type};base64,${icon.bytes.toString('base64')}` : null;
   }
 
   // A user's tab out of sight is hidden and throttled; it stays in sight and

@@ -186,23 +186,23 @@ function setTabStrip({ vertical, collapsed } = {}) {
 // window gets a new session, so nothing carries over.
 let privateSes = null;
 let privateCount = 0;
-const privateSpare = []; // ended private sessions, emptied, to use again (Electron keeps a session until quit)
+// A new session each time: one used before keeps more than can be cleared
+// from here (the zoom chosen for a site, for one), and nothing may carry over
+// from one round of private windows to the next. Electron keeps the old one,
+// emptied, until Loui quits.
 function privateSession() {
   if (privateSes) return privateSes;
-  let ses = privateSpare.pop();
-  if (!ses) {
-    ses = session.fromPartition(`loui-private-${++privateCount}`);
-    // The same watchers as the user's session, in the same order: the relay
-    // guard first (tabs.js), then Shields, and the guardrails' hold last.
-    tabs.watchNetwork(ses);
-    shields.attach(ses);
-    downloads.attach(ses, { private: true });
-    permissions.attach(ses);
-    sleep.attach(ses);
-    guardrails.attach(ses);
-    reader.attach(ses);
-    identity.attach(ses);
-  }
+  const ses = session.fromPartition(`loui-private-${++privateCount}`);
+  // The same watchers as the user's session, in the same order: the relay
+  // guard first (tabs.js), then Shields, and the guardrails' hold last.
+  tabs.watchNetwork(ses);
+  shields.attach(ses);
+  downloads.attach(ses, { private: true });
+  permissions.attach(ses);
+  sleep.attach(ses);
+  guardrails.attach(ses);
+  reader.attach(ses);
+  identity.attach(ses);
   privateSes = ses;
   return ses;
 }
@@ -210,9 +210,10 @@ function endPrivate(ses) {
   if (privateSes === ses) privateSes = null;
   downloads.forgetPrivate();
   shields.forgetPrivate();
-  // Used again only once everything in it is gone.
-  Promise.all([ses.clearStorageData(), ses.clearCache(), ses.clearAuthCache()])
-    .then(() => privateSpare.push(ses), () => {});
+  ses.clearStorageData().catch(() => {});
+  ses.clearCache().catch(() => {});
+  ses.clearAuthCache().catch(() => {});
+  ses.closeAllConnections().catch(() => {});
 }
 
 // ── windows ─────────────────────────────────────────────────────────────────
@@ -296,6 +297,8 @@ function start() {
     hosts: process.env.LOUI_TEST && process.env.LOUI_HONEST_HOSTS ? process.env.LOUI_HONEST_HOSTS.split(',') : HONEST,
   });
   identity.attach(userSes);
+  // Tabs' icons, for the window chrome's <img> (tabs.icon): bytes held in memory, never from the web.
+  session.defaultSession.protocol.handle('loui-icon', (request) => tabs.iconResponse(request.url));
   tabs.openWindow = openWindow;
   const first = openWindow({ blank: false });
   shields = createShields({ ses: userSes, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first

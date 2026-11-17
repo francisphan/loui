@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # nothing here pushes with git; the job's scripts get no write token from it
       - uses: actions/setup-node@v4
         with:
           node-version: 20

@@ -93,7 +93,7 @@
     const g = state.groups.find((x) => x.id === s.session);
     return g ? (g.paused ? 'paused' : g.busy ? 'working' : 'open') : s.status || 'open';
   };
-  const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', unanswered: 'You did not answer, so it was stopped' };
+  const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', taken: 'You took the tab back', unanswered: 'You did not answer, so it was stopped' };
   const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
   // "2:14 PM · 3 min · 12 steps, 1 failed · ended"
   function facts(s) {

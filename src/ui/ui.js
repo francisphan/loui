@@ -648,7 +648,7 @@ function markdown(target, source) {
 const steps = new Map();
 let liveStep = null;
 // A step the user stopped is not one that failed.
-const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', unanswered: 'You did not answer, so it was stopped' };
+const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', taken: 'You took the tab back', unanswered: 'You did not answer, so it was stopped' };
 const ENDED = { closed: 'You ended this session', lost: 'Session ended: connection lost' };
 loui.on('feed', (entry) => {
   if (entry.type === 'ended') {

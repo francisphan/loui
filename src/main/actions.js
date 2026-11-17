@@ -37,8 +37,16 @@ function parseKey(chord) {
 
 const shorten = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const host = (u) => { try { return new URL(u).host || u; } catch { return u; } };
-// The host and path, so two pages of one site read differently; never the query, which can hold secrets.
-const place = (u) => { try { const { host, pathname } = new URL(u); return host ? host + pathname.replace(/\/$/, '') : u; } catch { return u; } };
+// The host and the start of the path, so two pages of one site read
+// differently. Never the query, and no more than the first part of the path:
+// the rest can hold secrets (a reset or invite link's token).
+const place = (u) => {
+  try {
+    const { host, pathname } = new URL(u);
+    const first = pathname.split('/')[1] || '';
+    return host ? host + (first ? `/${first.length > 24 ? first.slice(0, 23) + '…' : first}` : '') : u;
+  } catch { return u; }
+};
 
 // refuse(url): why sessions may not open an address (see brave.js), or null.
 // guard: guardrails.js, which asks the user before consequential actions.
@@ -606,6 +614,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
           },
           stop: () => picker.cancel(),
         });
+        c.own(tab); // taken back while the crosshair was up: what they then point at is theirs
         return p ? pickContent(p, c.session) : text('The user did not pick anything (cancelled or timed out).');
       },
     },
@@ -630,8 +639,9 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
       // input: the user can take a tab back, or take over, while it runs.
       const own = (tab) => {
         if (tabs.get(tab.id) !== tab) return; // closed: nothing of the user's is left in it
-        if (tab.group !== session.group) throw new Error('The user took this tab back.');
-        if (acts && tabs.group(session.group)?.paused) throw new Error(PAUSED);
+        // stopped: the user's doing, not a failure (sessions.js).
+        if (tab.group !== session.group) throw Object.assign(new Error('The user took this tab back.'), { stopped: 'taken' });
+        if (acts && tabs.group(session.group)?.paused) throw Object.assign(new Error(PAUSED), { stopped: 'paused' });
       };
       try {
         const out = await handler.run(args, { say, note: record, session, own, need: () => need(session) });

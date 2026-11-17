@@ -12,9 +12,16 @@ let b, server, port;
 const seen = []; // { host, agent } of each page request
 test.before(async () => {
   server = http.createServer((req, res) => {
-    if (req.url.startsWith('/page')) seen.push({ host: req.headers.host.split(':')[0], agent: req.headers['user-agent'] });
+    const host = req.headers.host.split(':')[0];
+    if (req.url.startsWith('/page') || req.url.startsWith('/sub')) seen.push({ host, path: req.url, agent: req.headers['user-agent'] });
+    // /to-other: a redirect to the same page on the other host, as a sign-in link makes.
+    if (req.url.startsWith('/to-other')) {
+      const other = host === 'localhost' ? '127.0.0.1' : 'localhost';
+      res.writeHead(302, { location: `http://${other}:${port}/page?${req.url.split('?')[1]}` });
+      return res.end();
+    }
     res.writeHead(200, { 'content-type': 'text/html' });
-    res.end('<!doctype html><title>Who</title><p>page</p>');
+    res.end('<!doctype html><title>Who</title><p>page</p><script>fetch("/sub?" + location.search.slice(1))</script>');
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   port = server.address().port;
@@ -60,6 +67,38 @@ test('a tab opened straight on such a host has the full one from its first reque
   await b.ui('tab:new', url);
   for (const end = Date.now() + 8000; Date.now() < end && seen.length === before; await sleep(100));
   assert.match(seen[seen.length - 1].agent, /Electron\//);
+});
+
+// Arrives at `host` through a redirect from the other one.
+async function redirected(host, mark) {
+  const from = host === 'localhost' ? '127.0.0.1' : 'localhost';
+  const url = `http://${host}:${port}/page?${mark}`;
+  await b.ui('go', `http://${from}:${port}/to-other?${mark}`);
+  for (const end = Date.now() + 8000; Date.now() < end; await sleep(100)) {
+    const t = (await b.state()).tabs.find((x) => x.active);
+    const sub = seen.find((x) => x.path === `/sub?${mark}`);
+    if (t.url === url && !t.loading && sub) {
+      return {
+        sent: seen.find((x) => x.path === `/page?${mark}`).agent, sub: sub.agent,
+        page: await b.ui('tab:js', { id: t.id, code: 'navigator.userAgent' }),
+      };
+    }
+  }
+  assert.fail(`${url} did not load`);
+}
+
+test('reached through a redirect, such a host gets the full one throughout', async () => {
+  const { sent, sub, page } = await redirected('localhost', 'r1');
+  assert.match(sent, /Electron\//);
+  assert.equal(page, sent, 'the page reads what the request said');
+  assert.equal(sub, sent, 'and so do the page\'s own requests');
+});
+
+test('left through a redirect, the next site gets the usual one throughout', async () => {
+  const { sent, sub, page } = await redirected('127.0.0.1', 'r2');
+  assert.doesNotMatch(sent, /loui|Electron/i);
+  assert.equal(page, sent);
+  assert.equal(sub, sent, 'nothing of the full one leaks to it');
 });
 
 test("a Claude session's tab does the same", async () => {
