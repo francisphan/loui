@@ -5,6 +5,8 @@
 // file access, so a hostile page that talks it into something can only reach
 // the browser.
 const fs = require('fs');
+const { spawn, execFile } = require('child_process');
+const execFileAsync = require('util').promisify(execFile);
 const os = require('os');
 const path = require('path');
 const TOOLS = require('../shared/tools');
@@ -12,16 +14,54 @@ const { YOU } = require('./tabs');
 
 const MODEL = process.env.LOUI_MODEL || 'claude-opus-5-5';
 
-// Where Claude Code's program is, when the Agent SDK did not bring its own
-// (the Windows installer leaves it out: it is 380 MB). undefined: use the SDK's.
-function installedClaude() {
+// How to start Claude Code. The Agent SDK brings its own program for the
+// platform it was installed on; the Windows installer leaves it out (380 MB),
+// so there Loui uses an installed claude.exe, or else Claude Code inside WSL,
+// where developers on Windows usually have it.
+// Returns {} (use the SDK's own), the options that start another one, or null.
+let launcher; // cached once found; a miss is looked up again next time
+async function claudeLauncher() {
+  if (launcher) return launcher;
   try {
     require.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`);
-    return undefined;
+    return (launcher = {});
   } catch {}
   const exe = process.platform === 'win32' ? 'claude.exe' : 'claude';
   const dirs = [...(process.env.PATH || '').split(path.delimiter), path.join(os.homedir(), '.local', 'bin')];
-  return dirs.map((d) => path.join(d, exe)).find((p) => fs.existsSync(p)) || null;
+  const found = dirs.map((d) => path.join(d, exe)).find((p) => fs.existsSync(p));
+  if (found) return (launcher = { pathToClaudeCodeExecutable: found });
+  const inWsl = process.platform === 'win32' && (await wslClaude());
+  if (!inWsl) return null;
+  return (launcher = {
+    pathToClaudeCodeExecutable: inWsl.claude,
+    spawnClaudeCodeProcess: ({ args, cwd, env, signal }) => {
+      // Only the SDK's own settings cross into WSL; the WSL side uses its own
+      // login, and none of Windows' environment (keys included) goes along.
+      // PATH is the one the user's shell gave, so a claude installed through
+      // npm finds its node.
+      const pass = Object.keys(env).filter((k) => /^(CLAUDE_|MCP_)/.test(k));
+      return spawn('wsl.exe', ['-e', 'env', `PATH=${inWsl.path}`, inWsl.claude, ...args], {
+        cwd, signal, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, ...Object.fromEntries(pass.map((k) => [k, env[k]])), WSLENV: pass.join(':') },
+      });
+    },
+  });
+}
+
+// Claude Code inside the default WSL distribution: { claude, path }, or null.
+// Asks an interactive login shell, which reads the user's profile and rc
+// files (where nvm and the like set PATH). type -P gives the program's path
+// even when an alias of the same name exists. Runs without blocking the browser.
+async function wslClaude() {
+  try {
+    const { stdout } = await execFileAsync('wsl.exe', [
+      '-e', 'bash', '-lic', 'printf "\\n@@%s\\n@@%s\\n" "$(type -P claude)" "$PATH"',
+    ], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+    const [claude, PATH] = stdout.split('\n').filter((l) => l.startsWith('@@')).map((l) => l.slice(2).trim());
+    return claude?.startsWith('/') ? { claude, path: PATH } : null;
+  } catch {
+    return null;
+  }
 }
 
 function subscriptionEnv() {
@@ -58,10 +98,10 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
 
   async function send({ text, pickIds = [] }) {
     if (active) return;
-    const claude = installedClaude();
+    const claude = await claudeLauncher();
     if (claude === null) {
       emit({ type: 'user', text, picks: [] });
-      emit({ type: 'error', text: 'This panel runs on Claude Code, which is not installed on this computer. Install Claude Code and sign in, then try again. Other Claude sessions can still use this browser.' });
+      emit({ type: 'error', text: 'This panel runs on Claude Code, which is not installed on this computer (on Windows or in WSL). Install Claude Code and sign in, then try again. Other Claude sessions can still use this browser.' });
       return emit({ type: 'done' });
     }
     sdk ??= await import('@anthropic-ai/claude-agent-sdk');
@@ -105,7 +145,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
           includePartialMessages: true,
           cwd,
           env: subscriptionEnv(),
-          ...(claude ? { pathToClaudeCodeExecutable: claude } : {}),
+          ...claude,
           ...(sessionId ? { resume: sessionId } : {}),
         },
       });

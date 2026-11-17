@@ -1,0 +1,44 @@
+# Publishes a release that installed copies of Loui update to.
+#
+#   1. Set "version" in package.json (for example 0.2.0) and commit it.
+#   2. git tag v0.2.0 && git push origin main v0.2.0
+#
+# The tests run first; if they pass, the Windows installer is built and attached
+# to a GitHub release for the tag, with the latest.yml the updater reads.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check the tag matches package.json
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag is $GITHUB_REF_NAME but package.json says $version." >&2
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build the Windows installer and publish the release
+        run: npm run dist:win -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -60,6 +60,13 @@ approval page; enter the relay key. To close the entrance again:
 Everything the connector does passes through the relay, and anyone who has the
 key can drive a signed-in browser. Keep the key private.
 
+The approval page names the site that will receive access. The relay only sends
+sign-ins to `claude.ai`, `claude.com` and this machine; `LOUI_REDIRECT_HOSTS`
+(comma-separated) adds others. Connector sign-ins last 30 days from last use.
+To revoke everything at once, replace the key: delete `~/.config/loui-relay/key`,
+restart the relay, and give the new key to each Loui install and to Claude Code.
+Every connector then has to be approved again.
+
 ### Relay settings (environment)
 
 | Variable | Meaning |
@@ -83,7 +90,10 @@ copy this repository there, run `npm install --omit=dev`, start
   the browser it gets a group, named after it ("Claude Code · pung"). Its tools
   see and act on only that group. It works in the background: the tab you are
   looking at does not change.
-- **Your tabs are yours.** Sessions cannot list, read or act on them.
+- **Your tabs are yours.** Sessions cannot list, read or act on them, or see
+  what you pointed at in them. This is about tabs, not accounts: all tabs share
+  one set of logins, so a session can open any site you are signed in to in a
+  tab of its own. Treat a session's access as your access.
 - **Handing a tab over.** Right-click a tab and choose *Give to …*, or a
   session can ask (`request_tab`) and you answer in the tab row. A tab you
   handed over comes back to you when the session ends; *Take back* does it
@@ -115,13 +125,35 @@ Claude with its selector, text, HTML and a cropped screenshot.
 `npm run dist:win` builds `dist/Loui Setup 0.1.0.exe` on Linux in about half a
 minute (no wine: `scripts/nowine/wine` stands in for the one step that wants
 it). The build is unsigned, so Windows shows a SmartScreen warning the first
-time, and it has the default icon.
+time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
+`icon.png`); `src/ui/icon.png` is the window's.
 
 - Profile: `%APPDATA%\loui`. Put the relay address and key in the panel, or in
   `relay.json` there.
 - *File › Open Loui when I sign in* keeps it reachable.
-- The Claude panel needs Claude Code installed on Windows; without it the
-  panel says so, and other sessions still work.
+- The Claude panel runs Claude Code: an installed `claude.exe` if there is
+  one, otherwise Claude Code inside WSL (`wsl.exe`), with your WSL login.
+- **Updates.** An installed copy checks GitHub Releases shortly after launch and
+  every six hours, downloads a new version in the background, and installs it
+  when Loui quits. *Restart to update* in the toolbar (and the File menu)
+  installs it at once. Each download is checked against the SHA-512 published
+  with the release; the builds are unsigned, so there is no publisher check.
+
+## Releasing
+
+1. Set `version` in `package.json` and commit.
+2. `git tag v<version> && git push origin main v<version>`
+
+`.github/workflows/release.yml` runs the tests, builds the Windows installer
+and publishes it with `latest.yml` as a GitHub release, which installed copies
+then update to.
+
+## Appearance
+
+Dark by default. *View › Appearance* switches to Light or Match system; the
+choice is kept in `settings.json` in the profile. Pages see it as
+`prefers-color-scheme`. Under WSL, *Match system* follows Linux's setting, not
+Windows'.
 
 ## Layout
 
@@ -134,6 +166,7 @@ src/main/actions.js   what each tool does
 src/main/link.js      the connection out to the relay
 src/main/rpc.js       local control socket, used by the tests
 src/main/chat.js      the Claude panel (Agent SDK)
+src/main/updater.js   updates for installed copies (GitHub Releases)
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
@@ -153,6 +186,11 @@ break:
 
 - Nothing in Loui listens for connections; it dials out to the relay. The
   relay listens on loopback only.
+- Sessions' tabs cannot load the relay's own addresses (the relay tells each
+  browser what they are), and the relay answers only to those addresses, so a
+  session cannot reach the approval page under another name either.
+- The relay refuses to start with a key shorter than 32 characters.
+- A session belongs to whoever opened it; another token cannot use it.
 - Tabs are sandboxed and get no preload script or Node access.
 - Sessions can open only `http` and `https` pages. Page content is passed to
   Claude as untrusted data.

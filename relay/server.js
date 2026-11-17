@@ -70,7 +70,9 @@ async function start(options = {}) {
   let seq = 0;
 
   // ── browsers ──────────────────────────────────────────────────────────────
-  const wss = new WebSocketServer({ noServer: true });
+  // Tool replies carry screenshots, so allow a few megabytes, but no more.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
+  let relayOrigins = []; // set once the server is listening
   wss.on('connection', (ws) => {
     let device = null;
     const hurry = setTimeout(() => ws.close(), 5000);
@@ -84,11 +86,17 @@ async function start(options = {}) {
           return ws.close();
         }
         const d = msg.hello.device || {};
+        if (typeof d.id !== 'string' || !d.id) {
+          ws.send(JSON.stringify({ denied: 'the browser did not say who it is' }));
+          return ws.close();
+        }
         device = { id: String(d.id), name: String(d.name || 'Loui'), platform: d.platform, ws, waiting: new Map(), since: Date.now() };
         devices.get(device.id)?.ws.close(); // the same browser reconnecting
         devices.set(device.id, device);
         const mine = [...sessions.values()].filter((s) => s.device === device.id).map((s) => s.id);
-        return ws.send(JSON.stringify({ welcome: true, sessions: mine }));
+        // relay: the addresses that reach this relay. The browser keeps sessions'
+        // tabs away from them, so a session can never see the approval page.
+        return ws.send(JSON.stringify({ welcome: true, sessions: mine, relay: relayOrigins }));
       }
       device.waiting.get(msg.id)?.(msg);
       device.waiting.delete(msg.id);
@@ -152,8 +160,9 @@ async function start(options = {}) {
     setImmediate(() => s.transport.close().catch(() => {})); // after any reply in flight
   }
 
-  async function openSession() {
-    const s = { id: null, label: 'Claude', source: 'claude', device: null, deviceName: '', lastSeen: Date.now(), streams: 0, hadStream: false };
+  // owner: who signed in (the key, or one OAuth connector). Only they can use the session.
+  async function openSession(owner) {
+    const s = { id: null, owner, label: 'Claude', source: 'claude', device: null, deviceName: '', lastSeen: Date.now(), streams: 0, hadStream: false };
     const mcp = new McpServer({ name: 'loui', version }, { instructions: INSTRUCTIONS });
 
     // Name the session after the app it comes from, and its project if it says.
@@ -176,6 +185,8 @@ async function start(options = {}) {
       s.lastSeen = Date.now();
       try {
         const device = await deviceFor(s);
+        // The session may have ended while this call waited for a browser.
+        if (sessions.get(s.id) !== s) return say('This session has ended.', true);
         const reply = await ask(device, { tool, args, session: { id: s.id, label: s.label, source: s.source } });
         return reply.error ? say(reply.error, true) : { content: reply.content };
       } catch (e) {
@@ -230,10 +241,17 @@ async function start(options = {}) {
   await new Promise((resolve) => server.listen(options.port ?? 7332, host, resolve));
   const publicUrl = new URL(options.publicUrl || `http://127.0.0.1:${server.address().port}`);
   const mcpUrl = new URL('/mcp', publicUrl);
+  const port = server.address().port;
+  relayOrigins = [...new Set([publicUrl.origin, `http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`])];
 
+  // Requests must name the relay by one of its own addresses. Other names that
+  // happen to reach this machine (foo.localhost, 127.0.0.2, a DNS name pointing
+  // at 127.0.0.1) are refused; the browser keeps sessions' tabs off these ones.
+  const hosts = new Set(relayOrigins.map((o) => new URL(o).host));
+  app.use((req, res, next) => (hosts.has(String(req.headers.host).toLowerCase()) ? next() : res.status(421).send('Wrong host')));
   app.use(mcpAuthRouter({ provider: auth.provider, issuerUrl: publicUrl, resourceServerUrl: mcpUrl, resourceName: 'Loui' }));
   app.all('/approve', express.urlencoded({ extended: false }), auth.approve);
-  app.get('/healthz', (_req, res) => res.json({ ok: true, browsers: devices.size, sessions: sessions.size }));
+  app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
   const signedIn = requireBearerAuth({
     verifier: auth.provider,
@@ -241,20 +259,25 @@ async function start(options = {}) {
   });
   const noSession = (res, status, message) =>
     res.status(status).json({ jsonrpc: '2.0', error: { code: -32000, message }, id: null });
+  // The session named in the request, if it is the caller's.
+  const theirs = (req) => {
+    const s = sessions.get(req.headers['mcp-session-id']);
+    return s && s.owner === req.auth.clientId ? s : null;
+  };
 
   app.post('/mcp', signedIn, express.json({ limit: '4mb' }), async (req, res) => {
     const id = req.headers['mcp-session-id'];
-    let s = sessions.get(id);
+    let s = theirs(req);
     if (!s) {
       if (id) return noSession(res, 404, 'This session has ended. Start a new one.');
       if (!isInitializeRequest(req.body)) return noSession(res, 400, 'Initialize a session first.');
-      s = await openSession();
+      s = await openSession(req.auth.clientId);
     }
     s.lastSeen = Date.now();
     await s.transport.handleRequest(req, res, req.body);
   });
   app.get('/mcp', signedIn, async (req, res) => {
-    const s = sessions.get(req.headers['mcp-session-id']);
+    const s = theirs(req);
     if (!s) return noSession(res, 404, 'This session has ended. Start a new one.');
     s.streams++;
     s.hadStream = true;
@@ -262,13 +285,14 @@ async function start(options = {}) {
     await s.transport.handleRequest(req, res);
   });
   app.delete('/mcp', signedIn, async (req, res) => {
-    const s = sessions.get(req.headers['mcp-session-id']);
+    const s = theirs(req);
     if (!s) return noSession(res, 404, 'This session has already ended.');
     await s.transport.handleRequest(req, res);
   });
 
   server.on('upgrade', (req, socket, head) => {
     if (new URL(req.url, 'http://x').pathname !== '/device') return socket.destroy();
+    if (!relayOrigins.some((o) => new URL(o).host === String(req.headers.host).toLowerCase())) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws));
   });
 

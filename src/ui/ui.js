@@ -246,6 +246,17 @@ relay.onsubmit = (e) => {
   $('relay-key').value = '';
 };
 
+// Shown only once a new version has downloaded; until then updates stay out of the way.
+function drawUpdate() {
+  const u = state.update;
+  const ready = u?.status === 'ready';
+  $('update').hidden = !ready;
+  if (!ready) return;
+  $('update').textContent = 'Restart to update';
+  $('update').title = `Version ${u.version} is ready. Loui restarts and reopens; Claude sessions' tab groups close.`;
+}
+$('update').onclick = () => loui.send('update:install');
+
 loui.on('state', (next) => {
   const fresh = state.picks.length < next.picks.length;
   state = next;
@@ -254,6 +265,7 @@ loui.on('state', (next) => {
   drawHelm();
   drawChips();
   drawLink();
+  drawUpdate();
   if (!state.groups.some((g) => g.busy)) liveStep?.classList.remove('live');
   if (document.activeElement !== address) address.value = tab?.url || '';
   $('back').disabled = !tab?.canGoBack;

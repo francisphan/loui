@@ -6,13 +6,14 @@
 //   tests --> rpc.js (local socket) -------------------> sessions.js --> actions.js
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, Menu, ipcMain, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, nativeTheme } = require('electron');
 const paths = require('../shared/paths');
 const { Tabs, PRESETS, toUrl, YOU } = require('./tabs');
 const { createSessions } = require('./sessions');
 const { createActions } = require('./actions');
 const { createChat } = require('./chat');
 const { createLink } = require('./link');
+const { createUpdater } = require('./updater');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -25,9 +26,21 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Sites that refuse embedded browsers key on these tokens.
 app.userAgentFallback = app.userAgentFallback.replace(/ (loui|Electron)\/\S+/gi, '');
 
+// Appearance: 'dark' (the default), 'light', or 'system' to follow the OS.
+// It applies to the window and is what pages see as prefers-color-scheme.
+const settingsFile = path.join(paths.home, 'settings.json');
+const settings = (() => { try { return JSON.parse(fs.readFileSync(settingsFile, 'utf8')); } catch { return {}; } })();
+nativeTheme.themeSource = ['dark', 'light', 'system'].includes(settings.theme) ? settings.theme : 'dark';
+function setTheme(theme) {
+  nativeTheme.themeSource = theme;
+  settings.theme = theme;
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+  Menu.setApplicationMenu(appMenu());
+}
+
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
 
-let win, tabs, sessions, actions, chat, link, handle;
+let win, tabs, sessions, actions, chat, link, handle, updater;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -53,6 +66,7 @@ const currentState = () => ({
   picks: actions.picker.recent().filter((p) => p.group === YOU)
     .map((p) => ({ id: p.id, name: p.name || p.tag, thumb: p.thumb })),
   link: link.state(),
+  update: updater.state(),
 });
 
 function createWindow() {
@@ -65,8 +79,9 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     title: 'Loui',
+    icon: path.join(__dirname, '../ui/icon.png'),
     autoHideMenuBar: true,
-    backgroundColor: '#E6EDEF',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true,
       backgroundThrottling: false,
@@ -77,7 +92,20 @@ function createWindow() {
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState });
   handle = rpc.createHandler({ run: actions.run, sessions, extra: process.env.LOUI_TEST ? testHook : null });
-  link = createLink({ home: paths.home, version: app.getVersion(), handle, sessions, changed: pushState });
+  link = createLink({
+    home: paths.home, version: app.getVersion(), handle, sessions, changed: pushState,
+    guard: (origins) => { tabs.relayOrigins = new Set(origins); },
+  });
+  let shown = '';
+  updater = createUpdater({
+    changed: () => {
+      pushState();
+      // The menu names the status (and progress in tens of percent); progress events come many times a second.
+      const u = updater.state();
+      const now = `${u.status}:${Math.floor(u.percent / 10)}`;
+      if (now !== shown) { shown = now; Menu.setApplicationMenu(appMenu()); }
+    },
+  });
   chat = createChat({
     run: (name, args) => actions.run(name, args, sessions.panel),
     tabs,
@@ -137,6 +165,7 @@ const handlers = {
   'group:close': (id) => sessions.end(id),
   'device:menu': () => deviceMenu(),
   'relay:set': (settings) => link.configure(settings),
+  'update:install': () => updater.install(),
   'chat:send': (message) => { chat.send(message); },
   'chat:stop': () => chat.stop(),
   'chat:reset': () => chat.reset(),
@@ -181,6 +210,7 @@ function appMenu() {
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => active() && tabs.close(active().id) },
         { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
         { type: 'separator' },
+        ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{
           label: 'Open Loui when I sign in', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
           click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
@@ -202,6 +232,13 @@ function appMenu() {
         { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
         { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
         { type: 'separator' },
+        {
+          label: 'Appearance',
+          submenu: [['dark', 'Dark'], ['light', 'Light'], ['system', 'Match system']].map(([theme, label]) => ({
+            label, type: 'radio', checked: nativeTheme.themeSource === theme, click: () => setTheme(theme),
+          })),
+        },
+        { type: 'separator' },
         { label: 'Developer tools', accelerator: 'F12', click: handlers.devtools },
       ],
     },
@@ -216,6 +253,24 @@ function appMenu() {
       ],
     },
   ]);
+}
+
+// File menu items for updates, in installed copies only.
+function updateMenu() {
+  const u = updater?.state();
+  if (!u) return [];
+  const label = {
+    ready: `Restart to update to ${u.version}`,
+    downloading: `Downloading ${u.version}… ${u.percent}%`,
+    checking: 'Checking for updates…',
+    latest: `Check for updates (you have the latest, ${u.current})`,
+    failed: "Check for updates (the last check didn't work)",
+  }[u.status] || 'Check for updates';
+  const busy = u.status === 'checking' || u.status === 'downloading';
+  return [
+    { label, enabled: !busy, click: () => (u.status === 'ready' ? updater.install() : updater.check()) },
+    { type: 'separator' },
+  ];
 }
 
 function zoom(step) {

@@ -380,6 +380,7 @@ function createActions({ tabs, sessions, changed }) {
         if (action === 'select' || action === 'close') {
           if (tabs.get(id)?.group !== group) throw new Error(`No tab ${id} in your group.`);
           if (action === 'select') tabs.setCurrent(group, id);
+          else if (tabs.get(id).lent) tabs.move(id, YOU); // the user's tab goes back to them
           else tabs.close(id);
         }
         const current = tabs.current(group);
@@ -463,9 +464,9 @@ function createActions({ tabs, sessions, changed }) {
     picks: {
       label: () => 'looking at what you pointed at',
       async run(_args, c) {
-        // A session sees what the user pointed at in its own tabs and in theirs.
-        const mine = (p) => p.group === c.session.group || p.group === YOU;
-        const list = picker.recent().filter(mine);
+        // A session sees only what the user pointed at in its own tabs; the
+        // panel sees what they pointed at in theirs.
+        const list = picker.recent().filter((p) => p.group === c.session.group);
         if (!list.length) return text('The user has not pointed at anything yet. ask_user_to_pick asks them to.');
         return list.flatMap((p) => pickContent(p, c.session));
       },

@@ -121,15 +121,16 @@ test('a session that just disappears is closed after the grace period', async ()
   await until(async () => (await groups()).length === 0, 'the abandoned group to close', 6000);
 });
 
-test("Claude's connector signs in with OAuth, approved with the relay key", async () => {
-  const redirect = 'https://claude.example/callback';
-  const registered = await (await fetch(relay.url + '/register', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ client_name: 'Claude', redirect_uris: [redirect], token_endpoint_auth_method: 'none' }),
-  })).json();
-  assert.ok(registered.client_id);
+const register = (redirect) => fetch(relay.url + '/register', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ client_name: 'Claude', redirect_uris: [redirect], token_endpoint_auth_method: 'none' }),
+});
 
+// Registers a client and starts a sign-in; returns what the approval step needs.
+async function startSignIn(redirect) {
+  const registered = await (await register(redirect)).json();
+  assert.ok(registered.client_id);
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const authorize = new URL(relay.url + '/authorize');
@@ -140,12 +141,42 @@ test("Claude's connector signs in with OAuth, approved with the relay key", asyn
   const toApproval = await fetch(authorize, { redirect: 'manual' });
   assert.equal(toApproval.status, 302);
   const approvePage = new URL(toApproval.headers.get('location'), relay.url);
-  assert.match(await (await fetch(approvePage)).text(), /Let Claude use your Loui browsers\?/);
-
   const answer = (key) => fetch(relay.url + '/approve', {
     method: 'POST', redirect: 'manual',
     body: new URLSearchParams({ request: approvePage.searchParams.get('request'), key }),
   });
+  return { registered, verifier, approvePage, answer };
+}
+
+test('sign-ins can only be sent to Claude or to this machine', async () => {
+  const refused = await register('https://evil.example/callback');
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error_description, /not evil\.example/);
+  assert.equal((await register('http://localhost:33418/callback')).status, 201);
+});
+
+test('the approval page names where access goes, and cannot be framed', async () => {
+  const { approvePage } = await startSignIn('https://claude.ai/api/mcp/auth_callback');
+  const res = await fetch(approvePage);
+  const html = await res.text();
+  assert.match(html, /Let Claude use your Loui browsers\?/);
+  assert.match(html, /Access goes to <span class="site">claude\.ai<\/span>/);
+  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+});
+
+test('wrong keys withdraw that one request, without locking out the owner', async () => {
+  const attacker = await startSignIn('https://claude.ai/api/mcp/auth_callback');
+  for (let i = 0; i < 2; i++) assert.equal((await attacker.answer('guess')).status, 403);
+  assert.match(await (await attacker.answer('guess')).text(), /withdrawn/);
+  assert.equal((await attacker.answer(relay.key)).status, 400, 'the withdrawn request is gone');
+  const owner = await startSignIn('https://claude.ai/api/mcp/auth_callback');
+  assert.equal((await owner.answer(relay.key)).status, 302);
+});
+
+test("Claude's connector signs in with OAuth, approved with the relay key", async () => {
+  const redirect = 'https://claude.ai/api/mcp/auth_callback';
+  const { registered, verifier, answer } = await startSignIn(redirect);
   assert.equal((await answer('guess')).status, 403);
   const approved = await answer(relay.key);
   assert.equal(approved.status, 302);
@@ -164,5 +195,36 @@ test("Claude's connector signs in with OAuth, approved with the relay key", asyn
 
   const s = await connect('claude-ai', tokens.access_token);
   assert.match(await s.text('navigate', { url: b.base }), /Fixture page/);
+
+  // Using a refresh token gives a new pair. The old one keeps working for a
+  // couple of minutes, for a client whose reply got lost.
+  const refresh = (token) => fetch(relay.url + '/token', {
+    method: 'POST',
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token, client_id: registered.client_id }),
+  });
+  const renewed = await refresh(tokens.refresh_token);
+  assert.equal(renewed.status, 200);
+  assert.notEqual((await renewed.json()).refresh_token, tokens.refresh_token);
+  assert.equal((await refresh(tokens.refresh_token)).status, 200);
+  assert.equal((await refresh('made-up')).status, 400);
+
+  // A session belongs to whoever opened it: the key cannot drive the connector's session.
+  const res = await fetch(relay.url + '/mcp', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${relay.key}`, 'mcp-session-id': s.transport.sessionId,
+      'content-type': 'application/json', accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list' }),
+  });
+  assert.equal(res.status, 404);
+  await s.transport.terminateSession();
+});
+
+test("a session's tabs cannot open the relay itself", async () => {
+  const s = await connect();
+  const page = await s.text('navigate', { url: relay.url + '/healthz' });
+  assert.doesNotMatch(page, /"ok":true/);
+  assert.match(await s.text('evaluate', { code: 'fetch(' + JSON.stringify(relay.url + '/healthz') + ').then(() => "reached", () => "blocked")' }), /blocked/);
   await s.transport.terminateSession();
 });

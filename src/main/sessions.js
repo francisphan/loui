@@ -81,17 +81,17 @@ function createSessions({ tabs, changed, feed }) {
     if (asking) throw new Error('Another session is already asking the user for a tab.');
     return new Promise((resolve) => {
       const timer = setTimeout(() => answer(false), 60000);
-      asking = { session, resolve, timer };
+      asking = { session, resolve, timer, tabId: tab?.id };
       changed();
     });
   }
 
   function answer(yes) {
     if (!asking) return;
-    const { session, resolve, timer } = asking;
+    const { session, resolve, timer, tabId } = asking;
     clearTimeout(timer);
     asking = null;
-    const tab = tabs.active();
+    const tab = tabs.get(tabId); // the tab on screen when the session asked
     // Only the user's own tabs can be handed over, not another session's.
     if (yes && tab?.group === YOU && live.has(session.id)) {
       tabs.move(tab.id, session.group, { lent: true });

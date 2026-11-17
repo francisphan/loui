@@ -21,7 +21,8 @@ function deviceUrl(base) {
   return u.href;
 }
 
-function createLink({ home, version, handle, sessions, changed }) {
+// guard(origins): told the addresses that reach the relay, which sessions' tabs must not open.
+function createLink({ home, version, handle, sessions, changed, guard }) {
   const file = path.join(home, 'relay.json');
   const read = (f, fallback) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return fallback; } };
 
@@ -72,6 +73,7 @@ function createLink({ home, version, handle, sessions, changed }) {
     sock.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
       if (msg.welcome) {
+        guard([...(msg.relay || []), new URL(config.url).origin]);
         attempt = 0;
         clearTimeout(orphanTimer);
         orphanTimer = 0;

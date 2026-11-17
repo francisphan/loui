@@ -55,6 +55,7 @@ class Tabs extends EventEmitter {
     this.activeId = null; // the tab on screen
     this.area = { x: 0, y: 80, width: 800, height: 600 };
     this.seq = 0;
+    this.relayOrigins = new Set();
     this.backdrop = new View();
     const tint = () => this.backdrop.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF');
     tint();
@@ -319,6 +320,14 @@ class Tabs extends EventEmitter {
       });
     };
     const all = { urls: ['<all_urls>'] };
+    // Tabs that Claude sessions work in never reach the relay itself (its
+    // approval page asks for the relay key), however they get there.
+    this.ses.webRequest.onBeforeRequest(all, (d, done) => {
+      const tab = owner(d);
+      let origin = '';
+      try { origin = new URL(d.url).origin; } catch {}
+      done({ cancel: !!tab && tab.group !== YOU && this.relayOrigins.has(origin) });
+    });
     this.ses.webRequest.onSendHeaders(all, (d) => started.set(d.id, Date.now()));
     this.ses.webRequest.onCompleted(all, (d) => record(d, { status: d.statusCode }));
     this.ses.webRequest.onErrorOccurred(all, (d) => record(d, { error: d.error }));
