@@ -9,11 +9,12 @@ const PAUSED =
   'The user has taken over this tab group and paused you. Stop here and tell them you are ' +
   'waiting; they will say when to continue.';
 
-function createSessions({ tabs, changed, feed }) {
+// prompts: the line of questions for the user (prompts.js). ended(id): told
+// whenever a session ends, even one that never got a group.
+function createSessions({ tabs, changed, feed, prompts, ended = () => {} }) {
   const live = new Map(); // id -> { id, group, label, source }
   const panel = { id: 'panel', group: YOU, label: 'Claude', source: 'panel' };
   let feedId = 0;
-  let asking = null; // a session waiting for the user to hand over the tab on screen
 
   // Two sessions from the same place get "Claude Code" and "Claude Code 2".
   function unique(label) {
@@ -35,8 +36,9 @@ function createSessions({ tabs, changed, feed }) {
   }
 
   function end(id) {
+    prompts.drop(id); // its questions, including one asking whether it may come in
+    ended(id);
     if (!live.delete(id)) return;
-    if (asking?.session.id === id) answer(false);
     tabs.removeGroup(id);
   }
 
@@ -70,41 +72,39 @@ function createSessions({ tabs, changed, feed }) {
     }
   }
 
-  // A session asks for the tab the user is looking at. Resolves with the tab
-  // once the user allows it, or null if they decline or a minute passes.
-  function request(session) {
+  // A session asks for the tab the user is looking at. The question waits its
+  // turn behind any others; once shown, the user has a minute. Resolves with
+  // the tab once the user allows it, or null if they decline or do not answer.
+  async function request(session) {
     const tab = tabs.active();
     if (tab?.group === session.group) {
       tabs.setCurrent(session.group, tab.id);
-      return Promise.resolve(tab);
+      return tab;
     }
-    if (asking) throw new Error('Another session is already asking the user for a tab.');
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => answer(false), 60000);
-      asking = { session, resolve, timer, tabId: tab?.id };
-      changed();
-    });
+    const yes = await prompts.ask({ kind: 'handoff', session, limit: 60000 });
+    // The tab on screen when the user answered: the question says "this tab",
+    // and by its turn the user may be looking at another one. Only the user's
+    // own tabs can be handed over, not another session's.
+    const now = tabs.active();
+    if (yes !== true || now?.group !== YOU || !live.has(session.id)) return null;
+    tabs.move(now.id, session.group, { lent: true });
+    return now;
   }
 
+  // The hand-over question on show, answered from the window (or the tests).
   function answer(yes) {
-    if (!asking) return;
-    const { session, resolve, timer, tabId } = asking;
-    clearTimeout(timer);
-    asking = null;
-    const tab = tabs.get(tabId); // the tab on screen when the session asked
-    // Only the user's own tabs can be handed over, not another session's.
-    if (yes && tab?.group === YOU && live.has(session.id)) {
-      tabs.move(tab.id, session.group, { lent: true });
-      resolve(tab);
-    } else resolve(null);
-    changed();
+    const head = prompts.head();
+    if (head?.kind === 'handoff') prompts.answer(head.id, !!yes);
   }
 
   return {
     panel, open, end, during, request, answer,
     get: (id) => live.get(id),
     ids: () => [...live.keys()],
-    asking: () => (asking ? { label: asking.session.label } : null),
+    asking: () => {
+      const head = prompts.head();
+      return head?.kind === 'handoff' ? { label: head.session.label } : null;
+    },
   };
 }
 

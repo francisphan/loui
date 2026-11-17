@@ -37,7 +37,7 @@ const shorten = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const host = (u) => { try { return new URL(u).host || u; } catch { return u; } };
 
 // refuse(url): why sessions may not open an address (see brave.js), or null.
-function createActions({ tabs, sessions, changed, refuse = () => null }) {
+function createActions({ tabs, sessions, prompts, changed, refuse = () => null }) {
   // The tab a session works in: its group's current tab. A session's first
   // tab is opened in the background the first time it needs one. A sleeping
   // or resting tab is woken (see tabs.use()).
@@ -501,8 +501,17 @@ function createActions({ tabs, sessions, changed, refuse = () => null }) {
       label: () => 'asking you to point at something',
       async run({ message }, c) {
         const tab = c.need();
-        tabs.select(tab.id); // the user has to see the tab to click in it
-        const p = await picker.start(tab, message);
+        // Waits its turn behind other sessions' questions (prompts.js), then
+        // brings the tab on screen: the user has to see it to click in it.
+        const p = await prompts.ask({
+          kind: 'pick', session: c.session, message,
+          begin(item) {
+            if (tabs.get(tab.id) !== tab || !tab.wc) return prompts.answer(item.id, null); // closed while waiting
+            tabs.select(tab.id);
+            picker.start(tab, message).then((found) => prompts.answer(item.id, found), () => prompts.answer(item.id, null));
+          },
+          stop: () => picker.cancel(),
+        });
         return p ? pickContent(p, c.session) : text('The user did not pick anything (cancelled or timed out).');
       },
     },

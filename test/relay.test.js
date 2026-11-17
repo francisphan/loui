@@ -80,6 +80,53 @@ test('Loui connects to the relay as a browser', async () => {
   assert.equal(relay.devices.size, 1);
 });
 
+// The browser asks the user before a new session first uses it (consent.js).
+const question = async () => {
+  await until(async () => (await b.state()).prompt?.kind === 'consent', 'the browser to ask the user');
+  return (await b.state()).prompt;
+};
+let keyConnector;
+
+test('a new session waits for the user, who can always allow sessions signed in with the key', async () => {
+  const s = await connect('claude-code');
+  const call = s.text('navigate', { url: b.base });
+  const p = await question();
+  assert.equal(p.who, 'Claude Code');
+  assert.equal(p.connector.kind, 'key');
+  assert.match(p.connector.id, /^[\w-]{22}$/);
+  assert.ok(!p.connector.id.includes('owner') && !JSON.stringify(p).includes(relay.key), 'nothing secret reaches the browser');
+  keyConnector = p.connector.id;
+  assert.equal((await groups()).length, 0, 'no group until the user answers');
+  await b.ui('prompt:answer', { id: p.id, value: 'always' });
+  assert.match(await call, /Fixture page/);
+  await s.transport.terminateSession();
+  await until(async () => (await groups()).length === 0, 'the group to close');
+
+  // The next session with the key is the same connector, so it is let straight in.
+  const again = await connect('claude-code');
+  assert.match(await again.text('navigate', { url: b.base }), /Fixture page/);
+  assert.equal((await b.state()).prompt, null);
+  await again.transport.terminateSession();
+  await until(async () => (await groups()).length === 0, 'the group to close');
+});
+
+test('a session the user denies is told so, and gets no group', async () => {
+  await b.ui('consent:revoke', keyConnector);
+  const s = await connect('claude-code');
+  const call = s.text('navigate', { url: b.base });
+  await b.ui('prompt:answer', { id: (await question()).id, value: 'deny' });
+  await assert.rejects(call, /did not allow this session/);
+  assert.equal((await groups()).length, 0);
+  await s.transport.terminateSession();
+  // Back as it was for the tests that follow.
+  const t = await connect('claude-code');
+  const next = t.text('navigate', { url: b.base });
+  await b.ui('prompt:answer', { id: (await question()).id, value: 'always' });
+  await next;
+  await t.transport.terminateSession();
+  await until(async () => (await groups()).length === 0, 'the group to close');
+});
+
 test('a session gets the browser tools and a tab group named after it', async () => {
   const s = await connect('claude-code');
   const { tools } = await s.client.listTools();
@@ -193,8 +240,15 @@ test("Claude's connector signs in with OAuth, approved with the relay key", asyn
   })).json();
   assert.ok(tokens.access_token && tokens.refresh_token);
 
+  // A connector is asked about on its own, not let in by the key's "always allow".
   const s = await connect('claude-ai', tokens.access_token);
-  assert.match(await s.text('navigate', { url: b.base }), /Fixture page/);
+  const call = s.text('navigate', { url: b.base });
+  const p = await question();
+  assert.deepEqual({ kind: p.connector.kind, name: p.connector.name }, { kind: 'connector', name: 'Claude' });
+  assert.notEqual(p.connector.id, keyConnector);
+  assert.ok(!p.connector.id.includes(registered.client_id), 'the client id stays with the relay');
+  await b.ui('prompt:answer', { id: p.id, value: 'allow' });
+  assert.match(await call, /Fixture page/);
 
   // Using a refresh token gives a new pair. The old one keeps working for a
   // couple of minutes, for a client whose reply got lost.

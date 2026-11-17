@@ -28,7 +28,7 @@ const el = (tag, className, text) => {
   return node;
 };
 
-let state = { tabs: [], groups: [], asking: null, picking: {}, picks: [], link: {} };
+let state = { tabs: [], groups: [], asking: null, prompt: null, waiting: [], picking: {}, picks: [], link: {} };
 let running = false; // a panel conversation turn is in flight
 
 const activeTab = () => state.tabs.find((t) => t.active);
@@ -148,12 +148,15 @@ function drawTabs() {
   $('tabs').replaceChildren(...nodes);
 }
 
-// Who is driving the tab on screen. The status lingers briefly after Claude's
-// last step so it does not flicker between one tool call and the next.
+// Who is driving the tab on screen, or a question from a Claude session
+// (src/main/prompts.js): one at a time, with a count of those waiting. The
+// status lingers briefly after Claude's last step so it does not flicker
+// between one tool call and the next.
 const lingerUntil = new Map(); // group id -> time
 let lingerTimer = 0;
+let shownPrompt = null;
 function drawHelm() {
-  const { picking, asking } = state;
+  const { picking, prompt } = state;
   const g = groupOf(activeTab()?.group) || { id: YOU, label: 'You' };
   const who = g.id === YOU ? 'Claude' : g.label;
   for (const each of state.groups) if (each.busy) lingerUntil.set(each.id, Date.now() + 1400);
@@ -163,16 +166,33 @@ function drawHelm() {
     lingerTimer = setTimeout(drawHelm, 1450);
   }
   const driving = !g.paused && (g.busy || lingering);
-  let text = '', label = '', act = null, decline = null;
-  if (picking.active) {
+  const answer = (value) => () => loui.send('prompt:answer', { id: prompt.id, value });
+  let text = '', label = '', act = null, decline = null, no = 'Not now', always = null;
+  const asked = prompt && !(picking.active && prompt.kind !== 'pick'); // the user's own pointing comes first
+  if (picking.active && !asked) {
     text = picking.message || 'Click the thing you mean. Esc cancels.';
     label = 'Cancel';
     act = () => loui.send('pick:cancel');
-  } else if (asking) {
-    text = `${asking.label} asks to work in this tab`;
-    label = 'Hand it over';
-    act = () => loui.send('handoff:answer', true);
-    decline = () => loui.send('handoff:answer', false);
+  } else if (asked && prompt.kind === 'consent') {
+    text = `Let ${prompt.who} use Loui?`;
+    label = 'Allow';
+    act = () => loui.send('prompt:answer', { id: prompt.id, value: $('helm-always').checked ? 'always' : 'allow' });
+    decline = answer('deny');
+    no = 'Deny';
+    always = prompt.connector;
+  } else if (asked && prompt.kind === 'handoff') {
+    // Only the user's own tabs can be handed over: the one on screen when they answer.
+    const theirs = activeTab()?.group === YOU;
+    text = theirs ? `${prompt.who} asks to work in this tab` : `${prompt.who} asks for one of your tabs. Open it to hand it over.`;
+    if (theirs) {
+      label = 'Hand it over';
+      act = answer(true);
+    }
+    decline = answer(false);
+  } else if (asked) {
+    text = `${prompt.who} asks you to point${prompt.message ? `: ${prompt.message}` : ' at something'}. Esc cancels.`;
+    label = 'Cancel';
+    act = () => loui.send('pick:cancel');
   } else if (g.paused) {
     text = `${who} is paused. You're driving.`;
     label = 'Let Claude continue';
@@ -186,14 +206,45 @@ function drawHelm() {
     label = 'Take over';
     act = () => loui.send('pause', { group: g.id, on: true });
   }
-  $('helm').hidden = !act;
-  $('helm').classList.toggle('moving', driving && !picking.active && !asking);
+  const helm = $('helm');
+  helm.hidden = !act && !decline;
+  helm.classList.toggle('moving', driving && !picking.active && !prompt);
+  helm.classList.toggle('asking', !!asked);
   $('helm-text').textContent = text;
   $('helm-text').title = text;
+  $('helm-btn').hidden = !act;
   $('helm-btn').textContent = label;
   $('helm-btn').onclick = act;
   $('helm-no').hidden = !decline;
+  $('helm-no').textContent = no;
   $('helm-no').onclick = decline;
+  $('helm-always-label').hidden = !always;
+  if (always) {
+    $('helm-always-text').textContent = always.kind === 'key' ? 'Always allow the relay key' : `Always allow the ${always.name} connector`;
+    $('helm-always-label').title = always.kind === 'key'
+      ? 'Sessions signed in with the relay key, such as Claude Code on your machines, will not be asked again. Revoke in File › Settings.'
+      : `New sessions from the ${always.name} connector will not be asked again. Revoke in File › Settings.`;
+  }
+  // Questions waiting behind the one on show, named in the tooltip.
+  const more = state.waiting.length + (prompt && !asked ? 1 : 0);
+  $('helm-more').hidden = !more;
+  $('helm-more').textContent = `${more} more`;
+  $('helm-more').title = `Also waiting: ${[...(asked ? [] : prompt ? [prompt.who] : []), ...state.waiting].join(', ')}`;
+  // A new question takes a moment to become answerable, so that a click meant
+  // for something else as it appears cannot answer it.
+  const shown = asked ? prompt.id : null;
+  if (shown !== shownPrompt) {
+    shownPrompt = shown;
+    $('helm-always').checked = false;
+    if (shown) {
+      for (const b of [$('helm-btn'), $('helm-no')]) b.disabled = true;
+      setTimeout(() => {
+        if (shownPrompt === shown) for (const b of [$('helm-btn'), $('helm-no')]) b.disabled = false;
+      }, 600);
+    } else {
+      for (const b of [$('helm-btn'), $('helm-no')]) b.disabled = false;
+    }
+  }
   document.body.classList.toggle('driving', driving);
 }
 

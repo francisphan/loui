@@ -18,8 +18,10 @@
       <button id="newtab" class="icon" type="button" title="New tab (Ctrl+T)" aria-label="New tab"></button>
       <div id="helm" role="status" hidden>
         <span id="helm-text"></span>
+        <label id="helm-always-label" hidden><input id="helm-always" type="checkbox"> <span id="helm-always-text"></span></label>
         <button id="helm-no" type="button" hidden>Not now</button>
         <button id="helm-btn" type="button"></button>
+        <span id="helm-more" hidden></span>
       </div>
     </div>
     <div id="navrow">
@@ -142,6 +144,9 @@
         <input id="elsewhere-site" type="text" spellcheck="false" autocomplete="off" placeholder="accounts.google.com" aria-label="Site to send to your other browser">
         <button type="submit" class="quiet">Add</button>
       </form>
+      <h3>Claude sessions let in without asking</h3>
+      <p>The first time a new Claude session uses Loui, Loui asks you. Sessions from these are let in straight away.</p>
+      <ul id="consent-list"></ul>
       <div class="row end"><button id="settings-close" class="quiet" type="button">Close</button></div>
     </section>
     <div id="feed">
@@ -213,5 +218,6 @@
   <script src="shields.js"></script>
   <script src="settings.js"></script>
   <script src="bookmarks.js"></script>
+  <script src="consent.js"></script>
 </body>
 </html>
