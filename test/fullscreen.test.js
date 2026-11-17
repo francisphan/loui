@@ -25,6 +25,20 @@ const place = (id) => b.ui('tab:place', id);
 const covers = (p) => p.view.x === 0 && p.view.y === 0 && p.view.width === p.window.width && p.view.height === p.window.height;
 const press = (id) => b.ui('tab:press', { id, x: 200, y: 200 }); // a real press: full screen needs one
 // The page itself is out of full screen (it follows the window by a moment): only then does its button ask again.
+// Presses the page's button until the page has the whole window: a press sent
+// while the tab is still being put on screen, or the window is still coming
+// out of full screen, can be lost.
+async function goFull(id) {
+  for (let tries = 0; tries < 5; tries++) {
+    await press(id);
+    for (const end = Date.now() + 2500; Date.now() < end; await sleep(100)) {
+      if ((await place(id)).full) return;
+    }
+    // Not in: if that press took the page out instead, wait for that to finish before the next.
+    await until(() => b.ui('tab:js', { id, code: '!document.fullscreenElement' }), 'the page to be out of full screen');
+  }
+  assert.fail('the page did not go into full screen');
+}
 const settled = (id) => until(() => b.ui('tab:js', { id, code: '!document.fullscreenElement' }), 'the page to be out of full screen');
 
 let tab;
@@ -44,8 +58,7 @@ test('a page that asks for the whole screen covers the tabs and the toolbar, and
 });
 
 test('showing another tab ends it', async () => {
-  await press(tab.id);
-  await until(async () => (await place(tab.id)).full, 'full screen');
+  await goFull(tab.id);
   await b.ui('tab:new', b.base + '/second.html');
   const other = await until(async () => { const t = await onScreen(); return t.id !== tab.id && !t.loading && t; }, 'the new tab');
   assert.ok(!covers(await place(other.id)), 'the new tab sits under the toolbar');
@@ -92,8 +105,7 @@ test('over a page in full screen Loui says whose it is and how to leave, and aga
   await until(async () => !(await hint()).shown && !(await place(shown.id)).wide, 'the note to go with the full screen');
   // What the page asked for, Esc ends.
   await b.ui('tab:select', tab.id);
-  await press(tab.id);
-  await until(async () => (await place(tab.id)).full, 'full screen');
+  await goFull(tab.id);
   await noted(/^127\.0\.0\.1:\d+\s+Esc to leave full screen$/);
   await press(tab.id);
   await until(async () => !(await place(tab.id)).full && !(await hint()).shown, 'the toolbar back, and the note gone');
@@ -132,8 +144,7 @@ test('a question for the window ends full screen of either kind, so that it is s
   await answer();
   await asked;
   // The page's own.
-  await press(tab.id);
-  await until(async () => (await place(tab.id)).full, 'full screen');
+  await goFull(tab.id);
   asked = s.call('request_tab').catch(() => {});
   await until(async () => { const p = await place(tab.id); return !p.full && !covers(p); }, 'the question to end the full screen');
   await settled(tab.id);
