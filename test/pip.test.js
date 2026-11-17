@@ -163,7 +163,8 @@ test('closing the window stops all capture', async () => {
   const before = (await pip()).sent;
   await b.ui('pip:open', 'v');
   await until(pip, (p) => p.open && p.sent > before);
-  await js('document.getElementById("pip-close").click()');
+  // The window closes under the script, which may then never answer.
+  await js('document.getElementById("pip-close").click()').catch(() => {});
   const s = await until(pip, (p) => !p.open);
   assert.equal(s.subscribed, false);
   assert.equal(s.waiting, false);
