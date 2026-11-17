@@ -70,7 +70,6 @@ function askFirst(button, question, needed, act) {
 setIcon($('newtab'), 'plus');
 setIcon($('back'), 'back');
 setIcon($('forward'), 'forward');
-setIcon($('devtools'), 'devtools');
 setIcon($('panel-toggle'), 'panel');
 setIcon($('menu'), 'menu');
 setIcon($('point').querySelector('.glyph'), 'point');
@@ -81,7 +80,6 @@ $('newtab').onclick = () => loui.send('tab:new');
 $('back').onclick = () => loui.send('back');
 $('forward').onclick = () => loui.send('forward');
 $('reload').onclick = () => loui.send('reload');
-$('devtools').onclick = () => loui.send('devtools');
 $('device').onclick = () => loui.send('device:menu');
 $('point').onclick = $('point-here').onclick = () =>
   loui.send(state.picking.active ? 'pick:cancel' : 'pick:start');
@@ -909,14 +907,22 @@ relay.onsubmit = (e) => {
   $('relay-key').value = '';
 };
 
-// Shown only once a new version has downloaded; until then updates stay out of the way.
+// A new version on its way shows how far its download has come; once it is
+// here the button restarts Loui. Until there is one, updates stay out of the way.
 function drawUpdate() {
   const u = state.update;
   const ready = u?.status === 'ready';
-  $('update').hidden = !ready;
+  const coming = u?.status === 'downloading';
+  $('update').hidden = !ready && !coming;
+  $('update').disabled = !ready;
+  if (coming) {
+    $('update').textContent = `Updating… ${u.percent || 0}%`;
+    $('update').title = `Version ${u.version} is downloading. Loui will offer to restart when it is here.`;
+    return;
+  }
   if (!ready || $('update').classList.contains('sure')) return; // not while it asks "Restart now?"
   $('update').textContent = 'Restart to update';
-  $('update').title = `Version ${u.version} is ready. Loui restarts and reopens; Claude sessions' tab groups close.`;
+  $('update').title = `Version ${u.version} is ready. Loui closes, the installer shows its progress for a few seconds, and Loui reopens; Claude sessions' tab groups close.`;
 }
 // Restarting closes sessions' tab groups, so while one is working (in any window) it asks first.
 askFirst($('update'), 'Restart now?', () => state.working > 0, () => loui.send('update:install'));
@@ -948,6 +954,7 @@ loui.on('state', (next) => {
   $('reload').title = tab?.loading ? 'Stop loading' : 'Reload (Ctrl+R)';
   $('device-label').textContent = tab?.device || '';
   $('device').classList.toggle('on', !!tab?.device);
+  $('device').hidden = !tab?.device; // only while a device is emulated; choosing one is in the menu (the three dots)
   $('point').classList.toggle('on', !!state.picking.active);
   // A private window is tinted and labelled, and says so in its title.
   const priv = !!state.window?.private;

@@ -884,6 +884,10 @@ function buttonMenu() {
     { label: 'Find in page…', ...keys('CmdOrCtrl+F'), click: () => handlers['find:open']() },
     { label: 'Print…', ...keys('CmdOrCtrl+P'), click: handlers.print },
     { type: 'separator' },
+    // For looking at a page as a developer; out of the toolbar's way.
+    { label: 'Device size', enabled: !!tab, submenu: tab ? deviceItems(tab) : [] },
+    { label: 'Developer tools', ...keys('F12'), enabled: !!tab, click: () => handlers.devtools() },
+    { type: 'separator' },
     {
       label: 'Claude',
       submenu: [
@@ -907,17 +911,20 @@ function buttonMenu() {
   ]);
 }
 
-function deviceMenu() {
-  const tab = active();
-  if (!tab) return;
+// The sizes a tab's page can be shown at: the full window, or a device's.
+function deviceItems(tab) {
   const item = (label, device, checked) => ({
     label, type: 'radio', checked, click: () => tabs.setDevice(tab, device),
   });
-  Menu.buildFromTemplate([
+  return [
     item('Full window', null, !tab.device),
     ...Object.entries(PRESETS).map(([key, p]) =>
       item(`${p.label}  ${p.width}×${p.height}`, key, tab.device === p)),
-  ]).popup({ window: tab.window.win });
+  ];
+}
+function deviceMenu() {
+  const tab = active();
+  if (tab) Menu.buildFromTemplate(deviceItems(tab)).popup({ window: tab.window.win });
 }
 
 // Menu items act in the window they were chosen in.
