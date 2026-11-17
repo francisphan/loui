@@ -48,6 +48,10 @@
 .activity-row:hover .remove, .activity-row .remove:focus-visible { opacity: 1; }
 .activity-row .remove:hover { background: var(--water); color: var(--ink); }
 .activity-live { color: var(--claude); }
+/* What can be done with a session that is still connected. */
+.activity-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 0 2px -6px; font-size: 12.5px; }
+.activity-controls .sure { margin: 0 4px 0 6px; font-weight: 650; }
+.activity-controls .danger { color: var(--danger); font-weight: 650; }
 .activity-bad { color: var(--danger); }
 
 /* One session's timeline. */

@@ -14,7 +14,7 @@ const SEND = new Set([
   'shields:menu', 'shields:set',
   'print', 'print:save-pdf', 'search:set', 'brave:open', 'brave:add', 'brave:remove',
   'bookmarks', 'passwords', 'reader:toggle',
-  'prompt:answer', 'consent:revoke',
+  'prompt:answer', 'prompt:next', 'consent:revoke',
   'activity',
   'pip:open',
 ]);
@@ -24,6 +24,7 @@ const LISTEN = new Set([
   'show-settings',
   'bookmarks', 'passwords',
   'activity', 'show-activity',
+  'group:end',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {

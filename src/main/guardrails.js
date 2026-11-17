@@ -246,9 +246,11 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   async function confirm(session, tab, found, image) {
     const { ok, p } = await ask(session, tab, found, image);
     if (ok) return;
-    throw new Error(p.timedOut
+    // stopped: the user's doing, not a failure (sessions.js, activity.js).
+    throw Object.assign(new Error(p.timedOut
       ? `The user did not answer within 2 minutes, so Loui did not ${found.what} on ${p.site}. Ask the user before trying again.`
-      : `The user declined: ${found.what}${found.kind === 'site' ? '' : ` on ${p.site}`}. Loui stopped it before it reached the page. Do not try another way; ask the user what they want.`);
+      : `The user declined: ${found.what}${found.kind === 'site' ? '' : ` on ${p.site}`}. Loui stopped it before it reached the page. Do not try another way; ask the user what they want.`),
+    { stopped: p.timedOut ? 'unanswered' : 'blocked' });
   }
 
   // Before input: the consequential action this would be, or null if it is

@@ -145,3 +145,33 @@ test('ending a session closes its tab group', async () => {
   // The same session id starts afresh rather than failing.
   assert.match(await a.text('navigate', { url: b.base }), /Fixture page/);
 });
+
+test('the × on a session with several tabs asks before ending it; one idle tab closes at once', async () => {
+  const chrome = (code) => b.ui('chrome:eval', code);
+  const groups = async () => (await b.state()).groups.map((g) => g.id);
+  const gone = async (id) => {
+    for (let i = 0; i < 50 && (await groups()).includes(id); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(!(await groups()).includes(id), `${id} has ended`);
+  };
+  const s = b.as('e1', 'Ender');
+  await s.text('navigate', { url: b.base });
+  await s.text('navigate', { url: b.base + '/second.html', new_tab: true });
+  const x = `document.querySelector('.group[data-group="e1"] .group-tag .close')`;
+  await chrome(`${x}.click()`);
+  assert.equal(await chrome(`${x}.textContent`), 'End session?');
+  assert.match(await chrome(`${x}.title`), /close its 2 tabs/);
+  assert.ok((await groups()).includes('e1'), 'one click does not end it');
+  await chrome(`${x}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+  assert.equal(await chrome(`${x}.textContent`), '', 'Esc puts the × back');
+  // "End session" in the group's menu asks the same way; pressing the question ends it.
+  await b.ui('group:end', 'e1');
+  for (let i = 0; i < 30 && (await chrome(`${x}.textContent`)) !== 'End session?'; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok((await groups()).includes('e1'));
+  await chrome(`${x}.click()`);
+  await gone('e1');
+
+  const one = b.as('e2', 'Single');
+  await one.text('navigate', { url: b.base });
+  await chrome(`document.querySelector('.group[data-group="e2"] .group-tag .close').click()`);
+  await gone('e2');
+});

@@ -180,3 +180,54 @@ test('two sessions asking the user to point wait their turn instead of cancellin
   await wait('pointing to stop', async () => !(await b.state()).picking.active);
   a.end();
 });
+
+test('"1 more" in the helm shows the next question, so a waiting one can be answered first', async () => {
+  const chrome = (code) => b.ui('chrome:eval', code);
+  const a = b.as('n1', 'Wants a tab');
+  await a.text('navigate', { url: b.base });
+  assert.equal((await b.state()).tabs.find((t) => t.active).group, 'you');
+  const tabAsk = a.text('request_tab');
+  const first = await asked('Wants a tab');
+  const c = b.as('n2', 'Newcomer', { ask: true });
+  const call = c.text('navigate', { url: b.base }).catch((e) => e.message);
+  await wait('the newcomer to wait', async () => (await b.state()).waiting.length === 1);
+  await wait('the count', async () => (await chrome("document.getElementById('helm-more').textContent")) === '1 more');
+  await chrome("document.getElementById('helm-more').click()");
+  const second = await asked('Newcomer');
+  assert.equal(second.kind, 'consent');
+  assert.deepEqual((await b.state()).waiting, ['Wants a tab'], 'the first went to the back of the line');
+  await wait('the question in the helm', async () => (await chrome("document.getElementById('helm-text').textContent")) === 'Let Newcomer use Loui?');
+  await answer(second, 'allow');
+  assert.match(await call, /Fixture page/);
+  // The one set aside is still asked, and still answerable.
+  const again = await asked('Wants a tab');
+  assert.equal(again.id, first.id);
+  await answer(again, false);
+  assert.match(await tabAsk, /did not hand over/);
+  a.end();
+  c.end();
+  await sleep(300);
+});
+
+test('a pointing question set aside for the next one is asked again, not cancelled', async () => {
+  const a = b.as('n3', 'Pointer');
+  const c = b.as('n4', 'Borrower');
+  await a.text('navigate', { url: b.base });
+  await c.text('navigate', { url: b.base + '/second.html' });
+  const pick = a.text('ask_user_to_pick', { message: 'Which card?' });
+  await asked('Pointer');
+  await wait('pointing to start', async () => (await b.state()).picking.active);
+  const tabAsk = c.text('request_tab');
+  await wait('the second to wait', async () => (await b.state()).waiting.length === 1);
+  await b.ui('prompt:next');
+  const q = await asked('Borrower');
+  assert.equal((await b.state()).picking.active, false, 'pointing stops while the other question is on show');
+  await answer(q, false);
+  assert.match(await tabAsk, /did not hand over/);
+  await asked('Pointer');
+  await wait('pointing to start again', async () => (await b.state()).picking.active);
+  await b.ui('pick:cancel');
+  assert.match(await pick, /did not pick anything/);
+  a.end();
+  c.end();
+});

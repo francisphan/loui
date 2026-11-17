@@ -3,7 +3,9 @@
 // user point at something (actions.js). They wait in one line and are shown
 // one at a time, oldest first, in the helm at the end of the tab row: window
 // chrome, which no page can draw over. The rest are a count beside it, so a
-// user who was away comes back to one question and a number, not a pile.
+// user who was away comes back to one question and a number, not a pile. The
+// count is a button: it puts the question on show at the back of the line and
+// shows the next, so any of them can be answered first.
 //
 // A question's time limit runs from when it is shown, not from when it was
 // asked, so one waiting its turn still gets the user's full attention. Nothing
@@ -14,6 +16,7 @@ const MAX_WAIT_MS = 8 * 60 * 1000;
 function createPrompts({ changed }) {
   const line = []; // { id, kind, session, at, limit, begin, stop, resolve, timer, ... }
   let seq = 0;
+  let turns = 0; // counts each showing of a question
 
   // kind: 'consent' | 'handoff' | 'pick'. session: { id, label }. limit: ms
   // once shown (none: begin() has a limit of its own). begin(item): called
@@ -34,7 +37,22 @@ function createPrompts({ changed }) {
     const left = Math.max(0, MAX_WAIT_MS - (Date.now() - head.at));
     head.timer = setTimeout(() => withdraw(head), head.limit ? Math.min(head.limit, left) : left);
     head.shown = true;
+    head.turn = ++turns;
     head.begin?.(head);
+  }
+
+  // The user asks for the next question: the one on show goes to the back of
+  // the line, unanswered, and is shown afresh when its turn comes round.
+  function next() {
+    const head = line[0];
+    if (line.length < 2) return;
+    clearTimeout(head.timer);
+    head.turn = 0; // what begin() set going no longer answers it (see actions.js)
+    if (head.shown) head.stop?.();
+    head.shown = false;
+    line.push(line.shift());
+    show();
+    changed();
   }
 
   function settle(item, value) {
@@ -55,7 +73,7 @@ function createPrompts({ changed }) {
   }
 
   return {
-    ask,
+    ask, next,
     answer(id, value) {
       const item = line.find((x) => x.id === id);
       if (item) settle(item, value);
