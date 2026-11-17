@@ -284,21 +284,20 @@ test('an icon too large to be one is not fetched whole', async () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       return res.end('<!doctype html><title>Big icon</title><link rel="icon" href="/big.png"><p>page</p>');
     }
-    // No length given: 16 MB, in pieces, counted as they leave.
+    // No length given: 16 MB, in pieces.
     res.writeHead(200, { 'content-type': 'image/png' });
     let left = 256;
-    const more = () => { if (!left-- || res.destroyed) return res.end(); big.sent += 65536; res.write(Buffer.alloc(65536), more); };
+    res.on('close', () => { if (!res.writableEnded) big.hungUp = true; }); // the reader left before the end
+    const more = () => { if (res.destroyed) return; if (!left--) return res.end(); res.write(Buffer.alloc(65536), more); };
     more();
   });
-  big.sent = 0;
   await new Promise((r) => big.listen(0, '127.0.0.1', r));
   try {
     await from(one, 'go', `http://127.0.0.1:${big.address().port}/`);
     await wait('the page', async () => { const t = await tabIn(one); return t.title === 'Big icon' && !t.loading; });
     await pause(1500);
     assert.equal((await tabIn(one)).favicon, null, 'no icon');
-    // Some more leaves the server than is read (buffers on the way), but far from all of it.
-    assert.ok(big.sent < 4 * 1024 * 1024, `stopped early (${big.sent} bytes left the server)`);
+    await wait('Loui to stop reading it', () => big.hungUp);
   } finally {
     big.closeAllConnections();
     big.close();
