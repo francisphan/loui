@@ -184,6 +184,9 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     if (log.off || !wc || wc.isDestroyed()) return;
     capturing.add(tab.id);
     try {
+      // A tab out of sight may not be drawn (always so without a GPU), so it
+      // peeks, as for the screenshot tool.
+      tabs.use(tab);
       const img = await wc.capturePage();
       const { width } = img.getSize();
       if (!width && process.env.LOUI_TEST) console.error('activity: no picture: the capture was empty');
