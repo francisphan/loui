@@ -17,6 +17,7 @@ const { createUpdater } = require('./updater');
 const { createRestore } = require('./restore');
 const { createFind } = require('./find');
 const { createDownloads } = require('./downloads');
+const { createPermissions } = require('./permissions');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -41,9 +42,7 @@ function setTheme(theme) {
   Menu.setApplicationMenu(appMenu());
 }
 
-const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
-
-let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads;
+let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -72,11 +71,11 @@ const currentState = () => ({
   update: updater.state(),
   find: find.state(),
   downloads: downloads.state(),
+  ...permissions.state(),
 });
 
 function createWindow() {
   const ses = session.fromPartition('persist:loui');
-  ses.setPermissionRequestHandler((_wc, permission, allow) => allow(ALLOWED_PERMISSIONS.has(permission)));
 
   win = new BrowserWindow({
     width: 1440,
@@ -96,6 +95,7 @@ function createWindow() {
   tabs = new Tabs(win, ses);
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
+  permissions = createPermissions({ ses, tabs, home: paths.home, changed: pushState });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
@@ -185,6 +185,8 @@ const handlers = {
   'download:act': (request) => downloads.act(request),
   'download:ask': (on) => downloads.setAsk(on),
   'download:clear': () => downloads.clear(),
+  'permission:answer': (answer) => permissions.answer(answer),
+  'permission:forget': (which) => permissions.forget(which),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -228,6 +230,7 @@ function appMenu() {
         { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
         { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
         { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
+        { label: 'Site permissions…', click: () => send('show-permissions') },
         { type: 'separator' },
         ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{

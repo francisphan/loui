@@ -8,9 +8,11 @@ const SEND = new Set([
   'group:close', 'device:menu', 'relay:set', 'update:install', 'chat:send', 'chat:stop', 'chat:reset',
   'find', 'find:open', 'find:close',
   'download:act', 'download:ask', 'download:clear',
+  'permission:answer', 'permission:forget',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
+  'show-permissions',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {

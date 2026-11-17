@@ -305,10 +305,17 @@ class Tabs extends EventEmitter {
     const d = tab.device;
     const peekX = a.x + a.width - 1;
     if (!d) return tab.view.setBounds(tab.peeking ? { ...a, x: peekX } : a);
-    // Whole view pixels first, then the zoom that makes them exactly d.width wide.
-    const width = Math.floor(d.width * Math.min(1, a.width / d.width, a.height / d.height));
-    const zoom = width / d.width;
-    const height = Math.round(d.height * zoom);
+    // The page sees (view pixels / zoom), rounded down, as its size. Pick
+    // whole view pixels and a zoom so that comes out exactly d.width by
+    // d.height: the zoom makes the width exact, and a width is chosen for
+    // which some whole number of pixels gives exactly d.height too.
+    let width = Math.floor(d.width * Math.min(1, a.width / d.width, a.height / d.height));
+    let zoom, height;
+    for (;; width--) {
+      zoom = width / d.width;
+      height = Math.ceil(d.height * zoom - 1e-9);
+      if (height / zoom < d.height + 1 - 1e-9 || width <= 1) break;
+    }
     tab.view.setBounds({
       x: tab.peeking ? peekX : a.x + Math.round((a.width - width) / 2),
       y: a.y + Math.round((a.height - height) / 2),

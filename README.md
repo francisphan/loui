@@ -185,6 +185,7 @@ src/main/rpc.js       local control socket, used by the tests
 src/main/chat.js      the Claude panel (Agent SDK)
 src/main/updater.js   updates for installed copies (GitHub Releases)
 src/main/downloads.js downloads: where they are saved, the list, pause and resume
+src/main/permissions.js  camera, microphone, location, notifications, screen: asking and remembering
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
@@ -212,8 +213,14 @@ break:
 - Tabs are sandboxed and get no preload script or Node access.
 - Sessions can open only `http` and `https` pages. Page content is passed to
   Claude as untrusted data.
-- Sites may ask for clipboard-write, fullscreen and pointer lock; every other
-  permission is refused.
+- Sites get clipboard-write, fullscreen and pointer lock without asking. For
+  the camera, microphone, location, notifications and screen sharing, Loui asks
+  you in a strip above the page, naming the site by its address; an answer
+  lasts until you leave the page unless you tick *Remember for this site*
+  (screen sharing is asked every time). *File › Site permissions* lists what
+  is remembered and forgets it. Tabs in a Claude session's group, including
+  tabs you handed over, are refused without asking. Every other permission is
+  refused.
 
 ## Not here yet
 
