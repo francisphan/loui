@@ -113,9 +113,30 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
   let mode = 'all'; // or 'tabs'
   let before = null; // the page or chrome that had the keyboard
   let actions = new Map(); // key of a row on show -> what choosing it does
+  // One palette for all windows: it moves into the window it is opened in,
+  // as the suggestion list does (suggest.js).
+  let host = null;
+  const known = new WeakSet();
+  function moveTo(target) {
+    if (!target || host === target) return;
+    if (host && !host.isDestroyed()) host.contentView.removeChildView(view);
+    host = target;
+    target.contentView.addChildView(view);
+    if (known.has(target)) return;
+    known.add(target);
+    target.on('resize', () => { if (open && host === target) fit(); });
+    target.once('close', () => {
+      if (host !== target) return;
+      if (open) hide();
+      target.contentView.removeChildView(view);
+      host = null;
+    });
+  }
+  // The window the palette is in, for code that asks about "the tab on screen".
+  const served = (fn) => tabs.as(tabs.windows.find((w) => w.win === host), fn);
   // A view only draws if it was in sight while its page loaded (see tabs.js),
   // so it loads as one transparent pixel in the corner and hides afterwards.
-  win.contentView.addChildView(view);
+  moveTo(win);
   view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
   const loaded = new Promise((done) => view.webContents.once('did-finish-load', () => {
     if (!open) view.setVisible(false);
@@ -124,24 +145,25 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
   view.webContents.loadFile(path.join(__dirname, '../ui/palette.html'));
 
   function fit() {
-    const [width, height] = win.getContentSize();
+    const [width, height] = host.getContentSize();
     view.setBounds({ x: 0, y: 0, width, height });
   }
-  win.on('resize', () => { if (open) fit(); });
 
   // Tabs re-stack their views when one is selected or loads in the
   // background; the palette goes back in front of them.
   function raise() {
-    const children = win.contentView.children;
-    if (open && children[children.length - 1] !== view) win.contentView.addChildView(view);
+    if (!open || !host || host.isDestroyed()) return;
+    const children = host.contentView.children;
+    if (children[children.length - 1] !== view) host.contentView.addChildView(view);
   }
   tabs.on('change', raise);
 
   // which: 'all', or 'tabs' for open tabs only. The shortcut that opened it
   // closes it again.
   async function show(which = 'all') {
-    if (open && which === mode) return hide();
-    if (!open) before = webContents.getFocusedWebContents();
+    if (open && which === mode && host === tabs.win) return hide();
+    if (!open || host !== tabs.win) before = webContents.getFocusedWebContents();
+    moveTo(tabs.win); // the window being served (see tabs.as())
     mode = which;
     open = true;
     fit();
@@ -156,7 +178,7 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
     if (!open) return;
     open = false;
     view.setVisible(false);
-    const back = before && !before.isDestroyed() ? before : tabs.active()?.wc || win.webContents;
+    const back = before && !before.isDestroyed() ? before : served(() => tabs.active()?.wc) || host?.webContents;
     before = null;
     back.focus();
   }
@@ -205,7 +227,7 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
   // or chrome that had the keyboard.
   function runCommand(c, target) {
     remember(c.id);
-    c.item.click(undefined, win, target);
+    c.item.click(undefined, host, target);
   }
 
   const recent = () => (Array.isArray(settings.paletteRecent) ? settings.paletteRecent : []);
@@ -328,8 +350,8 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
     run(target);
   }
 
-  ipcMain.handle('palette:query', (e, text) => (e.sender === view.webContents ? results(text) : null));
-  ipcMain.on('palette:choose', (e, key) => { if (e.sender === view.webContents) choose(String(key)); });
+  ipcMain.handle('palette:query', (e, text) => (e.sender === view.webContents ? served(() => results(text)) : null));
+  ipcMain.on('palette:choose', (e, key) => { if (e.sender === view.webContents) served(() => choose(String(key))); });
   ipcMain.on('palette:close', (e) => { if (e.sender === view.webContents) hide(); });
 
   // For the tests (LOUI_TEST only): what only a person at the keyboard can do.
@@ -341,10 +363,11 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
   const probes = {
     // What the palette shows, whether it is in front of every page, and who has the keyboard.
     palette: async () => {
-      const children = win.contentView.children;
+      const children = host.contentView.children;
       return {
         open: open && view.getVisible(),
         inFront: children[children.length - 1] === view,
+        window: tabs.windows.find((w) => w.win === host)?.id ?? null,
         mode,
         ...(await view.webContents.executeJavaScript(`({
           text: document.getElementById('palette-input').value,
@@ -377,7 +400,7 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
       const wc = webContents.getFocusedWebContents();
       if (!wc) return null;
       if (wc === view.webContents) return 'palette';
-      if (wc === win.webContents) return 'chrome';
+      if (tabs.windowOf(wc)) return 'chrome';
       return tabs.list.find((t) => t.wc === wc)?.id || 'other';
     },
   };

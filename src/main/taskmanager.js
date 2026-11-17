@@ -214,7 +214,7 @@ function createTaskManager({ tabs, sleep, pages, claude, lockToApp, focusMain })
     let done = true;
     if (action === 'close') tabs.close(id);
     else if (action === 'sleep') done = sleep.sleepNow(id);
-    else if (action === 'show') { tabs.select(id); focusMain(); }
+    else if (action === 'show') { tabs.select(id); focusMain(tab); } // the window it is in
     else return false;
     setTimeout(refresh, 100);
     return done;

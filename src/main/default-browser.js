@@ -49,9 +49,12 @@ function urlsFrom(argv, cwd) {
 }
 
 function createDefaultBrowser({ getWin, tabs }) {
+  // In the normal window the user focused last (never a private one; a new
+  // normal window if only private ones are open).
   function open(urls) {
-    for (const url of urls) tabs.create(url, { group: YOU, show: true });
-    const win = getWin();
+    const w = tabs.normalWindow() || tabs.openWindow({ blank: !urls.length });
+    for (const url of urls) tabs.create(url, { group: YOU, show: true, window: w });
+    const win = w.win;
     if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
     win.show();

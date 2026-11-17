@@ -2,7 +2,7 @@
 // group. The 'you' group is the user's own tabs. Each Claude session gets a
 // group of its own and works only inside it.
 //
-// All views stay attached to the window, stacked, with the tab the user is
+// All views stay attached to their window, stacked, with the tab the user is
 // looking at on top and an opaque backdrop under it. A tab that is attached but
 // covered can still be captured and sent input without taking focus; a detached
 // or off-screen one cannot, which is why they are stacked rather than hidden.
@@ -12,7 +12,7 @@
 // tab is loading it "peeks": it sits on top, shifted so that a single column
 // of pixels shows at the right edge of the page area, and it is tucked back
 // underneath when the load is done. Its size never changes, so the page
-// cannot tell.
+// cannot tell. A tab moved to another window peeks there the same way.
 //
 // Speed and memory. A covered view still counts as visible, so Chromium never
 // throttles it. The user's own background tabs are therefore hidden as well
@@ -21,6 +21,27 @@
 // A tab can also be put to sleep (sleep.js decides when): its view and page
 // are destroyed and only what the tab strip shows and its history are kept,
 // until it is woken by being selected or used by Claude.
+//
+// Windows. Loui can have several; each is a BrowserWindow with its own window
+// chrome (src/ui) and its own stack of views and backdrop. One Tabs object
+// keeps every tab and group of every window; each tab belongs to one window
+// (tab.window). What is per window lives on the window object: which tab is
+// on screen (activeId), where the page area is (area), the backdrop. The rest
+// (groups, sessions, history, downloads, bookmarks, Shields...) is app-wide.
+//
+// A Claude session's group lives in one window (group.window): the normal
+// window the user focused last when the session started. Its tabs follow it
+// when it is moved to another window, and its tools work wherever it is.
+//
+// A private window has an in-memory session (see main.js: shared by the
+// private windows open at the same time, cleared when the last one closes).
+// Its tabs are the user's, marked private (tab.private), and keep that session
+// for life (tab.ses): one the user hands to a Claude session moves to the
+// session's window but stays private, and closes with the last private window.
+//
+// Code that asks about "the tab on screen" without naming a window (active(),
+// activeId) gets the window being served: the one whose chrome sent the
+// request, or whose state is being drawn (see as()), else the focused one.
 const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
 const { EventEmitter } = require('events');
 const { requestRules } = require('./requests');
@@ -55,24 +76,141 @@ function toUrl(input) {
 }
 
 class Tabs extends EventEmitter {
-  constructor(win, ses) {
+  constructor(ses) {
     super();
-    this.win = win;
-    this.ses = ses;
+    this.ses = ses; // the user's own session; a private tab has another (tab.ses)
+    this.windows = [];
+    this.focused = null; // the window the user focused last
+    this.viewer = null; // the window being served just now (see as())
+    this.windowSeq = 0;
+    // Set by main.js: opens a window ({ private, blank }) and returns it, for
+    // when one has to exist (a session's group with no window left to go to).
+    this.openWindow = null;
     this.list = [];
     // busy/status/paused describe the Claude session working in the group.
     this.groups = [{ id: YOU, label: 'You', source: null, current: null, busy: 0, status: '', paused: false }];
-    this.activeId = null; // the tab on screen
-    this.area = { x: 0, y: 80, width: 800, height: 600 };
     this.seq = 0;
     this.relayOrigins = new Set();
-    this.backdrop = new View();
-    const tint = () => this.backdrop.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF');
+    this.setMaxListeners(50); // every module listens for changes
+    this.watchNetwork(ses);
+  }
+
+  // ── windows ──
+
+  addWindow(win, { private: priv = false, ses = this.ses } = {}) {
+    const w = {
+      id: ++this.windowSeq, win, ses, private: priv, activeId: null, focusedAt: Date.now(),
+      area: { x: 0, y: 80, width: 800, height: 600 }, backdrop: new View(),
+    };
+    const tint = () => w.backdrop.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#101B22' : '#E6EDEF');
     tint();
     nativeTheme.on('updated', tint);
-    win.contentView.addChildView(this.backdrop);
-    this.watchNetwork();
+    win.once('closed', () => nativeTheme.off('updated', tint));
+    win.contentView.addChildView(w.backdrop);
+    win.on('focus', () => this.focus(w));
+    // errorpage.js tells a page whether it is on screen, which a minimized window's is not.
+    for (const event of ['minimize', 'restore', 'hide', 'show']) win.on(event, () => this.emit('change'));
+    this.windows.push(w);
+    this.focused = w; // a new window opens in front
+    return w;
   }
+
+  focus(w) {
+    w.focusedAt = Date.now();
+    if (this.focused === w) return;
+    this.focused = w;
+    this.emit('focus', w);
+  }
+
+  // The window is closing: its own tabs close, and sessions' groups in it
+  // move to another normal window (the sessions are not over). Tabs of a
+  // private session close once no private window is left.
+  removeWindow(w) {
+    if (!this.windows.includes(w)) return;
+    this.windows = this.windows.filter((x) => x !== w);
+    if (this.focused === w) this.focused = [...this.windows].sort((a, b) => b.focusedAt - a.focusedAt)[0] || null;
+    if (this.viewer === w) this.viewer = null;
+    const alive = (tab) => !tab.private || this.windows.some((x) => x.ses === tab.ses);
+    for (const g of this.groups) {
+      if (g.id === YOU || g.window !== w) continue;
+      g.window = this.normalWindow();
+      for (const tab of this.in(g.id)) {
+        if (g.window && alive(tab)) this.relocate(tab, g.window);
+        else this.discard(tab);
+      }
+    }
+    for (const tab of this.list.filter((t) => t.window === w || !alive(t))) this.discard(tab);
+    w.activeId = null;
+    this.emit('change');
+  }
+
+  // Closes a tab without the rules close() keeps (a window always has a tab,
+  // another tab takes the screen): its window is going away.
+  discard(tab) {
+    if (!this.list.includes(tab)) return;
+    this.emit('closing', tab);
+    this.list.splice(this.list.indexOf(tab), 1);
+    this.emit('leaving', tab);
+    clearTimeout(tab.tuckTimer);
+    if (tab.view) {
+      if (!tab.window.win.isDestroyed()) tab.window.win.contentView.removeChildView(tab.view);
+      if (!tab.wc.isDestroyed()) tab.wc.close();
+    }
+    const g = this.group(tab.group);
+    if (g?.current === tab.id) g.current = this.fallback(g)?.id || null;
+  }
+
+  // The window being served (see the note at the top).
+  window() {
+    return this.viewer || this.focused || this.windows[0] || null;
+  }
+
+  // Runs fn with w as the window being served, for code that asks about "the
+  // tab on screen". Synchronous only: what fn starts for later runs without it.
+  as(w, fn) {
+    const was = this.viewer;
+    this.viewer = w || was;
+    try { return fn(); } finally { this.viewer = was; }
+  }
+
+  // The normal (not private) window the user focused last.
+  normalWindow() {
+    return this.windows.filter((w) => !w.private).sort((a, b) => b.focusedAt - a.focusedAt)[0] || null;
+  }
+
+  // The window a group's tabs go in. A session's group without one (its
+  // window closed, or only private windows are open) gets the last focused
+  // normal window, or a new one.
+  windowFor(groupId) {
+    const g = this.group(groupId);
+    if (!g || g.id === YOU) return this.window();
+    if (!g.window || !this.windows.includes(g.window)) g.window = this.normalWindow() || this.openWindow?.({}) || null;
+    return g.window;
+  }
+
+  windowOf(webContents) {
+    return this.windows.find((w) => !w.win.isDestroyed() && w.win.webContents === webContents) || null;
+  }
+
+  // For code written for a single window: the window being served.
+  get win() { return this.window()?.win; }
+  get activeId() { return this.window()?.activeId ?? null; }
+  get area() { return this.window()?.area; }
+
+  // Whether a tab is the one on screen in its window.
+  onScreen(tab) {
+    return !!tab && tab.window?.activeId === tab.id;
+  }
+
+  // A group's tab to make current when its current one goes. The Claude panel
+  // works in the user's current tab, which is never a private one.
+  fallback(g, near = null) {
+    const ok = (t) => !!t && !(g.id === YOU && t.private);
+    if (ok(near)) return near;
+    return this.in(g.id).find(ok) || null;
+  }
+
+  // ── tabs ──
 
   active() {
     return this.get(this.activeId);
@@ -99,27 +237,32 @@ class Tabs extends EventEmitter {
   // user is watching is shown, and one opened elsewhere stays in the background.
   // device and history: what a restored tab had (see restore.js). asleep: a
   // restored tab with history starts asleep unless shown, and loads when woken.
-  // pinned: only for the user's own tabs (see pin()).
-  create(url, { group = YOU, show, device, history, asleep = false, pinned = false } = {}) {
+  // pinned: only for the user's own tabs (see pin()). window: for the user's
+  // tabs, the window it opens in (the window being served if left out); a
+  // session's tabs open in its group's window.
+  create(url, { group = YOU, show, device, history, asleep = false, pinned = false, window } = {}) {
+    const w = group === YOU ? (window || this.window()) : this.windowFor(group);
     const tab = {
       id: ++this.seq, view: null, wc: null, group, lent: false, title: '', url: '', favicon: null,
       loading: false, console: [], network: [], pointer: null, device: null, shotScale: 1,
       asleep: false, history: null, seenAt: Date.now(), pinned: pinned && group === YOU,
+      window: w, ses: w.ses, private: w.private,
     };
     this.list.push(tab);
     this.tidy(); // a new tab goes at the end of its group
     const g = this.group(group);
-    const watching = this.active()?.group === group;
-    if (!g.current) g.current = tab.id;
+    const shown = this.get(w.activeId);
+    const watching = shown?.group === group;
+    if (!g.current && !(group === YOU && tab.private)) g.current = tab.id;
     // Before loading, so the first request has its user agent.
     tab.device = (typeof device === 'string' ? PRESETS[device] : device) || null;
-    show = show ?? (watching || !this.active());
+    show = show ?? (watching || !shown);
     if (asleep && history && !show) {
       tab.asleep = true;
       tab.history = history;
-      const shown = history.entries[history.index] || history.entries[0];
-      tab.url = shown?.url || '';
-      tab.title = shown?.title || '';
+      const first = history.entries[history.index] || history.entries[0];
+      tab.url = first?.url || '';
+      tab.title = first?.title || '';
       this.emit('change');
       return tab;
     }
@@ -131,7 +274,7 @@ class Tabs extends EventEmitter {
   // sight while it loads (see the note at the top).
   open(tab, show, { url, history }) {
     this.build(tab);
-    this.win.contentView.addChildView(tab.view);
+    tab.window.win.contentView.addChildView(tab.view);
     if (show) this.select(tab.id);
     else this.peek(tab);
     this.rest(tab);
@@ -152,10 +295,10 @@ class Tabs extends EventEmitter {
   }
 
   // Puts a tab to sleep: its page and renderer go, its place in the tab strip,
-  // title, icon and history stay. The tab on screen never sleeps. sleep.js
+  // title, icon and history stay. A tab on screen never sleeps. sleep.js
   // decides which tabs may.
   sleep(tab) {
-    if (!tab || tab.asleep || tab.id === this.activeId || !tab.wc || tab.wc.isDestroyed()) return false;
+    if (!tab || tab.asleep || this.onScreen(tab) || !tab.wc || tab.wc.isDestroyed()) return false;
     const nav = tab.wc.navigationHistory;
     const entries = nav.getAllEntries();
     // Kept with each entry's page state, which brings back the scroll position.
@@ -163,7 +306,7 @@ class Tabs extends EventEmitter {
     this.emit('leaving', tab); // its page goes away, as if it navigated
     clearTimeout(tab.tuckTimer);
     tab.peeking = false;
-    this.win.contentView.removeChildView(tab.view);
+    tab.window.win.contentView.removeChildView(tab.view);
     tab.wc.close();
     tab.view = tab.wc = null;
     tab.asleep = true;
@@ -177,7 +320,7 @@ class Tabs extends EventEmitter {
   build(tab) {
     const view = new WebContentsView({
       // Throttled in the background unless a Claude session works in it (see rest()).
-      webPreferences: { session: this.ses, sandbox: true, contextIsolation: true },
+      webPreferences: { session: tab.ses, sandbox: true, contextIsolation: true },
     });
     view.setBackgroundColor('#ffffff');
     const wc = view.webContents;
@@ -185,7 +328,7 @@ class Tabs extends EventEmitter {
     tab.wc = wc;
     tab.audible = false;
     tab.throttled = true; // as the view is made; rest() changes it
-    if (tab.device) wc.setUserAgent(tab.device.mobile ? MOBILE_UA : this.ses.getUserAgent());
+    if (tab.device) wc.setUserAgent(tab.device.mobile ? MOBILE_UA : tab.ses.getUserAgent());
     const changed = () => this.emit('change');
 
     wc.on('page-title-updated', (_e, title) => { tab.title = title; changed(); });
@@ -235,10 +378,12 @@ class Tabs extends EventEmitter {
       tab.title = `Page crashed (${details.reason})`;
       changed();
     });
-    // A page's new window becomes a new tab in the same group.
+    // A page's new window becomes a new tab in the same group (and window).
     wc.setWindowOpenHandler(({ url: to, disposition }) => {
       if (/^https?:|^about:blank/i.test(to)) {
-        const opened = this.create(to, { group: tab.group, show: tab.id === this.activeId && disposition !== 'background-tab' });
+        const opened = this.create(to, {
+          group: tab.group, window: tab.window, show: this.onScreen(tab) && disposition !== 'background-tab',
+        });
         if (disposition !== 'background-tab') this.group(tab.group).current = opened.id;
       }
       return { action: 'deny' };
@@ -259,7 +404,7 @@ class Tabs extends EventEmitter {
     const you = this.group(YOU);
     const claude = tab.group !== YOU || (you.busy > 0 && you.current === tab.id);
     const full = claude || tab.audible;
-    const visible = full || tab.peeking || tab.id === this.activeId;
+    const visible = full || tab.peeking || this.onScreen(tab);
     if (tab.throttled !== !full) tab.wc.setBackgroundThrottling(tab.throttled = !full);
     if (tab.view.getVisible() !== visible) tab.view.setVisible(visible);
   }
@@ -282,20 +427,24 @@ class Tabs extends EventEmitter {
     return tab;
   }
 
-  // Put a tab on screen. It also becomes its group's current tab.
+  // Put a tab on screen in its window. It also becomes its group's current
+  // tab (for the user's group, unless it is private: see fallback()).
   select(id) {
     const tab = this.get(id);
     if (!tab) return null;
+    const w = tab.window;
     const now = Date.now();
-    if (this.active()) this.active().seenAt = now; // the tab the user is leaving was seen until now
+    const leaving = this.get(w.activeId);
+    if (leaving) leaving.seenAt = now; // the tab the user is leaving was seen until now
     tab.seenAt = now;
-    this.activeId = id;
+    w.activeId = id;
     this.wake(tab);
-    this.group(tab.group).current = id;
+    if (!(tab.group === YOU && tab.private)) this.group(tab.group).current = id;
     tab.peeking = false;
-    this.win.contentView.addChildView(this.backdrop);
-    this.win.contentView.addChildView(tab.view); // re-adding moves it to the top
-    for (const other of this.list) if (other.peeking) this.win.contentView.addChildView(other.view);
+    const stack = w.win.contentView;
+    stack.addChildView(w.backdrop);
+    stack.addChildView(tab.view); // re-adding moves it to the top
+    for (const other of this.list) if (other.peeking && other.window === w) stack.addChildView(other.view);
     this.place(tab);
     this.restAll();
     this.emit('change');
@@ -304,10 +453,10 @@ class Tabs extends EventEmitter {
 
   // See the note at the top of this file.
   peek(tab) {
-    if (tab.id === this.activeId || !tab.wc || tab.wc.isDestroyed()) return;
+    if (this.onScreen(tab) || !tab.wc || tab.wc.isDestroyed()) return;
     tab.peeking = true;
     tab.view.setVisible(true);
-    this.win.contentView.addChildView(tab.view);
+    tab.window.win.contentView.addChildView(tab.view);
     this.place(tab);
     clearTimeout(tab.tuckTimer);
     tab.tuckTimer = setTimeout(() => this.tuck(tab), 8000); // a page that never finishes loading
@@ -338,44 +487,114 @@ class Tabs extends EventEmitter {
     clearTimeout(tab.tuckTimer);
     if (!tab.peeking || !tab.wc || tab.wc.isLoadingMainFrame?.()) return;
     tab.peeking = false;
-    if (tab.id === this.activeId || tab.wc.isDestroyed()) return;
-    this.win.contentView.addChildView(tab.view, 0);
+    if (this.onScreen(tab) || tab.wc.isDestroyed() || !this.list.includes(tab)) return;
+    tab.window.win.contentView.addChildView(tab.view, 0);
     this.place(tab);
     this.rest(tab);
   }
 
   // Point a session at one of its group's tabs. The screen follows only if the
-  // user is already watching that group.
+  // user is already watching that group in the tab's window.
   setCurrent(groupId, id) {
-    if (this.active()?.group === groupId) return this.select(id);
+    const tab = this.get(id);
+    if (tab && this.get(tab.window.activeId)?.group === groupId) return this.select(id);
     this.group(groupId).current = id;
     this.emit('change');
-    return this.get(id);
+    return tab;
   }
 
   close(id) {
     const tab = this.get(id);
     if (!tab) return;
-    const peers = this.in(tab.group);
+    const w = tab.window;
+    const peers = this.in(tab.group).filter((t) => t.window === w);
     const next = peers[peers.indexOf(tab) + 1] || peers[peers.indexOf(tab) - 1] || null;
     this.emit('closing', tab); // still in the list, its page and history intact
     this.list.splice(this.list.indexOf(tab), 1);
     this.emit('leaving', tab);
     if (tab.view) { // a sleeping tab has no page to close
-      this.win.contentView.removeChildView(tab.view);
+      w.win.contentView.removeChildView(tab.view);
       tab.wc.close();
     }
     const g = this.group(tab.group);
-    if (g && g.current === id) g.current = next?.id || null;
-    const wasOnScreen = this.activeId === id;
-    if (wasOnScreen) this.activeId = null;
-    if (!this.in(YOU).length) this.create('', { show: false }); // the user always has a tab
-    if (wasOnScreen) this.select((next || this.current(YOU)).id);
+    if (g && g.current === id) g.current = this.fallback(g, next)?.id || null;
+    const wasOnScreen = w.activeId === id;
+    if (wasOnScreen) w.activeId = null;
+    this.ensure(w);
+    if (wasOnScreen) this.showOther(w, next);
+    this.emit('change');
+  }
+
+  // A window always has one of the user's tabs, as the single window always
+  // had: a new blank one if the last goes. moved: the user moved its last tab
+  // to another window, and a window left with no tab at all then closes
+  // instead (main.js hears 'empty'), as in other browsers. (A tab handed to a
+  // session leaves a blank one: closing a private window would end its session.)
+  ensure(w, { moved = false } = {}) {
+    if (!this.windows.includes(w) || this.list.some((t) => t.window === w && t.group === YOU)) return;
+    if (moved && this.windows.length > 1 && !this.list.some((t) => t.window === w)) return void this.emit('empty', w);
+    this.create('', { window: w, show: false });
+  }
+
+  // The tab on screen in w went (closed, or moved away): another takes its place.
+  showOther(w, near) {
+    if (w.activeId || !this.windows.includes(w)) return;
+    const mine = (t) => t?.window === w;
+    const you = this.current(YOU);
+    const pick = (mine(near) && near) || (mine(you) && you) ||
+      this.list.find((t) => mine(t) && t.group === YOU) || this.list.find(mine);
+    if (pick) this.select(pick.id);
+  }
+
+  // Moves a tab's view into another window. It peeks there until it has drawn
+  // (see the note at the top), unless the caller then puts it on screen.
+  relocate(tab, w) {
+    const from = tab.window;
+    if (from === w) return;
+    const wasOnScreen = from.activeId === tab.id;
+    if (wasOnScreen) from.activeId = null;
+    if (tab.view) {
+      if (!from.win.isDestroyed()) from.win.contentView.removeChildView(tab.view);
+      w.win.contentView.addChildView(tab.view, 0);
+    }
+    tab.window = w;
+    if (tab.view) {
+      this.peek(tab);
+      this.tuckWhenDrawn(tab);
+    }
+    if (wasOnScreen) this.showOther(from);
+  }
+
+  // The user's tab to another window (the tab menu, or dragged out of the tab
+  // strip), at index among the user's tabs there (the end if left out), on
+  // screen there. A private tab goes only to another private window, and a
+  // normal one only to a normal one. A session's tab takes its group along.
+  toWindow(id, w, { index } = {}) {
+    const tab = this.get(id);
+    if (!tab || !w || !this.windows.includes(w)) return;
+    if (tab.group !== YOU) return this.groupToWindow(tab.group, w);
+    if (tab.private !== w.private || tab.ses !== w.ses) return;
+    const from = tab.window;
+    this.relocate(tab, w);
+    this.reorder(id, index ?? Infinity);
+    this.select(id);
+    this.ensure(from, { moved: true });
+    this.emit('change');
+  }
+
+  // A session's group to another window. Sessions never work in a private window.
+  groupToWindow(groupId, w) {
+    const g = this.group(groupId);
+    if (!g || g.id === YOU || !w || w.private || !this.windows.includes(w)) return;
+    const from = g.window;
+    g.window = w;
+    for (const tab of this.in(groupId)) this.relocate(tab, w);
+    if (from) this.ensure(from);
     this.emit('change');
   }
 
   addGroup({ id, label, source }) {
-    this.groups.push({ id, label, source, current: null, busy: 0, status: '', paused: false });
+    this.groups.push({ id, label, source, current: null, busy: 0, status: '', paused: false, window: this.normalWindow() });
     this.emit('change');
     return this.group(id);
   }
@@ -394,18 +613,33 @@ class Tabs extends EventEmitter {
 
   // lent: the user handed this tab to a session, so it returns to them when the session ends.
   // at: where among the group's tabs it goes (see reorder()); the end if left out.
+  // A tab handed to a session goes to the session's window, and back to the
+  // window it came from (if still open) when it returns.
   move(id, groupId, { lent = false, at = Infinity } = {}) {
     const tab = this.get(id);
     const from = this.group(tab?.group);
     const to = this.group(groupId);
     if (!tab || !to || from === to) return;
+    let dest = tab.window;
+    if (groupId !== YOU) {
+      dest = this.windowFor(groupId);
+      if (!dest) return;
+      if (from.id === YOU) tab.home = tab.window;
+    } else {
+      const home = [tab.home, tab.window].find((w) => w && this.windows.includes(w) && w.ses === tab.ses);
+      dest = home || this.windows.find((w) => w.ses === tab.ses) || (tab.private ? null : tab.window);
+      tab.home = null;
+      if (!dest) return this.close(id); // a private tab whose private windows have all closed
+    }
+    const left = tab.window;
     tab.group = groupId;
     tab.lent = lent;
     tab.pinned = false; // pinning is for the user's own tabs, and one coming back lands among the others
-    if (from.current === id) from.current = this.in(from.id)[0]?.id || null;
-    if (!to.current || id === this.activeId) to.current = id;
+    if (from.current === id) from.current = this.fallback(from)?.id || null;
+    if ((!to.current || this.onScreen(tab)) && !(groupId === YOU && tab.private)) to.current = id;
+    this.relocate(tab, dest);
     this.reorder(id, at);
-    if (!this.in(YOU).length) this.create('', { show: false });
+    this.ensure(left);
     this.restAll(); // in a session's group a tab runs at full speed; back with the user it rests
     this.emit('change');
   }
@@ -418,13 +652,13 @@ class Tabs extends EventEmitter {
     this.list.sort((a, b) => rank(a) - rank(b));
   }
 
-  // Puts a tab at a place among its own group's tabs: index counts the
-  // group's other tabs before it. Pinned tabs stay ahead of the others, so the
-  // index is kept to their side of that line.
+  // Puts a tab at a place among its own group's tabs in its window: index
+  // counts the group's other tabs there before it. Pinned tabs stay ahead of
+  // the others, so the index is kept to their side of that line.
   reorder(id, index) {
     const tab = this.get(id);
     if (!tab) return;
-    const peers = this.in(tab.group).filter((t) => t !== tab);
+    const peers = this.in(tab.group).filter((t) => t !== tab && t.window === tab.window);
     const pins = peers.filter((t) => t.pinned).length;
     const at = Math.round(Math.max(tab.pinned ? 0 : pins, Math.min(tab.pinned ? pins : peers.length, Number(index) || 0)));
     this.list.splice(this.list.indexOf(tab), 1);
@@ -440,7 +674,7 @@ class Tabs extends EventEmitter {
   nudge(id, step) {
     const tab = this.get(id);
     if (!tab) return;
-    const peers = this.in(tab.group);
+    const peers = this.in(tab.group).filter((t) => t.window === tab.window);
     this.reorder(id, peers.indexOf(tab) + step);
   }
 
@@ -457,6 +691,7 @@ class Tabs extends EventEmitter {
       else if (tab.group === YOU) this.move(id, groupId, { lent: true });
       else return;
     }
+    if (!this.get(id)) return; // a private tab with nowhere to go back to closed
     if (groupId === YOU && typeof pinned === 'boolean') tab.pinned = pinned;
     this.reorder(id, index);
   }
@@ -467,22 +702,23 @@ class Tabs extends EventEmitter {
     if (!tab || tab.group !== YOU || tab.pinned === !!on) return;
     tab.pinned = !!on;
     // Pinning puts it at the end of the pinned tabs, unpinning at the start of the rest.
-    this.reorder(id, this.in(YOU).filter((t) => t.pinned && t !== tab).length);
+    this.reorder(id, this.in(YOU).filter((t) => t.pinned && t !== tab && t.window === tab.window).length);
   }
 
-  // The window tells us where the page area is; each tab fills it, or sits
-  // centred in it at its emulated device size.
-  setArea(area) {
-    this.area = area;
-    this.backdrop.setBounds(area);
-    for (const tab of this.list) this.place(tab);
+  // A window tells us where its page area is; each of its tabs fills it, or
+  // sits centred in it at its emulated device size.
+  setArea(area, w = this.window()) {
+    if (!w) return;
+    w.area = area;
+    w.backdrop.setBounds(area);
+    for (const tab of this.list) if (tab.window === w) this.place(tab);
   }
 
   // An emulated device is the page zoomed out until a view of exactly the
   // device's size in CSS pixels fits the page area. (Electron's own device
   // emulation does not resize the viewport of an embedded view.)
   place(tab) {
-    const a = this.area;
+    const a = tab.window.area;
     if (a.width < 1 || a.height < 1 || !tab.view) return;
     const d = tab.device;
     const peekX = a.x + a.width - 1;
@@ -512,14 +748,16 @@ class Tabs extends EventEmitter {
     const wasMobile = !!tab.device?.mobile;
     tab.device = d || null;
     if (!d) tab.wc.setZoomFactor(1);
-    tab.wc.setUserAgent(d?.mobile ? MOBILE_UA : this.ses.getUserAgent());
+    tab.wc.setUserAgent(d?.mobile ? MOBILE_UA : tab.ses.getUserAgent());
     this.place(tab);
     // The user agent only changes what the server sends on the next load.
     if (wasMobile !== !!d?.mobile && tab.url) tab.wc.reload();
     this.emit('change');
   }
 
-  watchNetwork() {
+  // Each session (the user's, and each private one) is watched: the console
+  // and network history the tools read, and the relay guard.
+  watchNetwork(ses) {
     const started = new Map();
     const owner = (d) => this.list.find((t) => t.wc?.id === d.webContentsId);
     const record = (d, extra) => {
@@ -537,15 +775,15 @@ class Tabs extends EventEmitter {
     // Tabs that Claude sessions work in never reach the relay itself (its
     // approval page asks for the relay key), however they get there. Added
     // first, so no other rule is asked before it (see requests.js).
-    requestRules(this.ses).add((d) => {
+    requestRules(ses).add((d) => {
       const tab = owner(d);
       let origin = '';
       try { origin = new URL(d.url).origin; } catch {}
       return !!tab && tab.group !== YOU && this.relayOrigins.has(origin) ? { cancel: true } : null;
     });
-    this.ses.webRequest.onSendHeaders(all, (d) => started.set(d.id, Date.now()));
-    this.ses.webRequest.onCompleted(all, (d) => record(d, { status: d.statusCode }));
-    this.ses.webRequest.onErrorOccurred(all, (d) => record(d, { error: d.error }));
+    ses.webRequest.onSendHeaders(all, (d) => started.set(d.id, Date.now()));
+    ses.webRequest.onCompleted(all, (d) => record(d, { status: d.statusCode }));
+    ses.webRequest.onErrorOccurred(all, (d) => record(d, { error: d.error }));
   }
 
   // Right-click inside a page.
@@ -554,7 +792,7 @@ class Tabs extends EventEmitter {
     const items = [];
     if (p.linkURL) {
       items.push(
-        { label: 'Open link in new tab', click: () => this.create(p.linkURL, { group: tab.group, show: false }) },
+        { label: 'Open link in new tab', click: () => this.create(p.linkURL, { group: tab.group, window: tab.window, show: false }) },
         { label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) },
         { type: 'separator' },
       );
@@ -566,13 +804,22 @@ class Tabs extends EventEmitter {
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
       { label: 'Reload', click: () => wc.reload() },
       { type: 'separator' },
-      { label: 'Point Claude at this', click: () => this.emit('point', tab, { x: p.x, y: p.y }) },
+      // The Claude panel stays out of private windows.
+      ...(tab.private && tab.group === YOU ? [] : [{ label: 'Point Claude at this', click: () => this.emit('point', tab, { x: p.x, y: p.y }) }]),
       { label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) },
     );
-    Menu.buildFromTemplate(items).popup({ window: this.win });
+    Menu.buildFromTemplate(items).popup({ window: tab.window.win });
   }
 
-  // Right-click on a tab in the tab strip: hand it to a session, or take it back.
+  // How a window is named in menus: by the tab on screen in it.
+  windowLabel(w) {
+    const shown = this.get(w.activeId);
+    const title = shown?.title || shown?.url || 'New tab';
+    return `${w.private ? 'Private window' : 'Window'} with “${title.length > 40 ? title.slice(0, 39) + '…' : title}”`;
+  }
+
+  // Right-click on a tab in the tab strip: hand it to a session, or take it
+  // back, or move it (or a session's whole group) to another window.
   tabMenu(id) {
     const tab = this.get(id);
     if (!tab) return;
@@ -583,36 +830,72 @@ class Tabs extends EventEmitter {
       for (const g of others) {
         items.push({ label: `Give to ${g.label}`, click: () => this.move(id, g.id, { lent: true }) });
       }
+      const there = this.windows.filter((w) => w !== tab.window && w.private === tab.private && w.ses === tab.ses);
+      items.push({
+        label: 'Move to new window', click: () => this.emit('to-new-window', { tab }),
+      });
+      if (there.length) {
+        items.push({
+          label: 'Move to window',
+          submenu: there.map((w) => ({ label: this.windowLabel(w), click: () => this.toWindow(id, w) })),
+        });
+      }
     } else {
       items.push({ label: 'Take back', click: () => this.move(id, YOU) });
+      items.push(...this.groupMoveItems(tab.group));
     }
     this.emit('tab-menu', tab, items); // other modules add their items (sleep.js, brave.js)
     if (items.length) items.push({ type: 'separator' });
     items.push({ label: 'Close tab', click: () => this.close(id) });
-    Menu.buildFromTemplate(items).popup({ window: this.win });
+    Menu.buildFromTemplate(items).popup({ window: tab.window.win });
   }
 
-  // What the window chrome needs to draw the tab strip and toolbar.
-  summary() {
+  // "Move group to window" for a session's group: a new window, or another
+  // normal one.
+  groupMoveItems(groupId) {
+    const g = this.group(groupId);
+    if (!g || g.id === YOU) return [];
+    const there = this.windows.filter((w) => w !== g.window && !w.private);
+    return [{
+      label: 'Move group to window',
+      submenu: [
+        { label: 'New window', click: () => this.emit('to-new-window', { group: g.id }) },
+        ...there.map((w) => ({ label: this.windowLabel(w), click: () => this.groupToWindow(g.id, w) })),
+      ],
+    }];
+  }
+
+  // Right-click on a session's name in the tab strip.
+  groupMenu(groupId) {
+    const g = this.group(groupId);
+    if (!g || g.id === YOU || !g.window) return;
+    Menu.buildFromTemplate(this.groupMoveItems(groupId)).popup({ window: g.window.win });
+  }
+
+  // What the window chrome needs to draw the tab strip and toolbar: the tabs
+  // of one window, or of all of them if w is left out.
+  summary(w) {
     // A sleeping tab answers from the history it kept.
     const nav = (t) => t.wc?.navigationHistory || {
       canGoBack: () => !!t.history && t.history.index > 0,
       canGoForward: () => !!t.history && t.history.index < t.history.entries.length - 1,
     };
-    return this.list.map((t) => ({
+    return this.list.filter((t) => !w || t.window === w).map((t) => ({
       id: t.id,
       group: t.group,
       title: t.title || (t.url && t.url !== 'about:blank' ? t.url : 'New tab'),
       url: t.url === 'about:blank' ? '' : t.url,
       favicon: t.favicon,
       loading: t.loading,
-      active: t.id === this.activeId,
+      active: this.onScreen(t),
       current: this.group(t.group)?.current === t.id,
       canGoBack: nav(t).canGoBack(),
       canGoForward: nav(t).canGoForward(),
       device: t.device ? t.device.label || `${t.device.width}×${t.device.height}` : null,
       asleep: !!t.asleep,
       pinned: !!t.pinned,
+      window: t.window.id,
+      private: !!t.private,
     }));
   }
 }

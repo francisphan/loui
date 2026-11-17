@@ -174,6 +174,44 @@ works in your tabs. It runs on your Claude Code login through the Agent SDK
 **Point** (`Ctrl+Shift+C`, or right-click an element) hands an element to
 Claude with its selector, text, HTML and a cropped screenshot.
 
+## More than one window, and private windows
+
+- **New window** (`Ctrl+N`) opens another window with a tab of its own.
+  *Close window* is `Ctrl+Shift+W`; closing the last window quits, as before.
+- **Moving a tab.** Right-click a tab: *Move to new window*, or *Move to
+  window* and pick one (named after the tab on screen in it). Dragging a tab
+  out of the tab strip and letting go over another Loui window moves it there;
+  letting go anywhere else opens a new window with it.
+- **Sessions' tab groups** open in the normal window you focused last when the
+  session started. Right-click the session's name in the tab strip (or one of
+  its tabs) for *Move group to window*, or drag its name out of the strip; its
+  tabs go along, and its tools work wherever the group is. When its window
+  closes, the group moves to another window (the session carries on).
+- **Closing a window** closes its tabs. Each window always has a tab of yours,
+  like the single window did; a window whose last tab you move away closes.
+- **Restore** brings back all your normal windows, each with its tabs.
+- **Private window** (`Ctrl+Shift+N`): tinted indigo, marked *Private* beside
+  the address bar and in its title. Its tabs use a session kept only in
+  memory, shared by the private windows open at the same time and cleared when
+  the last of them closes: no cookies, cache or site data survive, and none
+  are shared with normal windows. Nothing goes into history, passwords are
+  never offered or filled, permission answers are not remembered, it is never
+  restored, and closed tabs in it cannot be reopened. Downloads from it are
+  listed only in private windows and only while one is open (the files stay
+  in your Downloads folder; one still running is cancelled). Shields and the
+  relay guard work there as everywhere. The Claude panel and *Point* are not
+  shown in it.
+- **Sessions and private windows.** A session's group never goes in a private
+  window. A session can still ask for the tab on screen (`request_tab`), and
+  you can hand it one from a private window: the tab moves into the session's
+  group (in a normal window) but keeps its private session, so the session
+  sees that tab's private cookies and nothing else. When the session ends the
+  tab goes back to its private window, or closes if no private window is left.
+- **Cost.** A second window costs one more window chrome renderer (roughly
+  30 to 90 MB); a private window also an in-memory session. Nothing is made
+  until you open one. The address suggestions list is one view that moves to
+  the window you type in.
+
 ## Guardrails
 
 Loui itself asks you before Claude pays, sends or deletes, whatever Claude was

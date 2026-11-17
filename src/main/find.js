@@ -1,10 +1,13 @@
 // Find in page: the find bar in the window chrome searches the tab on screen.
 // It follows the user to whichever tab they switch to, and closes when that
 // tab navigates away (the matches would belong to a page that is gone).
+// The bar belongs to the window it was opened in, and follows the tab on
+// screen there; other windows have no bar open.
 function createFind({ tabs, changed, focus }) {
   let open = false;
   let text = '';
   let tab = null; // the tab being searched
+  let win = null; // the window whose bar is open
   let request = 0; // the latest search; results from older ones are ignored
   let matches = 0; // null while a new search has no results yet
   let active = 0;
@@ -46,8 +49,10 @@ function createFind({ tabs, changed, focus }) {
   }
 
   function show() {
-    if (!open) {
+    if (!open || win !== tabs.window()) { // opened in another window, the bar moves here
+      if (open) clear(tab);
       open = true;
+      win = tabs.window();
       tab = tabs.active();
       changed();
     }
@@ -59,15 +64,17 @@ function createFind({ tabs, changed, focus }) {
     clear(tab);
     open = false;
     text = '';
-    tab = null;
+    tab = win = null;
     request = matches = active = 0;
     changed();
   }
 
   tabs.on('change', () => {
-    if (!open || tab === tabs.active()) return;
+    if (open && !tabs.windows.includes(win)) return close();
+    const shown = open && tabs.get(win.activeId);
+    if (!open || tab === shown) return;
     clear(tab);
-    tab = tabs.active();
+    tab = shown;
     search({ text });
   });
   tabs.on('leaving', (t) => { if (t === tab) close(); });
@@ -76,7 +83,7 @@ function createFind({ tabs, changed, focus }) {
     show,
     close,
     search,
-    state: () => ({ open, text, matches, active }),
+    state: () => (open && win === tabs.window() ? { open, text, matches, active } : { open: false, text: '', matches: 0, active: 0 }),
   };
 }
 
