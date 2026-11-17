@@ -40,7 +40,16 @@ jobs:
         run: npm test
         timeout-minutes: 10
 
-      - name: Build the Windows installer and publish the release
-        run: npm run dist:win -- --publish always
+      - name: Build the Windows installer
+        run: npm run dist:win
+
+      # Published with gh rather than electron-builder, whose parallel uploads
+      # raced to create the release and exited successfully with files missing.
+      - name: Publish the release
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          gh release create "$GITHUB_REF_NAME" --title "Loui $version" --generate-notes \
+            "dist/Loui-Setup-$version.exe" "dist/Loui-Setup-$version.exe.blockmap" dist/latest.yml
+          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | sort
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
