@@ -314,7 +314,7 @@ function start() {
   reader = createReader({ tabs, ses: userSes, settings, save: saveSettings, changed: pushState });
   activity = createActivity({
     dir: path.join(paths.home, 'activity'), tabs, settings, save: saveSettings,
-    changed: () => broadcast('activity', { type: 'changed' }, false),
+    changed: (ids) => broadcast('activity', { type: 'changed', ids }, false),
     cipher: createCipher(),
   });
   consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState, decided: activity.consent });
@@ -501,12 +501,12 @@ const handlers = {
 
 // The Sessions panel (src/ui/activity.js). Only the window chrome reaches
 // the activity log: no tool reads it.
-async function activityRequest({ do: what, id, url, days } = {}) {
+async function activityRequest({ do: what, id, url, days, have } = {}) {
   // The answer goes to the window that asked, which an await would forget (tabs.as()).
   const w = tabs.window();
   const reply = (payload) => tabs.as(w, () => send('activity', payload));
   if (what === 'list') reply({ type: 'list', ...(await activity.list()) });
-  else if (what === 'open') reply({ type: 'session', id, log: await activity.get(id) });
+  else if (what === 'open') reply({ type: 'session', id, log: await activity.get(id, have) });
   else if (what === 'delete') await activity.remove(id);
   else if (what === 'clear') await activity.clear();
   else if (what === 'keep') activity.keep(days);

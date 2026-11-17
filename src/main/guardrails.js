@@ -363,7 +363,9 @@ function createGuardrails({ ses, tabs, sessions, home, changed, asked = () => {}
   // A session that ends takes its questions and trust with it; so does a tab
   // that closes or goes back to the user.
   tabs.on('change', () => {
-    for (const id of trusted) if (id !== sessions.panel.id && !tabs.group(id)) trusted.delete(id);
+    for (const kept of [trusted, acting, passes, notes]) {
+      for (const id of [...kept.keys()]) if (id !== sessions.panel.id && !tabs.group(id)) kept.delete(id);
+    }
     for (const p of [...pending]) {
       const tab = tabs.get(p.tabId);
       const gone = !tab || (p.session !== sessions.panel && tab.group !== p.session.id);

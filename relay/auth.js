@@ -29,7 +29,8 @@ const MAX_CLIENTS = 200; // when full, the oldest registration that was never ap
 const MAX_APPROVALS = 100; // pending approvals; the oldest makes way
 const REFRESH_GRACE_MS = 2 * 60 * 1000; // a replaced refresh token still works this long (lost replies, retries)
 const MIN_KEY_LENGTH = 32;
-const REDIRECT_HOSTS = ['claude.ai', 'claude.com', 'localhost', '127.0.0.1', '[::1]'];
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+const REDIRECT_HOSTS = ['claude.ai', 'claude.com', ...LOOPBACK];
 
 const random = () => crypto.randomBytes(32).toString('base64url');
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -112,7 +113,12 @@ function createAuth(home) {
       registerClient(client) {
         const hosts = allowedHosts();
         for (const uri of client.redirect_uris) {
-          const host = new URL(uri).host.replace(/:\d+$/, '').toLowerCase();
+          const { protocol, host: full } = new URL(uri);
+          const host = full.replace(/:\d+$/, '').toLowerCase();
+          // https only; plain http just for this machine (a local client's callback).
+          if (protocol !== 'https:' && !(protocol === 'http:' && LOOPBACK.includes(host))) {
+            throw new InvalidClientMetadataError(`This relay only sends sign-ins to https addresses, not ${uri}.`);
+          }
           if (!hosts.includes(host)) {
             throw new InvalidClientMetadataError(`This relay only sends sign-ins to ${hosts.join(', ')}, not ${host}.`);
           }

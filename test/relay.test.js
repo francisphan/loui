@@ -200,6 +200,13 @@ test('sign-ins can only be sent to Claude or to this machine', async () => {
   assert.equal(refused.status, 400);
   assert.match((await refused.json()).error_description, /not evil\.example/);
   assert.equal((await register('http://localhost:33418/callback')).status, 201);
+  // The right host is not enough: https, or plain http on this machine only.
+  for (const uri of ['http://claude.ai/api/mcp/auth_callback', 'someapp://claude.ai/callback', 'someapp://localhost/callback']) {
+    const res = await register(uri);
+    assert.equal(res.status, 400, uri);
+    assert.match((await res.json()).error_description, /only sends sign-ins to https/);
+  }
+  assert.equal((await register('https://claude.ai/api/mcp/auth_callback')).status, 201);
 });
 
 test('the approval page names where access goes, and cannot be framed', async () => {

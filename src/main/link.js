@@ -92,17 +92,20 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
     set('connecting');
     sock.onopen = () => sock.send(JSON.stringify({ hello: { key: config.key, device } }));
     sock.onmessage = async (event) => {
-      const msg = JSON.parse(event.data);
+      let msg;
+      try { msg = JSON.parse(event.data); } catch { return; }
+      if (!msg || typeof msg !== 'object') return;
       if (msg.welcome) {
-        guard([...(msg.relay || []), new URL(config.url).origin]);
+        guard([...(Array.isArray(msg.relay) ? msg.relay : []), new URL(config.url).origin]);
         attempt = 0;
         clearTimeout(orphanTimer);
         orphanTimer = 0;
         // The relay may have ended sessions while we were away.
-        for (const id of [...mine]) if (!msg.sessions.includes(id)) drop(id);
+        for (const id of [...mine]) if (Array.isArray(msg.sessions) && !msg.sessions.includes(id)) drop(id);
         return set('connected');
       }
       if (msg.denied) return set('refused', msg.denied);
+      if (msg.tool && typeof msg.session?.id !== 'string') return;
       if (msg.tool) mine.add(msg.session.id);
       if (msg.end) mine.delete(msg.end);
       const reply = await handle(msg, null, true); // true: from the relay, so asked about (consent.js)

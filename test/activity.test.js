@@ -133,6 +133,40 @@ test("clicking a step's page in the Sessions panel opens it in a new tab of the 
   await until(async () => (await b.state()).tabs.find((t) => t.active).url === b.base + '/', 'the page to open');
 });
 
+test('the panel fetches the session on show again only when that one changes, and each picture once', async () => {
+  const s = b.as('a5', 'Watched');
+  await s.text('navigate', { url: b.base + '/' });
+  const log = await until(async () => {
+    const l = await logOf('Watched');
+    return l?.steps[0]?.thumb && l;
+  }, 'a picture of the step');
+  // A picture the window says it holds is not sent again.
+  const again = await b.ui('activity:get', { id: log.id, have: [0] });
+  assert.equal(again.steps[0].thumb, true);
+  assert.equal(again.steps[0].url, b.base + '/');
+
+  // In the panel, on that session: another session's steps leave it as it is.
+  await chrome("document.querySelector('#activity-list .activity-summary .quiet').click()");
+  await until(() => chrome("[...document.querySelectorAll('#activity-list .activity-row .name')].some((n) => n.textContent === 'Watched')"), 'the list');
+  await chrome(`[...document.querySelectorAll('#activity-list .activity-row')]
+    .find((r) => r.querySelector('.name').textContent === 'Watched').querySelector('.open').click()`);
+  await until(() => chrome("!!document.querySelector('.activity-step .page img')"), 'the timeline');
+  await sleep(700); // the changes already on their way
+  const mark = "document.querySelector('#activity-list .activity-summary').dataset.kept";
+  await chrome(`${mark} = 'yes'`);
+  const o = b.as('a6', 'Other');
+  await o.text('navigate', { url: b.base + '/second.html' });
+  await sleep(1500);
+  assert.equal(await chrome(mark), 'yes', 'not drawn again for another session');
+  // Its own next step draws it again, with the picture the window kept.
+  await s.text('snapshot');
+  await until(() => chrome(`${mark} !== 'yes' && document.querySelectorAll('.activity-step').length === 2`), 'the new step');
+  assert.match(await chrome("document.querySelector('.activity-step .page img').src"), /^data:image\/jpeg;base64,/);
+  s.end();
+  o.end();
+  await until(async () => (await list()).filter((x) => /Watched|Other/.test(x.label)).every((x) => x.ended), 'both to end');
+});
+
 test('a session can be deleted, and all of them cleared', async () => {
   const one = (await list()).find((x) => x.label === 'Nosy');
   await b.ui('activity', { do: 'delete', id: one.id });
@@ -257,15 +291,62 @@ test('where the system can encrypt, logs and pictures are encrypted on disk', as
     assert.match(again.steps[0].url, /kept-from-disk/);
     assert.match(again.steps[0].thumb, /^data:image\/jpeg;base64,\/9j\//);
 
-    // A key that will not open (a profile copied from elsewhere): the logs
-    // under it cannot be read again, and are removed.
+    // Where the system cannot encrypt in this run, the encrypted logs are
+    // listed as unreadable, not lost, and the key is left alone.
+    await e.close();
+    const key = fs.readFileSync(`${dir2}.key`, 'utf8');
+    e = await launch({ LOUI_TEST_SAFESTORAGE: 'off' }, { home: home2 });
+    assert.deepEqual((await items()).map((x) => x.unreadable), [true, true]);
+    assert.equal(fs.readFileSync(`${dir2}.key`, 'utf8'), key);
+    await e.close();
+    e = await launch(env, { home: home2 });
+    assert.match((await e.ui('activity:get', log.id)).steps[0].url, /kept-from-disk/, 'readable again with the key');
+
+    // A key that will not open (a profile copied from elsewhere, or the
+    // system's own key lost): it is put aside, never written over, and the
+    // logs under it are not deleted at once. They are listed as unreadable,
+    // so that they still go when too old or when the user clears the list.
     await e.close();
     fs.writeFileSync(`${dir2}.key`, 'not a key');
     e = await launch(env, { home: home2 });
-    assert.deepEqual(await items(), []);
+    const unread = await items();
+    assert.equal(unread.length, 2);
+    assert.ok(unread.every((x) => x.unreadable), 'listed as unreadable');
+    assert.equal(await e.ui('activity:get', log.id), null);
+    assert.ok(fs.existsSync(path.join(dir2, `${log.id}.json`)), 'still on disk');
+    const aside = fs.readdirSync(home2).filter((f) => f.startsWith('activity.key.bad-'));
+    assert.equal(aside.length, 1);
+    assert.equal(fs.readFileSync(path.join(home2, aside[0]), 'utf8'), 'not a key', 'the old key file is kept aside');
+    assert.ok(fs.readFileSync(`${dir2}.key`, 'utf8').startsWith('t1:'), 'a new key for new logs');
+    await e.ui('activity', { do: 'clear' });
+    await until(async () => (await items()).length === 0, 'the unreadable logs to be cleared');
     assert.deepEqual(fs.readdirSync(dir2), []);
   } finally {
     await e.close();
     fs.rmSync(home2, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+});
+
+test('a keyring that fails at start does not stop the log: plain files for that run', async () => {
+  const { createActivity } = require('../src/main/activity');
+  const home3 = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-activity-key-'));
+  const dir3 = path.join(home3, 'activity');
+  const cipher = {
+    available: true,
+    encrypt() { throw new Error('the keyring is locked'); },
+    decrypt() { throw new Error('the keyring is locked'); },
+  };
+  try {
+    const a = createActivity({ dir: dir3, tabs: { current: () => null }, settings: {}, save() {}, cipher });
+    assert.deepEqual((await a.list()).items, []);
+    assert.ok(!fs.existsSync(`${dir3}.key`), 'no key file is made');
+    const session = { id: 's', group: 's', label: 'Plain', source: 'code' };
+    a.open(session);
+    a.step(session, 'reading the page', false).done(null);
+    await a.probes['activity:flush']();
+    const [name] = fs.readdirSync(dir3).filter((f) => f.endsWith('.json'));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir3, name), 'utf8')).label, 'Plain');
+  } finally {
+    fs.rmSync(home3, { recursive: true, force: true });
   }
 });
