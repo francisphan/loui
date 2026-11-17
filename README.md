@@ -151,6 +151,19 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
 and publishes it with `latest.yml` as a GitHub release, which installed copies
 then update to.
 
+## Downloads
+
+Files are saved to your Downloads folder without asking (`LOUI_DOWNLOADS`
+overrides the folder). A file never replaces one already there: the second
+`report.pdf` becomes `report (1).pdf`. The downloads button in the toolbar
+(`Ctrl+J`) shows how far running downloads have got and opens the list, where
+you can pause, resume or cancel them, and open a finished file or show it in
+its folder. *Ask where to save each file* there brings back the Save As dialog
+for downloads you start. Downloads that start in a Claude session's tab are
+saved and listed too, with the session's name; they never open a dialog, and
+sessions have no way to open a downloaded file. The last 50 are kept in
+`downloads.json` in the profile.
+
 ## Appearance
 
 Dark by default. *View › Appearance* switches to Light or Match system; the
@@ -171,6 +184,7 @@ src/main/link.js      the connection out to the relay
 src/main/rpc.js       local control socket, used by the tests
 src/main/chat.js      the Claude panel (Agent SDK)
 src/main/updater.js   updates for installed copies (GitHub Releases)
+src/main/downloads.js downloads: where they are saved, the list, pause and resume
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
@@ -205,6 +219,6 @@ break:
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
 - Dragging tabs between groups; a prompt when a new session first connects.
-- Downloads list, find in page, bookmarks, history view, password manager,
+- Find in page, bookmarks, history view, password manager,
   extensions. Sites that block embedded browsers at sign-in (Google does) may
   refuse to log in.
