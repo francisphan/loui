@@ -37,7 +37,7 @@ const hosted = env.CI === 'true' && env.GITHUB_ACTIONS === 'true' && env.RUNNER_
 const refuse = (why) => { console.error(`\ntest/integration/windows.test.js: ${why}\n`); process.exit(1); };
 if (process.platform !== 'win32') refuse('this file drives the Windows app; run it with Node for Windows.');
 if (!hosted && env.LOUI_INTEGRATION_ALLOW !== '1') {
-  refuse('refusing to run outside CI. To drive an installed copy on this machine (nothing is installed, updated or '
+  refuse('refusing to run: this is not a GitHub-hosted runner. To drive an installed copy on this machine (nothing is installed, updated or '
     + 'uninstalled, and the profile is a temporary one), set LOUI_INTEGRATION_ALLOW=1 and LOUI_INTEGRATION_EXE.');
 }
 if (!hosted && (env.LOUI_INTEGRATION_INSTALLER || env.LOUI_INTEGRATION_UPDATE)) {

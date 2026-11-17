@@ -10,6 +10,7 @@ npm install
 npm start          # open the browser
 npm run relay      # run the relay in the foreground (normally a service, see below)
 npm test           # end-to-end tests: real app, real relay, virtual display
+npm run test:integration   # a whole session through a relay of its own (see Testing)
 npm run dist:win   # build the Windows installer into dist/
 ```
 

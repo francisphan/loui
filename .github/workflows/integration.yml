@@ -4,8 +4,8 @@
 # its own; and, nightly, the few things that depend on other people's servers.
 # See "Testing" in the README.
 #
-# Slow (the Windows job is about a quarter of an hour), so not on pull
-# requests: on main, on a release tag (the same commit the release is built
+# Not on pull requests (five minutes or so, and two installers built each
+# time): on main, on a release tag (the same commit the release is built
 # from; the release does not wait for this), and by hand:
 #
 #   gh workflow run integration.yml                 # Windows and relay
@@ -14,7 +14,7 @@ name: Integration
 
 on:
   push:
-    branches: [main, integration-tests]
+    branches: [main]
     tags: ['v*']
   schedule:
     - cron: '23 7 * * *' # the live checks, nightly
