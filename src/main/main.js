@@ -26,6 +26,7 @@ const { createSearch } = require('./search');
 const { createBrave } = require('./brave');
 const { createPrint } = require('./print');
 const { createBookmarks } = require('./bookmarks');
+const { createErrorPage } = require('./errorpage');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -64,6 +65,7 @@ let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, do
 let shields;
 let search, brave, print;
 let bookmarks;
+let errorPage;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -131,6 +133,7 @@ function createWindow() {
   });
   history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => send('history:changed') });
   suggest = createSuggest({ win, tabs, send, sources: [history] });
+  errorPage = createErrorPage({ tabs, win, file: path.join(paths.home, 'game.json') });
   lockToApp(suggest.webContents);
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), win, tabs, ses, send, changed: pushState });
   suggest.add(bookmarks);
@@ -260,6 +263,8 @@ async function testHook({ ui, arg }) {
   if (print.probes[ui]) return print.probes[ui](arg);
   if (ui === 'to-url') return toUrl(arg);
   if (bookmarks.probes[ui]) return bookmarks.probes[ui](arg);
+  // The next failed page reads as the network being down (the tests can't unplug it).
+  if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
   if (ui === 'chrome-navigate') {
     await win.webContents.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});

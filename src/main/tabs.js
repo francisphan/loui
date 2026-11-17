@@ -216,11 +216,8 @@ class Tabs extends EventEmitter {
       if (!isMainFrame || code === -3) return; // -3: superseded by another navigation
       tab.url = failedUrl;
       tab.title = "Can't open this page";
-      const message = `Can't open ${failedUrl}\n\n${reason} (${code})`;
-      wc.executeJavaScript(
-        `document.documentElement.style.cssText='font:16px/1.5 system-ui;padding:12vh 8vw;white-space:pre-wrap;color:#333;background:#fff';` +
-        `document.body.textContent=${JSON.stringify(message)}`,
-      ).catch(() => {});
+      tab.favicon = null;
+      this.emit('failed', tab, { code, reason, url: failedUrl }); // errorpage.js draws the page
       changed();
     });
     wc.on('console-message', (e, ...old) => {
