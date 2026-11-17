@@ -62,6 +62,9 @@
 }
 
 html, body { height: 100%; margin: 0; }
+/* Hidden means not drawn, whatever display a class gives the element (a
+   toolbar button with display: flex stayed on show with hidden set). */
+[hidden] { display: none !important; }
 /* The main window alone has the top row, which spans it above everything
    else. This stylesheet is shared with the suggestion list, the palette,
    Settings, the task manager and the small session window: none of those

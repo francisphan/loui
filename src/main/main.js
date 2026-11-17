@@ -639,7 +639,12 @@ const handlers = {
   'pick:cancel': () => actions.picker.cancel(),
   'pick:remove': (id) => actions.picker.remove(id),
   // Take over, or hand back, the session working in a tab group.
-  pause: ({ group, on }) => { const g = tabs.group(group); if (g) g.paused = !!on; pushState(); },
+  pause: ({ group, on }) => {
+    const g = tabs.group(group);
+    if (g) g.paused = !!on;
+    if (g && on) actions.unwatchGroup(g.id); // taken over: what the pages do from here is theirs (actions.js)
+    pushState();
+  },
   'handoff:answer': (yes) => sessions.answer(!!yes),
   // A question from a Claude session (prompts.js): value is what the user chose.
   'prompt:answer': ({ id, value }) => prompts.answer(id, value),

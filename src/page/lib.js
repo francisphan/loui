@@ -492,7 +492,9 @@
     if (!matters(watch.words, info)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    caught.push({ el, type: e.type, e, submitter: e.submitter || null, info });
+    // Kept for the next look, up to a point: a timer that keeps trying is stopped each time all the same.
+    if (taken > 50) { caught.splice(0, taken); taken = 0; }
+    if (caught.length - taken < 100) caught.push({ el, type: e.type, e, submitter: e.submitter || null, info });
   }
 
   // This window and the frames of the same site inside it.
@@ -513,6 +515,16 @@
     watch = { words: new RegExp(words) };
     realUntil = passUntil = 0;
     listen(window);
+    return true;
+  }
+
+  // The watch ends: the tab has changed hands, the user has taken over, or
+  // (in the user's own tab) the panel's script is a while past. From here on
+  // what the page does is the page's.
+  function unwatchScript() {
+    watch = null;
+    caught.length = 0;
+    taken = 0;
     return true;
   }
 
@@ -869,6 +881,6 @@
 
   globalThis.__loui = {
     snapshot, locate, pointAt, overlay, pick, cancelPick, pickAt, focus, choose, scroll, calm,
-    hasText, guardAt, guardFocus, guardPage, guardControls, filledBeside, watchScript, pass, caughtByScript, release,
+    hasText, guardAt, guardFocus, guardPage, guardControls, filledBeside, watchScript, unwatchScript, pass, caughtByScript, release,
   };
 })();

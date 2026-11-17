@@ -856,6 +856,7 @@ class Tabs extends EventEmitter {
     }
     if (from.id === YOU) this.unstart(tab);
     const left = tab.window;
+    this.emit('handed', tab); // whoever had it lets go of what it left in the page (actions.js)
     // What the tab logged for whoever had it is not the next one's to read.
     tab.console = [];
     tab.network = [];

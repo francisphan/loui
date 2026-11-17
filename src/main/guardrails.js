@@ -82,7 +82,8 @@ const WORDS = [PAY, DELETE, SEND, PAY_LAST, SEND_LAST, CONFIRM, YES, ENTER_SEND]
 // A script that reads like one that clicks, submits, sends an event, or reads
 // a handler (on<event>) other than to set it. Not proof either way: it only
 // decides whether the user is asked first (judgeScript).
-const PRESSES = /\.\s*click\s*\(|\.\s*submit\s*\(|requestSubmit\s*\(|dispatchEvent\s*\(|(\.|\[\s*['"`])on[a-z]{4,}\b(?!\s*=(?!=))/;
+// Any case: frameworks name the handlers a script would call onClick, onSubmit.
+const PRESSES = /\.\s*click\s*\(|\.\s*submit\s*\(|requestSubmit\s*\(|dispatchEvent\s*\(|\.\s*(handler|trigger|emit)\s*\(|(\.|\[\s*['"`])on[a-z]{4,}\b(?!\s*=(?!=))/i;
 const BUTTONS = new Set(['button', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch']);
 
 const plain = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();

@@ -245,7 +245,12 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     try { u = new URL(to); } catch { return; }
     if (u.host === 'go') {
       const text = (u.searchParams.get('q') || '').trim();
-      if (text) tabs.byUser(tab).wc.loadURL(toUrl(text)).catch(() => {}); // typed in the page's box, as in the address bar
+      // Typed in the page's box. Unlike the address bar, this box is in the
+      // page, where the Claude panel's tools can type too: so it opens web
+      // addresses and searches only, never a file: or view-source: address
+      // (the panel has no way to read local files, and must not get one here).
+      const url = text && toUrl(text);
+      if (url && /^https?:\/\//i.test(url)) tabs.byUser(tab).wc.loadURL(url).catch(() => {});
     } else if (u.host === 'hide' && !tab.private) {
       const host = u.searchParams.get('h') || '';
       if (!host || hidden().includes(host)) return;
