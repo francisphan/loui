@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="history.css">
   <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="bookmarks.css">
 </head>
 <body>
   <header id="bar">
@@ -28,6 +29,7 @@
       <form id="address-form">
         <input id="address" type="text" spellcheck="false" autocomplete="off"
                placeholder="Search or enter an address" aria-label="Address">
+        <button id="star" type="button" aria-label="Bookmark this page" hidden></button>
       </form>
       <button id="shields" class="tool" type="button" disabled>
         <span class="glyph"></span><span id="shields-count"></span>
@@ -46,6 +48,20 @@
       <button id="devtools" class="icon" type="button" title="Developer tools (F12)" aria-label="Developer tools"></button>
       <button id="panel-toggle" class="icon" type="button" title="Claude panel (Ctrl+Shift+L)" aria-label="Claude panel"></button>
     </div>
+    <nav id="bookmarks-bar" aria-label="Bookmarks bar" hidden>
+      <div id="bookmarks-items"></div>
+      <p id="bookmarks-hint">Bookmarks you put on the bar show up here. <button id="bookmarks-hint-import" type="button">Import bookmarks</button></p>
+      <button id="bookmarks-more" class="bar-item" type="button" title="More bookmarks" aria-label="More bookmarks" hidden></button>
+      <button id="bookmarks-other" class="bar-item" type="button" hidden><span class="glyph"></span><span>Other bookmarks</span></button>
+    </nav>
+    <form id="bookmark-edit" aria-label="Edit bookmark" hidden>
+      <strong id="bookmark-edit-title"></strong>
+      <label>Name <input id="bookmark-name" type="text" spellcheck="false" autocomplete="off"></label>
+      <label id="bookmark-url-label">Address <input id="bookmark-url" type="text" spellcheck="false" autocomplete="off"></label>
+      <label>Folder <select id="bookmark-folder"></select></label>
+      <button id="bookmark-remove" class="quiet" type="button">Remove</button>
+      <button id="bookmark-done" type="submit">Done</button>
+    </form>
     <div id="find" role="search" hidden>
       <input id="find-text" type="text" spellcheck="false" autocomplete="off"
              placeholder="Find in page" aria-label="Find in page">
@@ -168,6 +184,27 @@
     <div id="history-list"></div>
   </aside>
 
+  <aside id="bookmarks" aria-label="Bookmarks" hidden>
+    <div id="bookmarks-head">
+      <h1>Bookmarks</h1>
+      <div>
+        <button id="bookmarks-new-folder" class="quiet" type="button">New folder</button>
+        <button id="bookmarks-import" class="quiet" type="button">Import</button>
+        <button id="bookmarks-close" class="quiet" type="button" aria-label="Close bookmarks"></button>
+      </div>
+    </div>
+    <input id="bookmarks-search" type="search" spellcheck="false" autocomplete="off"
+           placeholder="Search bookmarks" aria-label="Search bookmarks">
+    <div id="bookmarks-confirm" role="alertdialog" aria-label="Delete folder" hidden>
+      <p id="bookmarks-confirm-text"></p>
+      <div class="row">
+        <button id="bookmarks-confirm-no" class="quiet" type="button">Cancel</button>
+        <button id="bookmarks-confirm-yes" class="quiet" type="button">Delete</button>
+      </div>
+    </div>
+    <div id="bookmarks-list"></div>
+  </aside>
+
   <script src="ui.js"></script>
   <script src="find.js"></script>
   <script src="downloads.js"></script>
@@ -175,5 +212,6 @@
   <script src="history.js"></script>
   <script src="shields.js"></script>
   <script src="settings.js"></script>
+  <script src="bookmarks.js"></script>
 </body>
 </html>

@@ -205,6 +205,7 @@ The lists are not downloaded at start: the finished engine is kept in
 `shields/engine.bin` in the profile (about 7 MB on disk, about 15 MB in memory),
 and rebuilt in a background process of its own when it is more than four days
 old. Until the first download is done, nothing is blocked.
+
 ## Search, printing, and Brave
 
 *File › Settings* picks the search engine for words typed in the address bar:
@@ -224,6 +225,23 @@ and Loui does not pretend to be another browser to get past that. Instead:
   a link that takes the site off the list. Claude's tabs don't open them at all,
   and a session is told to ask you; Claude never makes Loui open another
   program.
+
+## Bookmarks
+
+`Ctrl+D` or the star in the address bar bookmarks the page onto the bookmarks
+bar and opens a strip under the toolbar to rename it, change its address or
+put it in a folder; on a page that is already bookmarked they edit its
+bookmark. The bar appears with the first bookmark (`Ctrl+Shift+B` shows or
+hides it) and holds bookmarks and folders; a folder opens as a menu, what does not fit goes under », and
+*Other bookmarks* sits at the right end. Right-click the bar for *Add folder*,
+*Edit*, *Delete* and the rest. *Bookmarks* (`Ctrl+Shift+O`) lists them all in
+their folders, with search. Bookmarks come first in address bar suggestions,
+above pages from history. *File › Import bookmarks…* reads the file that
+Brave, Chrome, Edge or Firefox export (Brave: *Bookmarks › Bookmark manager ›
+⋮ › Export bookmarks*): their bar goes onto the bar, everything else into
+*Other bookmarks*, and importing the same file twice adds nothing. Bookmarklets
+(`javascript:` addresses) are left out. They are kept in `bookmarks.json` in
+the profile. Claude sessions have no tool that reads or changes them.
 
 ## Layout
 
@@ -248,6 +266,7 @@ src/main/shields-update.js  downloads the lists and builds the engine, in a proc
 src/main/search.js    the search engine for the address bar
 src/main/brave.js     Open in Brave, and the sites that open there instead of in Loui
 src/main/print.js     printing and Save as PDF
+src/main/bookmarks.js bookmarks: the bar's folder menus, import, bookmarks.json
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in
@@ -275,6 +294,8 @@ break:
 - Tabs are sandboxed and get no preload script or Node access.
 - Sessions can open only `http` and `https` pages. Page content is passed to
   Claude as untrusted data.
+- Keys a session presses go to its page only: Loui's own shortcuts (`Ctrl+W`,
+  `Ctrl+D`, ...) ignore them, since those act on the tab the user has on screen.
 - Sites get clipboard-write, fullscreen and pointer lock without asking. For
   the camera, microphone, location, notifications and screen sharing, Loui asks
   you in a strip above the page, naming the site by its address; an answer
@@ -288,5 +309,5 @@ break:
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
 - Dragging tabs between groups; a prompt when a new session first connects.
-- Bookmarks, password manager,
+- Password manager,
   extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).
