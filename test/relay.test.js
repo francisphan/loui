@@ -23,12 +23,19 @@ const until = async (check, what, ms = 8000) => {
 };
 
 // A Claude session: an MCP client signed in with a bearer token.
-async function connect(name = 'claude-code', token = relay.key) {
+async function connect(name = 'claude-code', token = relay.key, again = true) {
   const transport = new StreamableHTTPClientTransport(new URL(relay.url + '/mcp'), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
   const client = new Client({ name, version: '1.0.0' });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (e) {
+    // After a long gap, fetch can pick a kept-alive connection the relay has
+    // since closed; nothing was sent, so once more.
+    if (again && /fetch failed/.test(String(e?.message))) return connect(name, token, false);
+    throw e;
+  }
   const text = async (tool, args = {}) => {
     const r = await client.callTool({ name: tool, arguments: args });
     const words = r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
