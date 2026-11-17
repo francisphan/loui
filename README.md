@@ -370,12 +370,18 @@ with `%s` where the words go. It is kept in `settings.json` in the profile.
 *File › Print…* (`Ctrl+P`) opens the system print dialog for the tab on screen;
 *File › Save as PDF…* saves it as a PDF.
 
-Google refuses to sign in from browsers it considers embedded, Loui included,
-and Loui does not pretend to be another browser to get past that. Instead:
+Signing in to Google works in Loui. Google refuses a browser that claims to
+be one it is not; almost everywhere Loui leaves its own name and Electron's
+out of its user agent (sites that look for them serve a broken page), which
+is exactly such a claim, so on Google's sign-in pages a tab carries the full,
+true one instead (`src/main/identity.js`). This is Google's decision to make
+and may change; if it stops working, the list below is the way round.
+
+For a site that will not work in Loui:
 
 - *Open in Brave* (right-click a tab, or the File menu) hands the page's
   address to Brave (or, without Brave, the system's default browser).
-- Sites on a list in *File › Settings* (`accounts.google.com` to begin with)
+- Sites on a list in *File › Settings* (empty to begin with)
   are sent to Brave when one of your tabs opens them, and the tab says so, with
   a link that takes the site off the list. Claude's tabs don't open them at all,
   and a session is told to ask you; Claude never makes Loui open another
@@ -571,4 +577,4 @@ break:
 ## Not here yet
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
-- Extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).
+- Extensions.

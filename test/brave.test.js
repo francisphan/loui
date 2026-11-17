@@ -1,5 +1,5 @@
 // Brave, the user's other browser: "Open in Brave" hands the page over, and
-// sites on a list (accounts.google.com by default, for Google sign-in) go to
+// sites on a list (empty to begin with) go to
 // Brave instead of opening in the user's tabs. Claude sessions never make Loui
 // open another program: their tabs just don't open those sites. Under
 // LOUI_TEST nothing is launched; Loui records what it would have opened.
@@ -33,8 +33,8 @@ async function visit(url) {
   return until(async () => { const t = await onScreen(); return t.url === url && !t.loading && t; }, `${url} to load`);
 }
 
-test('Google sign-in is on the list to begin with', async () => {
-  assert.deepEqual(await sites(), ['accounts.google.com']);
+test('no site is on the list to begin with (Google sign-in works in Loui: identity.test.js)', async () => {
+  assert.deepEqual(await sites(), []);
 });
 
 test('Open in Brave hands over the page on screen, and only web pages', async () => {
@@ -49,9 +49,9 @@ test('Open in Brave hands over the page on screen, and only web pages', async ()
 
 test('a listed site goes to Brave, and the tab says so', async () => {
   await b.ui('brave:add', 'https://LocalHost/some/page');
-  assert.deepEqual(await sites(), ['accounts.google.com', 'localhost'], 'kept as a host name');
+  assert.deepEqual(await sites(), ['localhost'], 'kept as a host name');
   const file = JSON.parse(fs.readFileSync(path.join(b.home, 'settings.json'), 'utf8'));
-  assert.deepEqual(file.openInBrave, ['accounts.google.com', 'localhost']);
+  assert.deepEqual(file.openInBrave, ['localhost']);
 
   await b.ui('go', listed);
   await until(async () => (await opened()).includes(listed), 'the hand-over');
@@ -104,7 +104,6 @@ test("a Claude session can't open a listed site or make Loui open Brave", async 
 
 test('a site can be taken off the list', async () => {
   await b.ui('brave:remove', 'localhost');
-  await b.ui('brave:remove', 'accounts.google.com');
   assert.deepEqual(await sites(), []);
   await visit(listed);
 });
