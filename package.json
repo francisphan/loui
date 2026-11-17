@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "relay": "node relay/server.js",
-    "test": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=90000 test/*.test.js",
+    "test": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=90000 --test-force-exit test/*.test.js",
     "dist:win": "USE_SYSTEM_WINE=true PATH=\"$PWD/scripts/nowine:$PATH\" electron-builder --win --x64 --publish never"
   },
   "dependencies": {

@@ -70,11 +70,18 @@ async function launch(env = {}) {
   // What only the window chrome can do: ui('pause', {...}), and the window's state.
   const ui = (name, arg) => ask({ ui: name, arg });
   const state = () => ui('state');
+  // Stops the app, even if it already exited (then there is no exit event to
+  // wait for) or does not respond to SIGTERM.
   const close = async () => {
     conn.destroy();
-    app.kill();
     server.close();
-    await new Promise((r) => app.once('exit', r));
+    if (app.exitCode === null && app.signalCode === null) {
+      const exited = new Promise((r) => app.once('exit', r));
+      app.kill();
+      const timer = setTimeout(() => app.kill('SIGKILL'), 5000);
+      await exited;
+      clearTimeout(timer);
+    }
     fs.rmSync(home, { recursive: true, force: true });
   };
   return { call, text, as, ui, state, close, base, home };
