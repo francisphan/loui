@@ -319,13 +319,13 @@ const whole = (l, [w, h], img, top = 0) => {
 
 test('Louis is a big button at the top left, across the tab row and the toolbar, which start to his right', async () => {
   await size(1400, 800);
-  const l = await louis();
+  const l = await until(louis, (x) => !x.over.length); // once the row has settled
   whole(l, [64, 84], 52);
   assert.deepEqual([l.tabrow, l.navrow, l.stage], [64, 64, [0, 84]], 'both rows start at his right edge; the page is under them, from the window edge');
   assert.equal(l.back, 'rgb(16, 27, 34)', "on the tab row's colour");
   // A small window keeps him whole: he is the way into the menu.
   await size(720, 600);
-  whole(await louis(), [64, 84], 52);
+  whole(await until(louis, (x) => !x.over.length), [64, 84], 52);
   await size(1400, 800);
   // He shows where the keyboard is, and that the pointer is on him.
   const rules = await chrome(`[...document.styleSheets].flatMap((s) => [...s.cssRules]).filter((r) => /#brand:(hover|active|focus-visible) img/.test(r.selectorText || ''))
@@ -338,32 +338,32 @@ test('Louis is a big button at the top left, across the tab row and the toolbar,
 test('with vertical tabs Louis is the top of the left column: the toolbar starts to his right, the tabs under him', async () => {
   await b.ui('tabs:layout', { vertical: true });
   await until(() => chrome(`document.getElementById('tabs').parentElement.id`), (p) => p === 'sidebar');
-  let l = await until(louis, (x) => x.tab >= 64);
+  let l = await until(louis, (x) => !x.over.length && x.tab >= 64);
   whole(l, [64, 64], 52);
   assert.deepEqual([l.tabrow, l.navrow, l.stage], [null, 64, [244, 44]], 'the toolbar from his right edge; the page beside the sidebar, under the toolbar');
   // A strip under the toolbar starts clear of him too, and the tabs still start under him, no lower than they need.
   await b.ui('menu:louis', { click: 'Show the bookmarks bar' });
   const strip = await until(() => chrome(`(() => { const r = document.getElementById('bookmarks-bar').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.bottom)]; })()`), ([, , bottom]) => bottom > 44);
   assert.deepEqual(strip.slice(0, 2), [64, 44]);
-  l = await until(louis, (x) => x.tab < 64 + 20 && x.stage[1] === strip[2]);
+  l = await until(louis, (x) => !x.over.length && x.tab < 64 + 20 && x.stage[1] === strip[2]);
   whole(l, [64, 64], 52);
   assert.ok(l.tab >= Math.max(64, strip[2]), `the first tab (${l.tab}) is under Louis and the strip (${strip[2]})`);
   await b.ui('menu:louis', { click: 'Show the bookmarks bar' });
   await until(() => chrome(`document.getElementById('bookmarks-bar').hidden`), (h) => h === true);
   // A collapsed sidebar sizes him to it.
   await b.ui('tabs:layout', { collapsed: true });
-  l = await until(louis, (x) => x.box[2] === 52);
+  l = await until(louis, (x) => !x.over.length && x.box[2] === 52);
   whole(l, [52, 52], 40);
   assert.deepEqual([l.navrow, l.stage], [52, [52, 44]]);
   assert.ok(l.tab >= 52, 'the tabs start under him');
   await b.ui('tabs:layout', { collapsed: false });
   // In a small window the toolbar has no room to give: he is smaller, not hidden, under it at the head of the sidebar.
   await size(720, 600);
-  l = await until(louis, (x) => x.box[2] === 44 && x.tab >= 88);
+  l = await until(louis, (x) => !x.over.length && x.box[2] === 44 && x.tab >= 88);
   whole(l, [44, 44], 32, 44);
   assert.deepEqual([l.navrow, l.stage], [0, [244, 44]], 'the toolbar spans the window; the page is beside the sidebar');
   await b.ui('tabs:layout', { collapsed: true });
-  l = await until(louis, (x) => x.box[2] === 52);
+  l = await until(louis, (x) => !x.over.length && x.box[2] === 52);
   whole(l, [52, 44], 32, 44);
   assert.ok(l.tab >= 88, 'the tabs start under him');
   await b.ui('tabs:layout', { collapsed: false });
@@ -379,7 +379,7 @@ test('a private window has the same Louis, on its tint, and no Claude panel in h
   await until(() => inw(`document.body.classList.contains('private')`).catch(() => false), (p) => p === true);
   await inw('window.resizeTo(1400, 800)');
   await until(() => inw('window.innerWidth'), (w) => Math.abs(w - 1400) < 4);
-  let l = await louis(inw);
+  let l = await until(() => louis(inw), (x) => !x.over.length);
   whole(l, [64, 84], 52);
   assert.deepEqual([l.tabrow, l.navrow], [64, 64]);
   assert.equal(l.back, 'rgb(23, 21, 42)', "the private window's colour");
