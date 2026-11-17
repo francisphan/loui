@@ -285,6 +285,9 @@ body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; bo
 #helm-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
 #helm.moving #helm-text { font-style: italic; }
 #helm-no { flex: none; height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-weight: 600; }
+#helm-pip { flex: none; height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-weight: 600; }
+#helm-pip:hover { background: var(--shoal); }
+#helm-pip[hidden] { display: none; }
 #helm-no[hidden], #helm-btn[hidden], #helm-more[hidden], #helm-always-label[hidden] { display: none; }
 /* A question from a Claude session: answering it is not optional, so it is drawn solid. */
 #helm.asking { box-shadow: inset 0 0 0 1.5px var(--claude); }

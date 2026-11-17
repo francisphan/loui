@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Moving page</title>
+<style>body{font:16px system-ui;margin:24px} #n{font-size:120px;font-weight:700}</style>
+</head>
+<body>
+<h1>Moving page</h1>
+<p id="n">0</p>
+<button id="step" onclick="n.textContent = +n.textContent + 1">Step</button>
+<button id="spin" onclick="clearInterval(window.t); window.t = setInterval(() => n.textContent = +n.textContent + 1, 30)">Spin</button>
+<button id="still" onclick="clearInterval(window.t)">Still</button>
+</body>
+</html>

@@ -15,6 +15,7 @@ const SEND = new Set([
   'bookmarks', 'passwords', 'reader:toggle',
   'prompt:answer', 'consent:revoke',
   'activity',
+  'pip:open',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
