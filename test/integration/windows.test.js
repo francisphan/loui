@@ -482,8 +482,10 @@ step('the uninstaller removes the program and leaves the profile alone', ciOnly(
   execFileSync(uninstaller, ['/currentuser', '/S'], { stdio: 'inherit', timeout: 2 * 60 * 1000 });
   await until('the program files to be gone', () => !fs.existsSync(exe) && !fs.existsSync(uninstaller), 2 * 60 * 1000);
   await until('the install folder to be gone', () => !fs.existsSync(installDir), 30000);
-  assert.deepEqual(uninstallEntry(), [], 'no longer listed as installed');
-  assert.ok(!fs.existsSync(shortcut), 'the shortcut is gone');
+  // The files go first; what Windows knows about the program a moment after.
+  await until('Loui to be no longer listed as installed', () => uninstallEntry().length === 0, 30000);
+  await until('the shortcut to be gone', () => !fs.existsSync(shortcut), 30000);
+  await until('the uninstaller to have finished', () => running() === 0 && regValue('HKEY_CURRENT_USER\\Software\\RegisteredApplications', 'Loui') === '', 30000);
   assert.equal(regValue('HKEY_CURRENT_USER\\Software\\Classes\\LouiHTML\\shell\\open\\command'), '', 'no longer registered as a browser');
   assert.equal(regValue('HKEY_CURRENT_USER\\Software\\RegisteredApplications', 'Loui'), '');
   // The profile: passwords, tabs, settings, all still there.

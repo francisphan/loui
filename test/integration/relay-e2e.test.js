@@ -143,7 +143,19 @@ test('it works in its own tab, in the background: snapshot, type, click, screens
   const mine = (await b.state()).tabs.find((t) => t.group === 'you' && t.active);
   const page = await code.text('snapshot');
   await code.text('type', { ref: ref(page, 'textbox "Your name"'), text: 'Ada', clear: true });
-  assert.match(await code.text('click', { ref: ref(page, 'button "Greet"') }), /Hello, Ada/);
+  const clicked = await code.text('click', { ref: ref(page, 'button "Greet"') });
+  if (!/Hello, Ada/.test(clicked)) {
+    // Not tried again: a click that did not land, or a page read too soon, is the thing to hear about.
+    // What the page says over the next three seconds tells the two apart.
+    const tab = (await b.state()).tabs.find((t) => t.group !== 'you' && t.current);
+    const started = Date.now();
+    let arrived = null;
+    while (arrived === null && Date.now() - started < 3000) {
+      if (/Hello, Ada/.test(await b.ui('tab:js', { id: tab.id, code: "document.getElementById('out').textContent" }))) arrived = Date.now() - started;
+      else await sleep(100);
+    }
+    assert.fail(`the page as the click returned it has no greeting; the page itself ${arrived === null ? 'still has none 3 s later (the click did not land)' : `had it ${arrived} ms later (read too soon)`}:\n${clicked}`);
+  }
 
   const shot = await code.call('screenshot');
   const image = shot.find((c) => c.type === 'image');
