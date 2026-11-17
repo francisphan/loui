@@ -49,6 +49,7 @@ const { createReader } = require('./reader');
 const { createPalette } = require('./palette');
 const { createSettingsWindow } = require('./settings-window');
 const { createStartPage } = require('./startpage');
+const { createVoice } = require('./voice');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -124,6 +125,7 @@ let pip;
 let settingsWindow;
 let startPage;
 let hints;
+let voice;
 let userSes;
 // Links Loui was started with (from another app, when it is the default browser).
 const launched = urlsFrom(process.argv, process.cwd());
@@ -228,6 +230,7 @@ const currentState = (w = tabs.window()) => {
     ...passwords.state(),
     ...reader.state(),
     ...certs.state(),
+    ...voice.state(w),
   };
 };
 
@@ -480,6 +483,12 @@ function start() {
     emit: (event) => broadcast('chat', event, false),
   });
 
+  // Reading replies aloud and dictation, for the Claude panel of normal windows.
+  voice = createVoice({
+    home: paths.home, settings, save: saveSettings, tabs, changed: pushState, lockToApp,
+    emit: (w, payload) => w.win.webContents.send('voice', payload),
+  });
+
   palette = createPalette({
     win: first.win, tabs, settings, save: saveSettings, sources: { bookmarks, history },
     // Shields has no menu item of its own (its menu is the toolbar's).
@@ -503,6 +512,7 @@ function start() {
       { label: 'Command palette', wc: palette.webContents },
       { label: 'Notes over the page', wc: hints.webContents },
       { label: 'Settings', wc: settingsWindow?.webContents() },
+      { label: 'Dictation', wc: voice.page() },
     ],
     claude: () => chat.process(),
     focusMain: (tab) => {
@@ -681,6 +691,7 @@ const handlers = {
   passwords: (request) => passwords.handle(request),
   'reader:toggle': () => reader.toggle(),
   activity: (request) => activityRequest(request),
+  voice: (request) => voice.handle(request),
 };
 
 // The Sessions panel (src/ui/activity.js). Only the window chrome reaches
@@ -823,6 +834,8 @@ async function testHook({ ui, arg }) {
   if (hints.probes[ui]) return hints.probes[ui](arg);
   if (pip.probes[ui]) return pip.probes[ui](arg);
   if (settingsWindow.probes[ui]) return settingsWindow.probes[ui](arg);
+  if (voice.probes[ui]) return voice.probes[ui](arg);
+  if (ui === 'chat:emit') { broadcast('chat', arg, false); return 'ok'; } // as the panel's conversation would say it
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
