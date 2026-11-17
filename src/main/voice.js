@@ -46,6 +46,24 @@ const MODEL = {
   ].map(([name, size, sha256]) => ({ name, size, sha256 })),
 };
 const HOST = 'https://huggingface.co';
+const MODEL_MB = 77; // as the panel says it
+// The languages the model writes down (Whisper's), for Settings: English and
+// Spanish first, the rest by name.
+const LANGUAGES = [['en', 'English'], ['es', 'Spanish'], ...Object.entries({
+  af: 'Afrikaans', sq: 'Albanian', am: 'Amharic', ar: 'Arabic', hy: 'Armenian', as: 'Assamese', az: 'Azerbaijani', ba: 'Bashkir',
+  eu: 'Basque', be: 'Belarusian', bn: 'Bengali', bs: 'Bosnian', br: 'Breton', bg: 'Bulgarian', my: 'Burmese', yue: 'Cantonese',
+  ca: 'Catalan', zh: 'Chinese', hr: 'Croatian', cs: 'Czech', da: 'Danish', nl: 'Dutch', et: 'Estonian', fo: 'Faroese',
+  fi: 'Finnish', fr: 'French', gl: 'Galician', ka: 'Georgian', de: 'German', el: 'Greek', gu: 'Gujarati', ht: 'Haitian Creole',
+  ha: 'Hausa', haw: 'Hawaiian', he: 'Hebrew', hi: 'Hindi', hu: 'Hungarian', is: 'Icelandic', id: 'Indonesian', it: 'Italian',
+  ja: 'Japanese', jw: 'Javanese', kn: 'Kannada', kk: 'Kazakh', km: 'Khmer', ko: 'Korean', lo: 'Lao', la: 'Latin', lv: 'Latvian',
+  ln: 'Lingala', lt: 'Lithuanian', lb: 'Luxembourgish', mk: 'Macedonian', mg: 'Malagasy', ms: 'Malay', ml: 'Malayalam',
+  mt: 'Maltese', mi: 'Maori', mr: 'Marathi', mn: 'Mongolian', ne: 'Nepali', no: 'Norwegian', nn: 'Nynorsk', oc: 'Occitan',
+  ps: 'Pashto', fa: 'Persian', pl: 'Polish', pt: 'Portuguese', pa: 'Punjabi', ro: 'Romanian', ru: 'Russian', sa: 'Sanskrit',
+  sr: 'Serbian', sn: 'Shona', sd: 'Sindhi', si: 'Sinhala', sk: 'Slovak', sl: 'Slovenian', so: 'Somali', su: 'Sundanese',
+  sw: 'Swahili', sv: 'Swedish', tl: 'Tagalog', tg: 'Tajik', ta: 'Tamil', tt: 'Tatar', te: 'Telugu', th: 'Thai', bo: 'Tibetan',
+  tr: 'Turkish', tk: 'Turkmen', uk: 'Ukrainian', ur: 'Urdu', uz: 'Uzbek', vi: 'Vietnamese', cy: 'Welsh', yi: 'Yiddish', yo: 'Yoruba',
+})];
+const RATES = [0.75, 1, 1.25, 1.5, 2]; // the speeds Settings offers
 // Loaded, the model's page holds about 1.4 GB, so it goes soon after the last
 // dictation. It is loading again by the time the next one has been spoken.
 const IDLE_MS = 30 * 1000;
@@ -92,22 +110,26 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
 
   let getting = null; // the download in flight: every caller waits for the same one
   let progress = null; // { percent } while it runs, for a window that opens meanwhile
+  let stop = null; // ends the download in flight (cancel())
+  // The user pressed the microphone again while the model was coming: the
+  // download stops, and what had arrived of the file under way is removed.
+  function cancel() { stop?.abort(); }
   function download(report) {
     disk = files.every(have);
     if (disk) return Promise.resolve();
     getting ??= (async () => {
+      const mine = stop = new AbortController();
       const missing = files.filter((f) => !have(f));
       const total = missing.reduce((sum, f) => sum + (f.size || 0), 0);
       let got = 0, shown = -1;
       for (const f of missing) {
         const to = path.join(dir, f.name);
         fs.mkdirSync(path.dirname(to), { recursive: true });
-        const stop = new AbortController();
         let stalled = false, quiet = null;
-        const alive = () => { clearTimeout(quiet); quiet = setTimeout(() => { stalled = true; stop.abort(); }, STALL_MS); };
+        const alive = () => { clearTimeout(quiet); quiet = setTimeout(() => { stalled = true; mine.abort(); }, STALL_MS); };
         try {
           alive();
-          const res = await fetch(`${testHost || HOST}/${MODEL.id}/resolve/${MODEL.revision}/${f.name}`, { signal: stop.signal });
+          const res = await fetch(`${testHost || HOST}/${MODEL.id}/resolve/${MODEL.revision}/${f.name}`, { signal: mine.signal });
           if (!res.ok) throw new Error(`the model host answered ${res.status}`);
           const hash = crypto.createHash('sha256');
           const out = fs.createWriteStream(`${to}.part`);
@@ -127,14 +149,24 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
           fs.renameSync(`${to}.part`, to);
         } catch (e) {
           fs.rmSync(`${to}.part`, { force: true }); // the next attempt starts afresh
-          throw stalled ? new Error('the download stalled') : e;
+          throw stalled ? Object.assign(new Error('the download stalled'), { stalled: true }) : e;
         } finally {
           clearTimeout(quiet);
         }
       }
       disk = files.every(have);
-    })().finally(() => { getting = null; progress = null; });
+    })().catch((e) => { throw !e?.stalled && stop?.signal.aborted ? Object.assign(new Error('cancelled'), { cancelled: true }) : e; })
+      .finally(() => { getting = null; progress = null; stop = null; changed(); });
     return getting;
+  }
+
+  // "Remove" in Settings: the model's files go; the next press of the microphone offers to fetch them again.
+  function removeModel() {
+    if (getting) return;
+    close();
+    for (const f of files) fs.rmSync(path.join(dir, f.name), { force: true });
+    disk = files.every(have);
+    changed();
   }
 
   // ── the hidden page ────────────────────────────────────────────────────────
@@ -235,7 +267,8 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
 
   // ── requests from a window's chrome ────────────────────────────────────────
   // Run inside tabs.as(w): the window is captured before anything is awaited.
-  function handle({ do: what, on, id, audio } = {}) {
+  let voices = null; // the system's voices, as the window chrome last reported them: [{ name, lang }]
+  function handle({ do: what, on, id, audio, list } = {}) {
     const w = tabs.window();
     if (!usable(w)) return;
     const reply = (payload) => { if (usable(w)) emit(w, payload); };
@@ -244,12 +277,19 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
       save();
       return changed();
     }
+    if (what === 'voices') { // asked for by askVoices()
+      voices = (Array.isArray(list) ? list : []).slice(0, 400)
+        .filter((v) => v && typeof v.name === 'string' && v.name)
+        .map((v) => ({ name: v.name.slice(0, 120), lang: typeof v.lang === 'string' ? v.lang.slice(0, 20) : '' }));
+      return changed();
+    }
+    if (what === 'cancel') return cancel();
     if (!dictation()) return;
     if (what === 'prepare') {
       // Gets the model if it is not here yet, and starts loading it so it is ready when the talking stops.
-      download((p) => reply({ type: 'model', status: 'downloading', ...p }))
+      download((p) => { changed(); reply({ type: 'model', status: 'downloading', ...p }); })
         .then(() => { open(); clearTimeout(idle); idle = setTimeout(close, IDLE_MS); reply({ type: 'model', status: 'ready' }); })
-        .catch((e) => reply({ type: 'model', status: 'failed', text: e.message || String(e) }));
+        .catch((e) => reply({ type: 'model', status: e.cancelled ? 'cancelled' : 'failed', text: e.message || String(e) }));
     } else if (what === 'transcribe') {
       transcribe(audio)
         .then((got) => reply({ type: 'text', id, text: got.text }))
@@ -269,6 +309,50 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
       model: onDisk() ? 'ready' : progress ? 'downloading' : 'missing',
     },
   });
+
+  // ── for the Settings window (Claude › Voice) ───────────────────────────────
+  // Voices are the system's, which only a page can list: the chrome of the
+  // window that reads aloud is asked, and answers through handle().
+  const speaker = () => { const w = tabs.normalWindow(); return usable(w) ? w : null; };
+  function askVoices() {
+    const w = speaker();
+    if (w) emit(w, { type: 'voices?' });
+  }
+  const rate = () => Math.min(3, Math.max(0.5, Number(settings.readBackRate) || 1));
+  const prefs = () => ({
+    readBack: settings.readBack === true,
+    voice: typeof settings.readBackVoice === 'string' ? settings.readBackVoice : '',
+    voices, // null until a window has said
+    rate: rate(), rates: RATES,
+    dictation: dictation(),
+    languages: LANGUAGES.map(([code, name]) => ({ code, name, on: languages().includes(code) })),
+    model: onDisk() ? 'ready' : progress ? 'downloading' : 'missing', percent: progress?.percent || 0, mb: MODEL_MB,
+    shortcut: 'Ctrl+Shift+Space',
+  });
+  const acts = {
+    'voice:read-back': (on) => { settings.readBack = !!on; save(); changed(); },
+    'voice:voice': (name) => {
+      if (typeof name !== 'string' || (name && !(voices || []).some((v) => v.name === name))) return;
+      if (name) settings.readBackVoice = name; else delete settings.readBackVoice;
+      save();
+      changed();
+    },
+    'voice:rate': (r) => { if (RATES.includes(Number(r))) { settings.readBackRate = Number(r); save(); changed(); } },
+    // "Play sample": a sentence in the chosen voice and speed, said by the main window.
+    'voice:sample': () => { const w = speaker(); if (w) emit(w, { type: 'sample' }); },
+    'voice:dictation': (on) => { settings.dictation = !!on; save(); changed(); },
+    // One language ticked or unticked. The last one stays: there must be one to write down.
+    'voice:language': ({ code, on } = {}) => {
+      if (!LANGUAGES.some(([c]) => c === code)) return;
+      const now = languages().filter((l) => l !== code);
+      if (on) now.push(code);
+      if (!now.length) return;
+      settings.dictationLanguages = LANGUAGES.map(([c]) => c).filter((c) => now.includes(c));
+      save();
+      changed();
+    },
+    'voice:model-remove': () => removeModel(),
+  };
 
   // Loui's own pages share Electron's default session, where nothing asked
   // before now. The microphone is for a normal window's chrome alone; the
@@ -317,7 +401,7 @@ function createVoice({ home, settings, save, tabs, changed, emit, lockToApp }) {
       .map((wc) => wc.executeJavaScript("navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => { s.getTracks().forEach((t) => t.stop()); return 'allowed'; }, (e) => e.name)"))),
   };
 
-  return { handle, state, probes, page: () => page?.win.webContents || null };
+  return { handle, state, probes, prefs, acts, askVoices, page: () => page?.win.webContents || null };
 }
 
 module.exports = { createVoice };

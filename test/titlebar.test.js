@@ -220,6 +220,31 @@ test('with vertical tabs in a small window a question has a row of its own, and 
   await until(() => chrome(`document.getElementById('helm').parentElement.id`), (p) => p === 'tabrow');
 });
 
+test('in a row of its own a long question keeps its buttons together, on one line at the right', async () => {
+  await b.ui('tabs:layout', { vertical: true });
+  await until(() => chrome(`document.getElementById('tabs').parentElement.id`), (p) => p === 'sidebar');
+  await size(720, 600);
+  await b.ui('tab:select', (await b.state()).tabs.find((t) => t.group === 'you').id);
+  const s = b.as('long', 'Claude Code (loui, a rather long name for one session)');
+  await s.text('navigate', { url: b.base + '/second.html?long' });
+  const asked = s.call('request_tab').catch(() => {});
+  await until(() => chrome(`!document.getElementById('helm').hidden && document.getElementById('helm').parentElement.id`), (p) => p === 'helmrow');
+  const lines = () => chrome(`(() => { const box = (n) => { const r = n.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.right)]; };
+    return { text: box(document.getElementById('helm-text')), no: box(document.getElementById('helm-no')), yes: box(document.getElementById('helm-btn')), helm: box(document.getElementById('helm')),
+      whole: document.getElementById('helm-text').scrollWidth <= document.getElementById('helm-text').clientWidth + 1 }; })()`);
+  const l = await until(lines, (x) => Math.abs(x.no[0] - x.yes[0]) <= 4);
+  assert.ok(l.whole, 'the question is whole');
+  assert.ok(l.no[0] > l.text[0] + 8, `the question did not fit on one line with them, so they are on the next: ${JSON.stringify(l)}`);
+  assert.ok(l.yes[1] >= l.helm[1] - 8, `at the right: ${JSON.stringify(l)}`);
+  const { prompt } = await b.state();
+  await b.ui('prompt:answer', { id: prompt.id, value: false });
+  await asked;
+  s.end();
+  await size(1400, 800);
+  await b.ui('tabs:layout', { vertical: false });
+  await until(() => chrome(`document.getElementById('helm').parentElement.id`), (p) => p === 'tabrow');
+});
+
 test("the Claude panel's header stays on one line in a small window: the lamp alone, and a plus", async () => {
   const head = () => chrome(`(() => { const h = (id) => document.getElementById(id).getBoundingClientRect();
     return { height: Math.round(h('panel-head').height), panel: Math.round(h('panel').width), lamp: getComputedStyle(document.getElementById('link-text')).display,
@@ -246,31 +271,63 @@ test('the menu button has a short menu of its own, one level deep', async () => 
   assert.deepEqual(menu.map((i) => (Array.isArray(i) ? `${i[0]} ▸` : i)), [
     'New tab', 'New window', 'New private window', '-',
     'History ▸', 'Bookmarks ▸', 'Downloads', 'Passwords', '-',
-    'Zoom: 100%', 'Zoom in', 'Zoom out', 'Reset zoom', 'Find in page…', 'Print…', '-',
-    'Device size ▸', 'Developer tools', '-',
-    'Claude ▸', '-',
-    'Settings', menu.at(-1)]);
-  assert.match(menu.at(-1), /^About Loui \d+\.\d+\.\d+/);
+    'Zoom: 100% ▸', 'Find in page…', 'Print…', 'Full screen', '-',
+    'Claude ▸', 'More tools ▸', 'Task manager', '-',
+    'Settings', menu.at(-3), '-', 'Quit']);
+  assert.match(menu.at(-3), /^About Loui \d+\.\d+\.\d+/);
   // The device sizes and the developer tools are here, not in the toolbar.
   assert.equal(await chrome("document.getElementById('devtools')"), null);
   assert.equal(await chrome("getComputedStyle(document.getElementById('device')).display"), 'none', 'the device button is drawn only while one is emulated');
   const sub = (name) => menu.find((i) => Array.isArray(i) && i[0] === name)[1];
-  assert.equal(sub('History')[0], 'Second', 'the page just visited comes first');
+  // History: the tab closed last (when there is one), then the last few pages.
+  const pages = sub('History').filter((i) => i !== 'Reopen closed tab');
+  assert.equal(pages.find((i) => i !== '-'), 'Second', 'the page just visited comes first');
+  assert.ok(pages.filter((i) => i !== '-').length <= 7, `a few pages, not a long list: ${pages}`);
   assert.deepEqual(sub('History').slice(-2), ['-', 'Show all history']);
-  assert.deepEqual(sub('Claude'), ['Sessions', 'Claude panel', 'Take over', 'Watch in a small window']);
+  assert.deepEqual(sub('Claude'), ['Sessions', 'Claude panel', 'Point at something', 'Take over', 'Watch in a small window']);
+  // Zoom is one row, which says the level; what is used now and then is under More tools.
+  assert.deepEqual(sub('Zoom: 100%'), ['Zoom in', 'Zoom out', 'Reset zoom']);
+  assert.deepEqual(sub('More tools'), ['Reader view', 'Site permissions…', '-', 'Device size', 'Developer tools']);
   // Its items act.
-  await b.ui('menu:button', { click: 'Zoom in' });
-  assert.ok((await b.ui('menu:button')).includes('Zoom: 110%'));
-  await b.ui('menu:button', { click: 'Reset zoom' });
-  assert.ok((await b.ui('menu:button')).includes('Zoom: 100%'));
+  const labels = async () => (await b.ui('menu:button')).map((i) => (Array.isArray(i) ? i[0] : i));
+  await b.ui('menu:button', { in: 'Zoom', click: 'Zoom in' });
+  assert.ok((await labels()).includes('Zoom: 110%'));
+  await b.ui('menu:button', { in: 'Zoom', click: 'Reset zoom' });
+  assert.ok((await labels()).includes('Zoom: 100%'));
+  await b.ui('menu:button', { in: 'Claude', click: 'Point at something' });
+  await until(() => b.state(), (s) => s.picking.active);
+  await b.ui('pick:cancel');
+  await b.ui('menu:button', { click: 'Task manager' });
+  await until(() => b.ui('taskmanager:state'), (t) => t.open);
+  await b.ui('taskmanager:close');
   const before = (await b.state()).tabs.length;
   await b.ui('menu:button', { in: 'History', click: 'Second' });
   await until(() => b.state(), (s) => s.tabs.length === before + 1 && /second\.html/.test(s.tabs.find((t) => t.active).url));
   await b.ui('menu:button', { click: 'Find in page…' });
   await until(() => chrome(`document.getElementById('find').hidden`), (h) => h === false);
   await chrome(`document.getElementById('find-close').click()`);
+  // A tab closed: History offers it back, first.
+  const closing = (await b.state()).tabs.find((t) => t.active);
+  await b.ui('tab:close', closing.id);
+  const after = await b.ui('menu:button');
+  assert.deepEqual(after.find((i) => Array.isArray(i) && i[0] === 'History')[1].slice(0, 2), ['Reopen closed tab', '-']);
+  await b.ui('menu:button', { in: 'History', click: 'Reopen closed tab' });
+  await until(() => b.state(), (s) => s.tabs.length === before + 1);
   // The application menu keeps its eight menus, for Alt and the shortcuts.
   assert.deepEqual((await b.ui('menu')).map(([name]) => name), ['File', 'Edit', 'View', 'History', 'Bookmarks', 'Tab', 'Claude', 'Help']);
+});
+
+test('with no pages and no closed tab, History in the menu is the panel itself, not a level holding one item', async () => {
+  const fresh = await launch();
+  try {
+    const menu = await fresh.ui('menu:button');
+    assert.ok(menu.includes('History'), `History is a plain item: ${JSON.stringify(menu)}`);
+    await fresh.ui('menu:button', { click: 'History' });
+    for (let i = 0; i < 50 && (await fresh.ui('chrome:eval', "document.getElementById('history').hidden")); i++) await pause(100);
+    assert.equal(await fresh.ui('chrome:eval', "document.getElementById('history').hidden"), false);
+  } finally {
+    await fresh.close();
+  }
 });
 
 test('a new window opens a little down and right of the one it came from, not on top of it', async () => {

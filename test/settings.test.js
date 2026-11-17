@@ -103,13 +103,16 @@ test('the command palette opens it too', async () => {
 test('each section lists its settings', async () => {
   const sections = await js('window.sectionsForTest()');
   assert.deepEqual(sections.map((s) => s.title),
-    ['General', 'Tabs', 'Search', 'Privacy and security', 'Passwords', 'Claude', 'Reading', 'About']);
+    ['General', 'Start page', 'Tabs', 'Search', 'Privacy and security', 'Passwords', 'Claude', 'Reading', 'About']);
   const of = (title) => sections.find((s) => s.title === title).settings;
   assert.deepEqual(of('General'), [
     'Appearance', 'When Loui starts', 'Open Loui when I sign in', 'Default browser',
-    'New tabs open with', 'New tab address', 'Show the sites you visit most', 'Sites taken off the start page',
-    'Show the weather', 'Your place', 'Temperature in', 'Show news headlines', 'News feeds',
     'Downloads folder', 'Ask where to save each file',
+  ]);
+  // The start page has a section of its own, after General.
+  assert.deepEqual(of('Start page'), [
+    'New tabs open with', 'New tab address', 'Show the sites you visit most', 'Sites taken off the start page',
+    'Show the weather', 'Your place', 'Temperature in', 'Show news headlines', 'News feeds', 'Well-known feeds',
   ]);
   assert.deepEqual(of('Tabs'), ['Vertical tabs', 'Show the bookmarks bar', 'Put tabs to sleep after', 'Sites that are never put to sleep']);
   assert.deepEqual(of('Search'), ['Search engine', 'Search address']);
@@ -120,6 +123,7 @@ test('each section lists its settings', async () => {
     'Let other Claude sessions use this browser', 'Relay address', 'Relay key', 'Connection', 'This browser\'s name on the relay', 'Let in without asking',
     'Ask before Claude pays, buys, sends, deletes or signs in', 'Sites Claude asks before opening', 'Allowed without asking', 'Sessions trusted until they end',
     'Keep what Claude sessions did for', 'Most disk space for the log', 'Clear the log', 'Local control socket',
+    'Read replies aloud', 'Voice', 'Speed', 'Hear it', 'Dictation', 'Languages you dictate in', 'Speech model', 'Push to talk',
   ]);
   assert.deepEqual(of('Reading'), ['Text size', 'Font', 'Line width', 'Colours']);
   assert.deepEqual(of('About'), ['Version', 'Updates', 'Release notes', 'Profile folder']);
@@ -155,6 +159,27 @@ test('General: appearance, what opens at start, and where downloads go', async (
   const browser = await row('default-browser');
   assert.match(browser.value, /installed on Windows/);
   assert.equal(await js("document.getElementById('set-default-browser').hidden"), true);
+});
+
+test('Start page: a section of its own, with the temperature unit, a place that is a hint until typed, and the feeds on offer', async () => {
+  await js("window.showSectionForTest('start')");
+  assert.deepEqual((await js('window.shownForTest()')).map((s) => s.title), ['Start page']);
+  const start = async () => (await win()).state.general.start;
+  // Fahrenheit only where the system's region uses it; the choice is kept once made.
+  assert.ok(['c', 'f'].includes((await start()).units));
+  assert.equal(saved().weatherUnits, undefined);
+  await use('weather-units', 'f');
+  await until(() => saved().weatherUnits === 'f', 'the unit to be kept');
+  await use('weather-units', 'c');
+  await until(() => saved().weatherUnits === 'c', 'and changed');
+  // No place yet: the field is empty, with a hint that does not read as a place, and no "Not this one?".
+  assert.equal(await js("document.getElementById('set-weather-place').value"), '');
+  assert.equal(await js("document.getElementById('set-weather-place').placeholder"), 'Type a town or city');
+  assert.equal(await js("document.getElementById('value-weather-place').hidden"), true);
+  // Well-known feeds are a press away, in English and Spanish (none is fetched here).
+  const offered = await js("[...document.querySelectorAll('[data-setting=news-known] .st-offers button')].map((n) => n.textContent)");
+  assert.ok(['BBC News', 'NPR', 'BBC Mundo', 'El País'].every((name) => offered.includes(name)), `offered: ${offered}`);
+  await js("window.showSectionForTest('general')");
 });
 
 test('Tabs: vertical tabs, the bookmarks bar, and sleeping', async () => {
@@ -423,8 +448,8 @@ test('the search box finds settings by label and description, across sections', 
 test('the sections are reached with the arrow keys, and Esc and Ctrl+W close the window', async () => {
   await js("window.showSectionForTest('general'); document.getElementById('tab-general').focus()");
   await b.ui('settings:key', { key: 'Down' });
-  await until(async () => (await js('document.activeElement.id')) === 'tab-tabs', 'Down to move to Tabs');
-  assert.deepEqual((await js('window.shownForTest()')).map((s) => s.id), ['tabs']);
+  await until(async () => (await js('document.activeElement.id')) === 'tab-start', 'Down to move to Start page');
+  assert.deepEqual((await js('window.shownForTest()')).map((s) => s.id), ['start']);
   await b.ui('settings:key', { key: 'End' });
   await until(async () => (await js('document.activeElement.id')) === 'tab-about', 'End to move to About');
   assert.equal(await js("document.querySelectorAll('.st-section-tab[tabindex=\"0\"]').length"), 1, 'the list of sections is one Tab stop');
@@ -512,7 +537,7 @@ test('it works with only a private window open, and shows nothing of it', async 
   await b.ui('window:close', first);
   await until(async () => (await b.ui('windows')).length === 1, 'only the private window to be left');
   await open();
-  assert.equal((await js('window.sectionsForTest()')).length, 8);
+  assert.equal((await js('window.sectionsForTest()')).length, 9);
   await use('sleep-minutes', 15);
   await until(() => saved().sleepAfterMinutes === 15, 'a setting to change');
   assert.ok(!JSON.stringify(await win()).includes('?private'), 'nothing of the private window is in what it is sent');

@@ -116,7 +116,14 @@ address.onkeydown = (e) => {
   address.blur();
   focusPage();
 };
-loui.on('focus-address', () => address.focus());
+// text: what was typed on the start page, which has no address bar of its own
+// (startpage.js): it goes in as if typed here, so the suggestions follow.
+loui.on('focus-address', (text) => {
+  if (document.activeElement !== address) address.focus(); // selects what is there: typing replaces it
+  if (typeof text !== 'string' || !text) return;
+  address.setRangeText(text, address.selectionStart, address.selectionEnd, 'end');
+  address.dispatchEvent(new Event('input', { bubbles: true }));
+});
 
 const panelOpen = () => !document.body.classList.contains('panel-closed');
 const togglePanel = (open) => {
@@ -617,11 +624,17 @@ tabsBox.addEventListener('mouseover', (e) => {
   cardTimer = setTimeout(() => {
     const now = tabsBox.querySelector(`.tab[data-id="${id}"]`);
     if (!now || dragging) return;
+    // The tab on screen says what it is in the address bar and on the page:
+    // it gets a card only if its title does not fit on it.
+    const title = now.querySelector('.title');
+    if (now.classList.contains('active') && title && title.scrollWidth <= title.clientWidth) return;
     const r = now.getBoundingClientRect();
     carded = true;
-    // Under a tab along the top; beside one in the sidebar.
-    loui.send('tab:card', state.tabStrip?.vertical ? { id, x: r.right - 4, y: r.top - 2 } : { id, x: r.left - 8, y: r.bottom + 3 });
-  }, 600);
+    // Beside a tab in the sidebar. Along the top the card would lie over the
+    // toolbar (Back, Reload, the address bar), so it goes under the toolbar, below its tab.
+    const under = Math.max(r.bottom + 3, $('stage').getBoundingClientRect().top + 4);
+    loui.send('tab:card', state.tabStrip?.vertical ? { id, x: r.right - 4, y: r.top - 2 } : { id, x: r.left - 8, y: under });
+  }, 900);
 });
 tabsBox.addEventListener('mouseleave', () => { hovered = null; dropCard(); });
 // A press is the start of something else (a click, a drag, the tab's menu):
@@ -791,6 +804,7 @@ function drawHelm() {
 // buttons. Measured, since what the toolbar holds varies.
 function placeHelm() {
   const helm = $('helm');
+  helm.classList.remove('split');
   if (!document.body.classList.contains('vertical') || helm.hidden) return;
   const wide = (node) => node.getBoundingClientRect().width;
   const row = $('navrow');
@@ -802,6 +816,9 @@ function placeHelm() {
   const fits = need <= spare && !(inRow && $('menu').getBoundingClientRect().right > end + 0.5);
   if (fits && !inRow) $('address-form').after(helm);
   if (!fits && inRow) $('helmrow').append(helm);
+  // In its own row a long question wraps: its buttons go to the next line together, not one by one.
+  const acts = [...helm.querySelectorAll(':scope > label, :scope > button')].filter((n) => !n.hidden);
+  if (!fits && acts.some((n) => Math.abs(n.offsetTop - acts[0].offsetTop) > 8))helm.classList.add('split');
 }
 new ResizeObserver(placeHelm).observe($('navrow'));
 // With the tabs in the sidebar, the strips under the toolbar (the bookmarks
@@ -927,17 +944,19 @@ function drawUpdate() {
   const coming = u?.status === 'downloading';
   $('update').hidden = !ready && !coming;
   $('update').disabled = !ready;
+  // A download is only said, quietly: nothing of Loui changes until it restarts, and there is nothing to press.
+  $('update').classList.toggle('coming', coming);
   if (coming) {
-    $('update').textContent = `Updating… ${u.percent || 0}%`;
-    $('update').title = `Version ${u.version} is downloading. Loui will offer to restart when it is here.`;
+    $('update').textContent = `Downloading update ${u.percent || 0}%`;
+    $('update').title = `Version ${u.version} is downloading in the background. Loui will offer to restart when it is here.`;
     return;
   }
-  if (!ready || $('update').classList.contains('sure')) return; // not while it asks "Restart now?"
+  if (!ready || $('update').classList.contains('sure')) return; // not while it asks
   $('update').textContent = 'Restart to update';
   $('update').title = `Version ${u.version} is ready. Loui closes, the installer shows its progress for a few seconds, and Loui reopens; Claude sessions' tab groups close.`;
 }
 // Restarting closes sessions' tab groups, so while one is working (in any window) it asks first.
-askFirst($('update'), 'Restart now?', () => state.working > 0, () => loui.send('update:install'));
+askFirst($('update'), 'A session is working. Restart anyway?', () => state.working > 0, () => loui.send('update:install'));
 loui.on('update:ask', () => $('update').click()); // "Restart to update" in the Help menu
 
 loui.on('state', (next) => {
@@ -1012,12 +1031,33 @@ function inline(parent, text) {
   parent.append(text.slice(last));
 }
 
+// A Markdown table: a row of cells, then a rule (|---|---|), then more rows.
+const tableRule = (line) => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line || '') && line.includes('|');
+const tableStart = (lines, i) => lines[i].includes('|') && tableRule(lines[i + 1]);
+const cellsOf = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+
 function markdown(target, source) {
   const out = [];
   const lines = source.split('\n');
   for (let i = 0; i < lines.length;) {
     const line = lines[i];
-    if (line.startsWith('```')) {
+    if (tableStart(lines, i)) {
+      // A small grid, which scrolls sideways when it is wider than the panel. Text only, as the rest.
+      const table = el('table');
+      const head = table.appendChild(el('thead')).appendChild(el('tr'));
+      const width = cellsOf(line).length;
+      for (const cell of cellsOf(line)) inline(head.appendChild(el('th')), cell);
+      const body = table.appendChild(el('tbody'));
+      for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes('|'); i++) {
+        const tr = body.appendChild(el('tr'));
+        const cells = cellsOf(lines[i]);
+        for (let c = 0; c < Math.max(width, cells.length); c++) inline(tr.appendChild(el('td')), cells[c] || '');
+      }
+      const wrap = el('div', 'table');
+      wrap.tabIndex = 0; // the arrow keys scroll it
+      wrap.append(table);
+      out.push(wrap);
+    } else if (line.startsWith('```')) {
       const code = [];
       for (i++; i < lines.length && !lines[i].startsWith('```'); i++) code.push(lines[i]);
       i++;
@@ -1037,7 +1077,7 @@ function markdown(target, source) {
       i++;
     } else {
       const para = [];
-      for (; i < lines.length && lines[i].trim() && !/^(```|\s*([-*]|\d+\.)\s+|#{1,4}\s)/.test(lines[i]); i++) para.push(lines[i]);
+      for (; i < lines.length && lines[i].trim() && !/^(```|\s*([-*]|\d+\.)\s+|#{1,4}\s)/.test(lines[i]) && !(para.length && tableStart(lines, i)); i++) para.push(lines[i]);
       inline(out[out.push(el('p')) - 1], para.join('\n'));
     }
   }

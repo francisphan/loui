@@ -499,13 +499,28 @@ test('resting on a tab shows a card with its whole title, its site, and whose it
   await until(() => chrome(`document.querySelector('#tabs .tab.active')?.dataset.id`), (id) => id === String(own.id));
   assert.equal(await chrome(`document.querySelector('#tabs .tab[data-id="${own.id}"]').title`), '', 'no tooltip of the system\'s as well');
   assert.equal(await chrome(`document.getElementById('address').title`), own.title);
+  // The tab on screen, its title whole on it: the address bar and the page already say what it is, so no card.
+  const fits = await chrome(`(() => { const t = document.querySelector('#tabs .tab.active .title'); return t.scrollWidth <= t.clientWidth; })()`);
   await rest(own.id);
-  assert.equal((await hint()).shown, null, 'not at once');
+  await pause(1300);
+  assert.equal((await hint()).shown, fits ? null : 'card', `the tab on screen has a card only when its title is cut short (fits: ${fits})`);
+  await leave();
+  await until(hint, (h) => h.shown === null);
+  // Another tab: after most of a second, not at once.
+  const other = (await mine()).find((t) => !t.pinned && t.id !== own.id);
+  await b.ui('tab:select', other.id);
+  await until(() => chrome(`document.querySelector('#tabs .tab.active')?.dataset.id`), (id) => id === String(other.id));
+  await rest(own.id);
+  await pause(650);
+  assert.equal((await hint()).shown, null, 'not at once, nor for a pointer passing by');
   const card = await until(hint, (h) => h.shown === 'card');
   assert.ok(card.inFront, 'in front of the page');
   assert.deepEqual(card.text.split('\n'), [own.title, new URL(own.url).host]);
-  const under = await chrome(`(() => { const r = document.querySelector('#tabs .tab[data-id="${own.id}"]').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.bottom)]; })()`);
+  // Below its tab, and clear of the toolbar: Back, Reload and the address bar stay in reach.
+  const under = await chrome(`(() => { const r = document.querySelector('#tabs .tab[data-id="${own.id}"]').getBoundingClientRect();
+    return [Math.round(r.left), Math.round(r.bottom), Math.round(document.getElementById('navrow').getBoundingClientRect().bottom)]; })()`);
   assert.ok(Math.abs(card.bounds.x + 8 - under[0]) <= 1 && card.bounds.y >= under[1], `under its tab: ${JSON.stringify(card.bounds)} for a tab at ${under}`);
+  assert.ok(card.bounds.y >= under[2], `under the toolbar too: ${JSON.stringify(card.bounds)}, toolbar ends at ${under[2]}`);
   await leave();
   await until(hint, (h) => h.shown === null);
   // A session's tab says whose it is.

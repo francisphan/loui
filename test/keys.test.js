@@ -385,6 +385,35 @@ test('"New conversation" asks first once there is a conversation to lose', async
   assert.equal(await label(), 'New conversation');
 });
 
+test('a table in a reply is a small grid that scrolls sideways when wider than the panel, built as text', async () => {
+  const say = (text) => b.ui('chat:emit', { type: 'text', text });
+  const last = (code) => chrome(`(() => { const r = [...document.querySelectorAll('#feed .reply')].at(-1); return ${code}; })()`);
+  await b.ui('chat:emit', { type: 'start' });
+  await b.ui('chat:emit', { type: 'text-start' });
+  await say('Results:\n\n| Site | Status | Time to load the whole page | Notes on what went wrong |\n');
+  await until(async () => (await last("r?.textContent.includes('| Site |')")) === true, 'the first row, not yet known to be a table');
+  await say('|---|:---:|---:|---|\n| example.com | OK | 120 ms | |\n| a-much-longer-host-name.example.org | **Failed** | 3,400 ms | <img src=x onerror=alert(1)> and a \\| pipe, with enough words after it to be wider than the panel is |\n\nThat is all.');
+  await b.ui('chat:emit', { type: 'done' });
+  const t = await until(() => last(`r.querySelector('table') && { head: [...r.querySelectorAll('th')].map((n) => n.textContent),
+    rows: [...r.querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((td) => td.textContent)),
+    strong: r.querySelector('td strong')?.textContent, markup: r.querySelectorAll('img, script').length,
+    kids: [...r.children].map((n) => n.tagName + (n.className ? '.' + n.className : '')),
+    scroll: getComputedStyle(r.querySelector('.table')).overflowX, wider: r.querySelector('.table').scrollWidth > r.querySelector('.table').clientWidth,
+    inside: r.querySelector('.table').getBoundingClientRect().right <= document.getElementById('feed').getBoundingClientRect().right,
+    end: r.lastElementChild.textContent }`), 'the table');
+  assert.deepEqual(t.head, ['Site', 'Status', 'Time to load the whole page', 'Notes on what went wrong']);
+  assert.deepEqual(t.rows, [
+    ['example.com', 'OK', '120 ms', ''],
+    ['a-much-longer-host-name.example.org', 'Failed', '3,400 ms', '<img src=x onerror=alert(1)> and a | pipe, with enough words after it to be wider than the panel is'],
+  ]);
+  assert.equal(t.strong, 'Failed');
+  assert.equal(t.markup, 0, 'markup in a cell is text');
+  assert.deepEqual(t.kids, ['P', 'DIV.table', 'P']);
+  assert.equal(t.end, 'That is all.');
+  assert.deepEqual([t.scroll, t.wider, t.inside], ['auto', true, true], 'it scrolls inside the panel instead of widening it');
+  await chrome("document.getElementById('new-chat').click(); document.getElementById('new-chat').click()");
+});
+
 test('"Restart to update" asks first while a session is working', async () => {
   const text = await chrome(`(() => {
     state.update = { status: 'ready', version: '9.9.9' };
@@ -395,7 +424,33 @@ test('"Restart to update" asks first while a session is working', async () => {
     drawUpdate(); // a change of state leaves the question up
     return [asked, document.getElementById('update').textContent, document.getElementById('update').classList.contains('sure')];
   })()`);
-  assert.deepEqual(text, ['Restart now?', 'Restart now?', true]);
+  assert.deepEqual(text, ['A session is working. Restart anyway?', 'A session is working. Restart anyway?', true]);
+  // It is tinted as the other questions are, not as the button it was.
+  const colours = await chrome(`(() => { const probe = document.createElement('span'); probe.style.color = 'var(--danger)'; document.body.append(probe);
+    const out = [getComputedStyle(document.getElementById('update')).color, getComputedStyle(probe).color]; probe.remove(); return out; })()`);
+  assert.equal(colours[0], colours[1]);
+});
+
+test('an update on its way is a quiet note, not a button', async () => {
+  const coming = await chrome(`(() => {
+    document.getElementById('update').classList.remove('sure');
+    state.update = { status: 'downloading', version: '9.9.9', percent: 37 };
+    drawUpdate();
+    const u = document.getElementById('update'), c = getComputedStyle(u);
+    const out = { text: u.textContent, disabled: u.disabled, quiet: u.classList.contains('coming'), weight: c.fontWeight, title: u.title };
+    state.update = { status: 'ready', version: '9.9.9' };
+    state.working = 0;
+    drawUpdate();
+    out.ready = [u.textContent, u.classList.contains('coming'), u.disabled, getComputedStyle(u).fontWeight];
+    state.update = null;
+    drawUpdate();
+    return out;
+  })()`);
+  assert.deepEqual([coming.text, coming.disabled, coming.quiet], ['Downloading update 37%', true, true]);
+  assert.ok(Number(coming.weight) <= 500, 'not in the weight of something to press');
+  assert.match(coming.title, /downloading in the background/);
+  assert.deepEqual(coming.ready.slice(0, 3), ['Restart to update', false, false]);
+  assert.ok(Number(coming.ready[3]) > 600);
 });
 
 test('a tool call with bad arguments is still named sensibly', async () => {

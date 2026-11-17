@@ -25,6 +25,7 @@ async function until(what, fn, tries = 80) {
 // ── stand-ins for Open-Meteo and a news feed ────────────────────────────────
 const hits = { forecast: 0, geocode: 0, feed: 0, atom: 0, bad: 0, inner: 0 };
 let weatherDown = false;
+let flakyDown = false; // the feed at /flaky answers until this is set
 const item = (title, link, source = 'The Gazette') =>
   `<item><title>${title}</title><link>${link}</link><pubDate>${new Date(Date.now() - 3 * 3600e3).toUTCString()}</pubDate><source url="https://gazette.example">${source}</source></item>`;
 const FEED = `<?xml version="1.0"?><rss version="2.0"><channel><title>Stub news</title>
@@ -50,13 +51,23 @@ const stub = http.createServer((req, res) => {
   if (url.pathname === '/geocode') {
     hits.geocode++;
     const name = url.searchParams.get('name');
-    return res.end(JSON.stringify(name === 'Mendoza'
-      ? { results: [{ name: 'Mendoza', latitude: -32.89, longitude: -68.83, country: 'Argentina', country_code: 'AR', admin1: 'Mendoza' }] } : {}));
+    // As Open-Meteo answers: the places of that name, as many as were asked for.
+    const places = {
+      Mendoza: [{ name: 'Mendoza', latitude: -32.89, longitude: -68.83, country: 'Argentina', country_code: 'AR', admin1: 'Mendoza' }],
+      'Córdoba': [
+        { name: 'Córdoba', latitude: -31.41, longitude: -64.18, country: 'Argentina', country_code: 'AR', admin1: 'Córdoba' },
+        { name: 'Córdoba', latitude: 37.89, longitude: -4.77, country: 'Spain', country_code: 'ES', admin1: 'Andalusia' },
+        { name: 'Córdoba', latitude: 18.88, longitude: -96.93, country: 'Mexico', country_code: 'MX', admin1: 'Veracruz' },
+      ],
+    }[name];
+    return res.end(JSON.stringify(places ? { results: places.slice(0, Number(url.searchParams.get('count')) || 1) } : {}));
   }
   if (url.pathname === '/feed') { hits.feed++; return res.end(FEED); }
   if (url.pathname === '/atom') { hits.atom++; return res.end(ATOM); }
   if (url.pathname === '/moved') return res.writeHead(302, { location: '/feed' }).end();
   if (url.pathname === '/inward') return res.writeHead(302, { location: `${within}/secret` }).end();
+  if (url.pathname === '/flaky' && !flakyDown) return res.end(FEED);
+  if (url.pathname === '/page') return res.end('<!doctype html><title>Not a feed</title><p>Just a page.</p>');
   hits.bad++;
   res.writeHead(500).end('no');
 });
@@ -67,9 +78,16 @@ let within;
 
 const now = Date.now();
 const entry = (url, visits) => ({ url, title: url, visits, first: now - 1e9, last: now - 1e6 });
+const DOT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const HISTORY = {
   version: 1,
-  entries: [entry('https://a.example/one', 3), entry('https://a.example/two', 2), entry('https://b.example/', 9), entry('https://www.c.example/deep/page', 2)],
+  entries: [
+    entry('https://a.example/one', 3), entry('https://a.example/two', 2), entry('https://b.example/', 9), entry('https://www.c.example/deep/page', 2),
+    entry('https://once.example/', 1), // been to once: not a site the user keeps going to
+    entry('https://search.brave.com/search?q=wine', 7), // where searches land: the search engine itself is left out
+  ],
+  // b.example's icon, as a tab once showed it; and one that is not a picture Loui made.
+  icons: { 'b.example': DOT, 'a.example': 'data:image/png;base64,AAAA" onerror="alert(1)' },
 };
 const BOOKMARKS = { version: 1, showBar: false, next: 5, other: [], bar: [{ id: '1', title: 'Marked place', url: 'https://marked.example/', added: now }] };
 const SITES = /a\.example|b\.example|c\.example|Marked place|marked\.example/;
@@ -107,6 +125,8 @@ const onScreen = async (app = b) => (await app.state()).tabs.find((t) => t.activ
 const js = (id, code, app = b) => app.ui('tab:js', { id, code });
 const saved = () => JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8'));
 const act = (what, arg) => b.ui('settings:act', { what, arg });
+const chrome = (code, app = b) => app.ui('chrome:eval', code);
+const start = async () => (await b.ui('settings:state')).state.general.start;
 // The tab on screen once the start page is drawn in it.
 async function started(app = b) {
   return until('the start page is drawn', async () => {
@@ -129,7 +149,10 @@ const names = async (id, app = b) => (await js(id, "[...document.querySelectorAl
 const panel = async (tool, args) => (await b.ui('panel', { tool, args })).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
 
 test('the first tab and a new tab show the start page: no address, "New tab", Louis in the tab strip', async () => {
-  for (const tab of [await started(), await fresh()]) {
+  const first = await started();
+  // Loui has just started: the address bar has the keyboard, as it does in a new tab.
+  await until('the address bar has the keyboard at launch', async () => (await chrome('document.hasFocus() && document.activeElement?.id')) === 'address');
+  for (const tab of [first, await fresh()]) {
     assert.equal(tab.url, '', 'the address bar is empty');
     assert.equal(tab.title, 'New tab');
     assert.match(tab.favicon, /^loui-icon:\/\/tab\//, 'Louis is its icon');
@@ -167,8 +190,12 @@ test('Louis is large on it, his name under him to scale, and the search box well
 
 test('most visited comes from history, most visited first, and the bookmarks bar\'s bookmarks show while the bar is hidden', async () => {
   const tab = await fresh();
-  assert.deepEqual(await names(tab.id), ['b.example', 'a.example', 'c.example']);
+  assert.deepEqual(await names(tab.id), ['b.example', 'a.example', 'c.example'], 'not the search engine, nor a site visited once');
   assert.equal(await js(tab.id, "document.querySelector('.tile').href"), 'https://b.example/');
+  // A site whose icon a tab has shown wears it; the others a letter. The grid is as wide as its tiles.
+  assert.deepEqual(await js(tab.id, "[...document.querySelectorAll('.tile')].slice(0, 3).map((t) => t.querySelector('img.icon')?.src || t.querySelector('.letter').textContent)"), [DOT, 'A', 'C']);
+  assert.equal(await js(tab.id, "document.querySelectorAll('[onerror]').length"), 0);
+  assert.match(await js(tab.id, "document.querySelector('.tiles').className"), /\bn\d\b/);
   assert.deepEqual(await js(tab.id, "[...document.querySelectorAll('.chip')].map((n) => n.textContent + ' ' + n.href)"), ['MMarked place https://marked.example/']);
 });
 
@@ -177,7 +204,17 @@ test('hiding a site sticks, and Settings brings it back', async () => {
   await js(tab.id, "document.querySelector('.hide[href*=\"a.example\"]').click()");
   await until('the tile is gone', async () => !(await names(tab.id).catch(() => ['a.example'])).includes('a.example'));
   assert.deepEqual(saved().startHidden, ['a.example']);
-  assert.deepEqual(await names((await fresh()).id), ['b.example', 'c.example']);
+  // The page that follows says so, with a way back; Undo restores it.
+  assert.match(await words(tab.id), /Removed a\.example · Undo/);
+  await js(tab.id, "document.querySelector('.removed a').click()");
+  await until('the tile is back', async () => (await names(tab.id).catch(() => [])).includes('a.example'));
+  assert.equal(saved().startHidden, undefined);
+  assert.doesNotMatch(await words(tab.id), /Removed/);
+  await js(tab.id, "document.querySelector('.hide[href*=\"a.example\"]').click()");
+  await until('the tile is gone again', async () => !(await names(tab.id).catch(() => ['a.example'])).includes('a.example'));
+  const next = await fresh();
+  assert.doesNotMatch(await words(next.id), /Removed/, 'offered once, on the page that followed');
+  assert.deepEqual(await names(next.id), ['b.example', 'c.example']);
   assert.equal((await b.ui('settings:state')).state.general.start.hidden, 1);
   await act('start:unhide');
   assert.deepEqual(await names((await fresh()).id), ['b.example', 'a.example', 'c.example']);
@@ -206,6 +243,61 @@ test('typing in its box and pressing Enter opens an address, or searches for wor
   await b.ui('search:set', { engine: 'custom', url: `${b.base}/second.html?q=%s` });
   await panel('type', { ref: ref(await panel('snapshot')), text: 'two words', submit: true });
   await until('the words are searched for', async () => (await tabOf(tab.id)).url === `${b.base}/second.html?q=two%20words`);
+  await b.ui('search:set', { engine: 'brave' });
+});
+
+test('its box hands the keyboard to the address bar: a click, or a letter typed on the page', async () => {
+  const tab = await fresh();
+  const focused = () => chrome('document.hasFocus() && document.activeElement?.id');
+  const value = () => chrome("document.getElementById('address').value");
+  // The keyboard is on the page (the user clicked it, say).
+  await chrome("document.getElementById('address').blur()");
+  await b.ui('page:focus');
+  await until('the page has the keyboard', async () => (await focused()) !== 'address');
+  // A press on the box.
+  const at = await js(tab.id, "(() => { const r = document.querySelector('form input').getBoundingClientRect(); return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)]; })()");
+  await b.ui('tab:press', { id: tab.id, x: at[0], y: at[1] });
+  await until('the address bar has the keyboard', async () => (await focused()) === 'address');
+  assert.equal((await tabOf(tab.id)).url, '', 'the page stayed where it was');
+  assert.equal(await js(tab.id, 'location.protocol'), 'loui-start:');
+  // Letters typed on the page: they arrive in the address bar, which completes them from history.
+  await chrome("document.getElementById('address').blur()");
+  await b.ui('page:focus');
+  await until('the page has the keyboard again', async () => (await focused()) !== 'address');
+  const type = async (key) => { for (const type of ['keyDown', 'keyUp']) await b.ui('tab:key', { id: tab.id, type, key }); };
+  // Esc in the address bar: the first closes a list of suggestions, the next gives the keyboard back to the page.
+  const esc = async () => {
+    for (let i = 0; i < 2 && (await focused()) === 'address'; i++) {
+      await chrome("document.getElementById('address').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await wait(200);
+    }
+    await until('Esc gives the keyboard back to the page', async () => (await focused()) !== 'address');
+  };
+  const typed = () => chrome("(() => { const a = document.getElementById('address'); return a.value.slice(0, a.selectionStart) + '|' + a.value.slice(a.selectionStart); })()");
+  await type('b');
+  await until('the letter is in the address bar, which completes it', async () => (await focused()) === 'address' && (await typed()) === 'b|.example');
+  // The next letters follow it there, though they too were typed "on the page".
+  await type('.');
+  await type('e');
+  await until('the address bar completes that too', async () => (await typed()) === 'b.e|xample');
+  assert.equal(await chrome("document.getElementById('address').selectionStart"), 3, 'three letters typed, the rest offered');
+  assert.equal(await js(tab.id, "document.querySelector('form input').value"), '', 'nothing was typed in the page');
+  assert.ok((await b.ui('suggestions')).open, 'with its list of suggestions');
+  // A key a tool sends the page (the Claude panel's press_key) is not the user's: it stays in the page.
+  await esc();
+  await panel('press_key', { key: 'x' });
+  await wait(300);
+  assert.notEqual(await focused(), 'address');
+  assert.equal(await value(), '', "nothing of the tool's is in the address bar");
+  await b.ui('page:focus');
+  await type('b');
+  await until('the user\'s own letter still goes there', async () => (await focused()) === 'address' && (await value()).startsWith('b'));
+  // Space, and keys with Ctrl, are the page's own.
+  await esc();
+  await type(' ');
+  await b.ui('tab:key', { id: tab.id, type: 'keyDown', key: 'a', modifiers: ['control'] });
+  await wait(300);
+  assert.notEqual(await focused(), 'address');
 });
 
 test('the box opens web addresses and searches only: not a file, though the Claude panel can type in it', async () => {
@@ -224,6 +316,10 @@ test('the weather and the news are drawn from what Loui fetched, once for any nu
   const tab = await fresh();
   const text = await words(tab.id);
   assert.match(text, /Mendoza, Argentina\s+72\s*°F\s+Partly cloudy\s+High 78° · Low 55°/);
+  // The date heads the weather's card, and is not said again at the foot.
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  assert.match(await js(tab.id, "document.querySelector('.weather .date').textContent"), new RegExp(today));
+  assert.doesNotMatch(await js(tab.id, "document.querySelector('footer').textContent"), new RegExp(today));
   assert.match(text, /Harvest starts early & well\s+The Gazette · 3 hours ago/, 'the title without its source, then the source and age');
   await fresh();
   await fresh();
@@ -246,7 +342,19 @@ test('markup in a headline is shown as text, and a link that is not http(s) is d
 test('an Atom feed is read too, and a place is looked up once by name', async () => {
   await act('start:feed-add', `${at}/atom`);
   await act('start:feed-add', 'javascript:alert(1)');
+  assert.equal((await start()).feedTrouble, 'That is not a web address.');
+  // An address is read once before it is listed: a page that is no feed, or one that does not answer, is not kept.
+  await act('start:feed-add', `${at}/page`);
+  assert.equal((await start()).feedTrouble, 'No headlines found at that address.');
+  await act('start:feed-add', `${at}/missing`);
+  assert.equal((await start()).feedTrouble, 'No headlines found at that address.');
+  await act('start:feed-add', `${at}/atom`);
+  assert.equal((await start()).feedTrouble, 'That feed is already listed.');
   assert.deepEqual(saved().newsFeeds, [`${at}/feed`, `${at}/atom`]);
+  // Well-known feeds are offered, less those already listed.
+  const known = (await start()).known;
+  assert.ok(known.length >= 6 && known.every((k) => k.name && /^https:\/\//.test(k.url)), JSON.stringify(known));
+  assert.ok(['BBC News', 'El País'].every((name) => known.some((k) => k.name === name)), 'in English and in Spanish');
   const tab = await fresh();
   assert.match(await words(tab.id), /An Atom headline\s+Atom stub · 10 minutes ago/);
   assert.equal(await js(tab.id, "[...document.querySelectorAll('.news a')].find((a) => /Atom/.test(a.textContent)).href"), 'https://atom.example/story');
@@ -262,32 +370,70 @@ test('an Atom feed is read too, and a place is looked up once by name', async ()
   await until('Settings opens', async () => (await b.ui('settings:state')).open);
   await b.ui('settings:close');
   await act('start:place', 'Mendoza');
-  assert.deepEqual(saved().weatherAt, { name: 'Mendoza, Argentina', lat: -32.89, lon: -68.83 });
+  assert.deepEqual(saved().weatherAt, { name: 'Mendoza, Argentina', lat: -32.89, lon: -68.83, full: 'Mendoza, Mendoza, Argentina' });
   assert.equal(hits.geocode, 2);
+  assert.equal((await start()).resolved, 'Mendoza, Mendoza, Argentina', 'Settings says which Mendoza');
 });
 
-test('a fetch that fails is said quietly, and the page still opens', async () => {
+test('a name that is several places: Settings says which one was taken, and offers the others', async () => {
+  await act('start:place', 'Córdoba');
+  assert.equal((await start()).resolved, 'Córdoba, Córdoba, Argentina');
+  assert.deepEqual((await start()).others.map((o) => o.full), ['Córdoba, Andalusia, Spain', 'Córdoba, Veracruz, Mexico']);
+  await b.ui('settings:open', 'start');
+  const page = (code) => b.ui('settings:js', code);
+  await until('the Settings window is drawn', async () => (await page("document.querySelector('#value-weather-place span')?.textContent")) === 'Córdoba, Córdoba, Argentina');
+  assert.equal(await page("document.getElementById('set-weather-place').placeholder"), 'Type a town or city');
+  await page("document.getElementById('set-weather-place-others').click()");
+  const others = () => page("[...document.querySelectorAll('[data-setting=weather-place] .st-list .st-item')].map((n) => n.textContent)");
+  await until('the other places show', async () => (await others()).length === 2);
+  assert.deepEqual(await others(), ['Córdoba, Andalusia, Spain', 'Córdoba, Veracruz, Mexico']);
+  await page("[...document.querySelectorAll('[data-setting=weather-place] .st-list li')].find((li) => /Spain/.test(li.textContent)).querySelector('button').click()");
+  await until('the place is the one chosen', async () => saved().weatherAt?.full === 'Córdoba, Andalusia, Spain');
+  assert.deepEqual(saved().weatherAt, { name: 'Córdoba, Spain', lat: 37.89, lon: -4.77, full: 'Córdoba, Andalusia, Spain' });
+  assert.equal(saved().weatherPlace, 'Córdoba');
+  // A feed that is no feed is refused in the page's own words; a well-known one is a press away.
+  await page("(() => { const i = document.getElementById('set-news-feeds'); i.value = '" + at + "/page'; i.form.requestSubmit(); })()");
+  await until('the page says why', async () => /No headlines found at that address/.test(await page("document.querySelector('[data-setting=news-feeds] .st-note').textContent")));
+  assert.ok((await page("[...document.querySelectorAll('[data-setting=news-known] .st-offers button')].map((n) => n.textContent)")).includes('BBC Mundo'));
+  // The start page has a section of its own.
+  assert.deepEqual((await page('window.shownForTest()')).map((s) => s.title), ['Start page']);
+  await b.ui('settings:close');
+  await act('start:place', 'Mendoza');
+});
+
+test('a fetch that fails is said quietly, and the page still opens; the last reading stays, in the units asked for', async () => {
+  await fresh(); // a reading of Mendoza, in Fahrenheit, is at hand
   weatherDown = true;
   await act('start:units', 'c'); // other units: asked for afresh
   await act('start:feed-remove', `${at}/feed`);
-  await act('start:feed-add', `${at}/missing`);
+  await act('start:feed-add', `${at}/flaky`);
+  flakyDown = true;
   const tab = await fresh();
   const text = await words(tab.id);
-  assert.match(text, /Couldn't load the weather\./);
+  // The reading from before, in the new units, with when it is from and a way to ask again.
+  assert.match(text, /Mendoza, Argentina\s+22\s*°C\s+Partly cloudy\s+High 26° · Low 13°\s+Couldn't update: this is from \d+:\d\d.*\. Try again/);
   assert.match(text, /Couldn't load the news\./);
   assert.equal(tab.title, 'New tab');
   assert.deepEqual(await names(tab.id), ['b.example', 'a.example', 'c.example']);
-  const failed = hits.bad;
+  const failed = hits.bad, asked = hits.forecast;
   await fresh();
   assert.equal(hits.bad, failed, 'not tried again on the next tab');
+  assert.equal(hits.forecast, asked);
+  // "Try again" asks at once, and the page shows what came.
   weatherDown = false;
+  const again = await fresh();
+  await js(again.id, "document.querySelector('.weather .stale a').click()");
+  await until('the weather is asked for again', async () => hits.forecast === asked + 1);
+  await until('the page shows it', async () => { const t = await words(again.id).catch(() => ''); return /22\s*°C\s+Partly cloudy\s+High 26° · Low 13°/.test(t) && !/Couldn't update|Try again/.test(t); });
+  await act('start:feed-remove', `${at}/flaky`);
+  await act('start:feed-add', `${at}/missing`);
+  flakyDown = false;
 });
 
 test('with both switched off nothing is asked for at all', async () => {
   await act('start:part', { part: 'startWeather', on: false });
   await act('start:part', { part: 'startNews', on: false });
   await act('start:units', 'f'); // nothing kept would answer for these
-  await act('start:feed-remove', `${at}/missing`);
   await act('start:feed-add', `${at}/feed`);
   const before = { ...hits };
   const tab = await fresh();
@@ -459,6 +605,22 @@ test("a session cannot open the start page, in its own tab or a handed one, and 
   s.end();
 });
 
+test("a site's icon is kept with the history once a tab of the user's has shown it, and its tile wears it", async () => {
+  const tab = await fresh();
+  const host = new URL(b.base).host;
+  for (const page of ['icon.html', 'icon.html?again']) {
+    await b.ui('go', `${b.base}/${page}`);
+    // (The second visit makes it a site gone to more than once; its icon was taken on the first.)
+    await until('the page with an icon', async () => { const t = await tabOf(tab.id); return t.url.endsWith(page) && !t.loading && (page !== 'icon.html' || /^loui-icon:/.test(t.favicon || '')); });
+  }
+  const kept = () => { try { return JSON.parse(fs.readFileSync(path.join(home, 'history.json'), 'utf8')).icons || {}; } catch { return {}; } };
+  await until('the icon is written with the history', async () => /^data:image\/png;base64,/.test(kept()[host] || ''));
+  assert.ok(kept()[host].length <= 8000, 'small enough to keep');
+  assert.deepEqual(Object.keys(kept()).sort(), ['b.example', host].sort(), 'only sites in the history, and only what is a picture');
+  const page = await fresh();
+  assert.equal(await js(page.id, `[...document.querySelectorAll('.tile')].find((t) => t.textContent.includes('${host}'))?.querySelector('img.icon')?.src`), kept()[host]);
+});
+
 test('a tab on the start page sleeps and wakes on it', async () => {
   const tab = await fresh();
   const other = await fresh();
@@ -478,9 +640,14 @@ test('after a restart a tab on the start page is on it again, and a blank tab fr
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
   let a;
   try {
-    profile(dir, { startWeather: false, startNews: false });
+    profile(dir, { startNews: false });
+    weatherDown = true; // with no reading from before: said so, with a way to ask again
     a = await launch(env(), { home: dir });
     const first = await started(a);
+    assert.match(await words(first.id, a), /Couldn't load the weather\. Try again/);
+    weatherDown = false;
+    // (This second Loui's window is not the one the system has in front, so only where its own keyboard is.)
+    await until('the address bar has the keyboard at launch', async () => (await chrome('document.activeElement?.id', a)) === 'address');
     const page = `${a.base}/plain.html`; // the fixture server has another port next time
     await a.ui('tab:new', page);
     await until('the second tab opens', async () => (await onScreen(a)).url === page);

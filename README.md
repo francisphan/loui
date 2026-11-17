@@ -188,10 +188,12 @@ copy this repository there, run `npm install --omit=dev`, start
   the pointer touches the top edge. A page gets the screen only right after
   your own click or key in it, never after a Claude session's; and a question
   for the window (a session's, a guardrail's, a site's permission) ends it.
-- **The menu button** at the end of the toolbar has a short menu, one level
-  deep: new tab and windows, History, Bookmarks, Downloads, Passwords, zoom,
-  Find, Print, Claude, Settings. The full menus are in the command palette and
-  behind their shortcuts.
+- **The menu button** at the end of the toolbar has a short menu: new tab and
+  windows, History (the tab closed last and the last few pages; with neither,
+  it opens the panel), Bookmarks, Downloads, Passwords, Zoom (one row that
+  says the level), Find, Print, Full screen, Claude, More tools (reader view,
+  site permissions, device size, developer tools), Task manager, Settings,
+  Quit. The full menus are in the command palette and behind their shortcuts.
 - **Louis**, at the top left of the window, is a button (`Alt+L`): Loui's own
   menu. Appearance, vertical tabs, the bookmarks bar, the Claude panel, new
   windows, Settings (and the start page's), checking for updates, About.
@@ -659,27 +661,37 @@ links to the page instead.
 ## Start page
 
 A new tab, a new window, and Loui itself when there is nothing to restore
-open on the start page: Louis, a box that does what the address bar does
-(the address bar still has the keyboard, so typing straight away works), the
-eight sites you visit most (from history, one tile per site, most visited
-first; the × on a tile takes that site off the page, kept in `"startHidden"`),
-the bookmarks bar's bookmarks while the bar is hidden, the weather, a few
-headlines, and a line with the date and how many Claude sessions are open.
+open on the start page: Louis, a box that points at the address bar (a click
+on it, or a letter typed on the page, moves the keyboard to the address bar
+with the letter, where the suggestions and completion are; when Loui starts
+the address bar has the keyboard already), the eight sites you visit most
+(from history, one tile per site with its icon once a tab has shown it, most
+visited first; not the search engine, nor a site you went to once; the × on a
+tile takes that site off the page, kept in `"startHidden"`, and the page that
+follows offers *Undo*), the bookmarks bar's bookmarks while the bar is hidden,
+the weather with the date, a few headlines, and how many Claude sessions are
+open.
 The address bar stays empty, the tab is called *New tab* and carries Louis as
 its icon. Back returns to it like any page; it sleeps, wakes and is restored
 like one.
 
-*Settings › General › Start page* chooses what new tabs open with (`"newTab"`:
+*Settings › Start page* chooses what new tabs open with (`"newTab"`:
 `"start"`, `"blank"`, or `"address"` with `"newTabAddress"`) and switches each
 part on or off (`"startTiles"`, `"startWeather"`, `"startNews"`).
 
 - **Weather** comes from [Open-Meteo](https://open-meteo.com), which needs no
   key. The place is a name you type in Settings, looked up once and kept as
   coordinates (`"weatherPlace"`, `"weatherAt"`); Loui never asks where the
-  computer is. `"weatherUnits"` is `"f"` or `"c"`.
+  computer is. Settings says which place the name was taken to mean, and
+  *Not this one?* lists the others of that name. `"weatherUnits"` is `"f"` or
+  `"c"`; until it is chosen, Fahrenheit only where the system's region uses
+  it. When the service does not answer, the last reading stays (in the units
+  asked for, with its time) beside *Try again*.
 - **News** is the first headlines of the feeds in `"newsFeeds"` (RSS or Atom;
   Google News by default), read by a small parser of Loui's own: titles,
-  sources and dates as plain text, links only if they are http or https.
+  sources and dates as plain text, links only if they are http or https. An
+  address added in Settings is read once first, and not listed if it has no
+  headlines; a few well-known feeds, in English and Spanish, are a press away.
 - Loui itself fetches both, from the main process: no tab's session is
   involved and no cookies go. They are kept in memory (weather 30 minutes,
   news 15), asked for only when a start page is shown, and a failed fetch is
@@ -736,11 +748,15 @@ private window has neither.
   the steps; a code block is just called "code block", and of an address only
   the site is said. It stops at once when you press Stop, send a message, start
   dictating, start a new conversation, turn it off, or press `Esc` in the
-  panel. While it talks the speaker is lit, and pressing it silences that reply
+  panel. While it talks the speaker is filled, and pressing it silences that reply
   without turning reading off. `"readBackVoice"` (a voice's name, as Windows
   lists it under *Settings › Time & language › Speech*) and `"readBackRate"`
   (0.5 to 3, 1 is normal) choose the voice and its speed. With several windows
   open, the one you were in last does the reading.
+- **Settings › Claude › Voice** has all of it: reading aloud, the voice (the
+  system's, listed by the main window) and its speed with *Play sample*,
+  dictation, the languages to tell apart, and the speech model (*Remove*
+  deletes it).
 - **Dictation.** The microphone beside *Send*: press it, talk, press it again
   (or `Esc`). What you said goes into the message box where the cursor is,
   for you to read, change and send; it is never sent by itself. Holding
@@ -751,9 +767,10 @@ private window has neither.
   language packs that only Chrome can install, so Loui runs a small Whisper
   model (`Xenova/whisper-base`, multilingual, 8-bit weights, 77 MB) with
   transformers.js on WebAssembly, in a hidden page of its own
-  (`src/ui/voice-page.js`). The first press of the microphone downloads the
-  model from huggingface.co into `voice/` in the profile, with the progress on
-  the button; the files are checked against fixed hashes, and after that
+  (`src/ui/voice-page.js`). The first press of the microphone asks, in place,
+  and then downloads the model from huggingface.co into `voice/` in the
+  profile, with the progress on the button (a press meanwhile cancels it and
+  removes what had arrived); the files are checked against fixed hashes, and after that
   dictation works offline. The hidden page can make no request except for its
   own files, so the sound cannot leave the machine, and it is never written to
   disk. Loui decides between the languages in `"dictationLanguages"` (default

@@ -453,6 +453,10 @@ body.vertical #helm:not(.asking) #helm-state:not(:empty) + #helm-text { min-widt
 #helmrow { display: flex; justify-content: flex-end; padding: 5px 8px; background: var(--paper); box-shadow: inset 0 -1px 0 var(--rule); }
 #helmrow:not(:has(#helm:not([hidden]))) { display: none; }
 #helmrow #helm { flex-wrap: wrap; justify-content: flex-end; row-gap: 3px; min-width: 0; max-width: 100%; height: auto; min-height: 26px; margin: 0; padding-block: 3px; box-sizing: border-box; }
+/* There its buttons stay together: when they do not all fit on the question's
+   line (placeHelm marks that), they take the next line, at the right. */
+#helmrow #helm.split::after { content: ''; order: 1; flex-basis: 100%; height: 0; margin-top: -3px; }
+#helmrow #helm.split > :is(label, button) { order: 2; }
 #helm.asking { flex-shrink: 0; } /* a question is shown whole; the tabs give way to it */
 #helm-state { flex: none; font-weight: 700; white-space: nowrap; }
 #helm-state:empty { display: none; }
@@ -547,6 +551,9 @@ body.driving #navrow { box-shadow: inset 0 -2px 0 var(--claude); }
 #point.on, #device.on, #panel-toggle.on { color: var(--claude); }
 #update { color: var(--focus); font-weight: 650; }
 #update[hidden] { display: none; }
+/* A new version on its way: said quietly, not a button to press. Asking before it restarts: as the other questions. */
+#update.coming { padding: 0 6px; background: none; color: var(--ink-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
+#update.sure { color: var(--danger); white-space: nowrap; }
 #point.on { background: var(--claude-wash); }
 #shields { font-variant-numeric: tabular-nums; }
 #shields:has(#shields-count:empty) { padding-right: 8px; }
@@ -746,6 +753,12 @@ body:is(.relay-open, .perms-open) #panel { display: none; }
 .reply pre { overflow-x: auto; padding: 9px 11px; border-radius: 7px; background: var(--water); }
 .reply pre code { padding: 0; background: none; }
 .reply a { color: var(--focus); }
+/* A table: a small grid that scrolls sideways when wider than the panel. */
+.reply .table { overflow-x: auto; border-radius: 7px; }
+.reply .table:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.reply table { border-collapse: collapse; font-size: 12.5px; line-height: 1.35; }
+.reply th, .reply td { min-width: 3em; max-width: 22em; padding: 4px 9px; border: 1px solid var(--rule); text-align: left; vertical-align: top; overflow-wrap: normal; word-break: normal; }
+.reply th { background: var(--water); font-weight: 650; white-space: nowrap; }
 .reply.waiting::after { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--claude); animation: breathe 1.1s ease-in-out infinite; }
 
 /* One line per thing Claude did. Italic while it is the live step, as in the helm. */
