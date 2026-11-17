@@ -67,14 +67,51 @@ To revoke everything at once, replace the key: delete `~/.config/loui-relay/key`
 restart the relay, and give the new key to each Loui install and to Claude Code.
 Every connector then has to be approved again.
 
+### Several devices, and saying where
+
+Each Loui install signs in to the relay under a name: its computer's name
+(with " (WSL)" added inside WSL), or the one you give it in *Settings › Claude ›
+This browser's name on the relay*. The relay remembers every browser that has
+signed in (`devices.json` in its home: id, name, platform, version, last seen;
+the latest 50), so a session can be told about one that is closed right now.
+
+Say where you want the session: **"launch a Loui browser session on FPMoss"**,
+or "use Loui on the laptop". Claude calls `devices` with that name and
+`start: true` before anything else, and its tab group opens there. Names match
+in any case, and the start of a name is enough when only one begins that way
+("fpm"). `devices` with no name lists the browsers: online first, then the
+ones seen before with when, and for each whether the relay can start it.
+
+The relay can only start Loui on its own machine, and only with a command you
+gave it. `launch.json` in the relay's home maps device names to shell commands:
+
+```json
+{
+  "FPMoss": "'/mnt/c/Users/you/AppData/Local/Programs/loui/Loui.exe'",
+  "*": "DISPLAY=:0 /path/to/loui/node_modules/.bin/electron /path/to/loui"
+}
+```
+
+`"*"` is the command for a session that names no device while no browser is
+online (the same as `LOUI_LAUNCH`). The file is read each time, so editing it
+needs no restart. `LOUI_LAUNCH_<NAME>` in the environment does the same for a
+name made of letters, digits and `_`; the file wins. With `start: true` the
+relay runs the command and waits up to 30 seconds for a browser of that name
+to sign in. For a device it has no command for, it says so, and Claude asks you
+to open Loui there (*Settings › General › Open Loui when I sign in* keeps a
+machine reachable). The commands are yours alone: a tool call can name a
+device, never give or change a command, and nothing a browser says about
+itself is run.
+
 ### Relay settings (environment)
 
 | Variable | Meaning |
 | --- | --- |
 | `LOUI_RELAY_PORT` | Port, default 7332 |
-| `LOUI_RELAY_HOME` | Where the key and connector sign-ins are kept, default `~/.config/loui-relay` |
+| `LOUI_RELAY_HOME` | Where the key, connector sign-ins, `devices.json` and `launch.json` are kept, default `~/.config/loui-relay` |
 | `LOUI_PUBLIC_URL` | The relay's public address, for OAuth |
-| `LOUI_LAUNCH` | A command that opens Loui on the relay's machine when a session needs a browser and none is online |
+| `LOUI_LAUNCH` | A command that opens Loui on the relay's machine when a session needs a browser, names none, and none is online (`"*"` in `launch.json`) |
+| `LOUI_LAUNCH_<NAME>` | The command that opens the Loui called `<NAME>` (any case) on the relay's machine; see above |
 | `LOUI_PRIMARY` | Name of the browser new sessions use when several are online (default: the one connected longest) |
 | `LOUI_IDLE_MINUTES` | See "When a session ends", default 15 |
 
@@ -320,7 +357,8 @@ to one *Claude panel* entry per day.
 `navigate`, `history`, `tabs`, `snapshot`, `read_article`, `click`, `type`, `press_key`,
 `hover`, `select_option`, `scroll`, `wait_for`, `screenshot`, `evaluate`,
 `console_logs`, `network_requests`, `set_viewport`, `request_tab`, `picks`,
-`ask_user_to_pick`, and `devices` (list your browsers, or move to another).
+`ask_user_to_pick`, and `devices` (list your browsers, online and offline, or
+move to one by name, starting it if the relay can).
 `snapshot` returns the page as an outline whose elements carry refs like
 `[e12]`; the acting tools take a ref. `read_article` returns the page's
 article as reader view finds it (title, byline, text with markdown-style

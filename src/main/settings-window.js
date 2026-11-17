@@ -157,6 +157,7 @@ function createSettingsWindow({
       key: typeof key === 'string' ? key : '',
       on: typeof on === 'boolean' ? on : link.state().on,
     }),
+    'relay:name': (name) => link.rename(typeof name === 'string' ? name : ''),
     'consent:revoke': (id) => consent.revoke(id),
     'guard:set': (on) => guardrails.set({ on: !!on }),
     'guard:site-add': (site) => guardrails.addSite(site),

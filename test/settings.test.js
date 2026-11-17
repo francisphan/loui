@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const WebSocket = require('ws');
 const { launch } = require('./drive');
 const TOOLS = require('../src/shared/tools');
 
@@ -115,7 +116,7 @@ test('each section lists its settings', async () => {
   assert.deepEqual(of('Privacy and security'), ['Sites with Shields off', 'Filter lists', 'Pop-ups', 'Site permissions', 'Sites that open in your other browser', 'Private windows']);
   assert.deepEqual(of('Passwords'), ['Offer to save passwords', 'Encryption', 'Sites whose passwords are never saved', 'Saved passwords', 'Import passwords']);
   assert.deepEqual(of('Claude'), [
-    'Let other Claude sessions use this browser', 'Relay address', 'Relay key', 'Connection', 'This device', 'Let in without asking',
+    'Let other Claude sessions use this browser', 'Relay address', 'Relay key', 'Connection', 'This browser\'s name on the relay', 'Let in without asking',
     'Ask before Claude pays, buys, sends, deletes or signs in', 'Sites Claude asks before opening', 'Allowed without asking', 'Sessions trusted until they end',
     'Keep what Claude sessions did for', 'Most disk space for the log', 'Clear the log', 'Local control socket',
   ]);
@@ -277,7 +278,7 @@ test('Claude: the relay (its key is never shown), guardrails, the session log, t
   await use('relay-on');
   await until(async () => (await b.state()).link.status === 'off', 'the relay to be turned off');
   assert.equal((await row('relay-status')).value, 'Not connected. Only the Claude panel can use this browser.');
-  assert.ok((await row('relay-device')).value.length > 0);
+  assert.ok((await row('relay-device')).control.length > 0);
 
   await use('guard-on');
   await until(async () => (await b.state()).guardrails.on === false, 'guardrails to turn off');
@@ -313,6 +314,54 @@ test('Claude: the relay (its key is never shown), guardrails, the session log, t
   assert.match(await js("document.querySelector('[data-setting=\"local-socket\"] .st-help').textContent"), /not asked about.*next time Loui starts/);
   await use('local-socket');
   await until(() => saved().localSocket === false, 'and off');
+});
+
+test("Claude: this browser's name on the relay can be changed, and the relay hears the new one", async () => {
+  await js("window.showSectionForTest('claude')");
+  const device = () => JSON.parse(fs.readFileSync(path.join(b.home, 'device.json'), 'utf8'));
+  const { id } = device();
+  const own = (await b.state()).link.device; // the computer's name
+  assert.equal((await row('relay-device')).control, own);
+  // A stand-in relay that notes who says hello.
+  const hellos = [];
+  const standIn = new WebSocket.Server({ port: 0, host: '127.0.0.1' });
+  await new Promise((resolve) => standIn.on('listening', resolve));
+  standIn.on('connection', (ws) => ws.on('message', (data) => {
+    const msg = JSON.parse(data);
+    if (msg.hello) { hellos.push(msg.hello.device); ws.send(JSON.stringify({ welcome: true, sessions: [], relay: [] })); }
+    if (msg.ping) ws.send(JSON.stringify({ pong: msg.ping }));
+  }));
+  try {
+    await use('relay-url', `http://127.0.0.1:${standIn.address().port}`);
+    await until(async () => !(await b.state()).link.hasKey, 'the address to change');
+    await use('relay-key-replace');
+    await js("(() => { const i = document.getElementById('set-relay-key'); i.value = 'k'; i.form.requestSubmit(); })()");
+    await until(async () => (await b.state()).link.hasKey, 'the key to be saved');
+    if (!(await b.state()).link.on) await use('relay-on');
+    await until(async () => (await b.state()).link.status === 'connected', 'the browser to connect');
+    assert.deepEqual([hellos.at(-1).id, hellos.at(-1).name], [id, own]);
+
+    await use('relay-device', '  Study\u0007 desk  ');
+    await until(() => hellos.at(-1).name === 'Study desk', 'the relay to hear the new name');
+    assert.equal(hellos.at(-1).id, id, 'the same browser');
+    assert.deepEqual(device(), { id, name: 'Study desk' });
+    assert.equal((await row('relay-device')).control, 'Study desk');
+    assert.equal((await row('relay-device')).note, 'Saved');
+    await until(async () => /^Connected as Study desk\./.test((await row('relay-status')).value), 'the status to use the name');
+    // No longer than a relay would take.
+    await use('relay-device', 'x'.repeat(200));
+    await until(() => hellos.at(-1).name === 'x'.repeat(64), 'a long name to be cut');
+    // Emptied, it is the computer's name again.
+    await use('relay-device', '');
+    await until(() => hellos.at(-1).name === own, 'the relay to hear the old name');
+    assert.deepEqual(device(), { id });
+    await until(async () => (await row('relay-device')).control === own, 'the field to show it');
+  } finally {
+    if ((await b.state()).link.on) await use('relay-on');
+    await until(async () => (await b.state()).link.status === 'off', 'the relay to be turned off');
+    for (const ws of standIn.clients) ws.terminate();
+    standIn.close();
+  }
 });
 
 test('Reading and About', async () => {
