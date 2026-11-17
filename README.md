@@ -344,6 +344,22 @@ Brave, Chrome, Edge or Firefox export (Brave: *Bookmarks › Bookmark manager �
 (`javascript:` addresses) are left out. They are kept in `bookmarks.json` in
 the profile. Claude sessions have no tool that reads or changes them.
 
+## Command palette
+
+`Ctrl+K` opens one search box over everything: open tabs (yours and each
+Claude session's, labelled with the session), bookmarks, history, every
+command in the menus with its shortcut and on/off state, what the tab's
+right-click menu offers for the tab on screen (*Sleep this tab now*, *Keep … awake*,
+*Open in Brave*), turning Shields off or on for the site, and *Ask Claude*,
+which sends what you typed to the Claude panel about the page you are on.
+Matching is fuzzy (`zoin` finds *Zoom in*, the matched letters lit up). Arrows
+move, `Tab` jumps to the next group, `Enter` opens, `Esc` closes and gives the
+keyboard back. With nothing typed it shows your recently used commands, then
+the open tabs; recent commands also win ties. `Ctrl+Shift+A` searches open tabs only,
+as in Brave. Commands run exactly as their menu items do, since they are read
+from the menu each time (`src/main/palette.js`). Only you can open it: keys a
+Claude session presses never reach Loui's shortcuts, and it has no tool.
+
 ## Passwords
 
 When you sign in to a site in one of your own tabs, a strip above the page
