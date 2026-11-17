@@ -142,6 +142,18 @@ copy this repository there, run `npm install --omit=dev`, start
   rests on it. The page makes room rather than being covered, since nothing
   can be drawn over a page. Kept in `settings.json` (`"verticalTabs"`,
   `"sidebarCollapsed"`).
+- **Task manager** (`Shift+Esc`, or *View › Task manager*) shows what each
+  tab costs, in a small window of its own: private memory, working set and CPU
+  for every tab (yours, and each session's with its group's name), sleeping
+  tabs at zero, the window chrome, the GPU process, utility processes (the
+  network service, the Shields list builds), the Claude panel's Claude Code
+  while it answers, and Loui's main process. Chromium can run several tabs in
+  one process; they are then listed together, with the process's numbers once.
+  Select a tab to show it, put it to sleep or close it; click a column to sort.
+  It measures every second and a half while open and not at all once closed.
+  On Linux private memory is shown only where `/proc` allows; under Windows the
+  Claude panel's Claude Code is measured with `tasklist` (CPU to the second),
+  and when it runs inside WSL it is listed without numbers.
 
 The **Claude panel** in the window is different: it is your own co-driver and
 works in your tabs. It runs on your Claude Code login through the Agent SDK
@@ -200,6 +212,15 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
 - Profile: `%APPDATA%\loui`. Put the relay address and key in the panel, or in
   `relay.json` there.
 - *File › Open Loui when I sign in* keeps it reachable.
+- **Default browser.** The installer registers Loui as a browser for your
+  user (`build/installer.nsh`: `StartMenuInternet\Loui`, its capabilities for
+  http, https, .htm and .html, and `RegisteredApplications`), and removes it
+  on uninstall. Windows lets only you pick the default: *File › Make Loui your
+  default browser…* opens Settings at Loui. A link opened in another app then
+  opens in a new tab of yours, in the running Loui if there is one. Only
+  http(s) addresses and existing .htm/.html files are taken from the command
+  line, and Windows passes them after `--`, so a link is never read as a
+  Chromium switch. (On Linux, links given on the command line open too.)
 - The Claude panel runs Claude Code: an installed `claude.exe` if there is
   one, otherwise Claude Code inside WSL (`wsl.exe`), with your WSL login.
 - **Updates.** An installed copy checks GitHub Releases shortly after launch and
@@ -388,6 +409,8 @@ src/main/print.js     printing and Save as PDF
 src/main/bookmarks.js bookmarks: the bar's folder menus, import, bookmarks.json
 src/main/errorpage.js the page shown when a page can't be opened (and Louis's walk)
 src/main/passwords.js passwords: the encrypted store, offers to save, filling, import
+src/main/taskmanager.js  the task manager window: memory and CPU per tab and process
+src/main/default-browser.js  links from other apps (command line, second launch), Default apps
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/page/passwords.js runs in your own pages only: notices sign-ins, fills on request
 src/ui/               tab strip, toolbar, panel

@@ -122,7 +122,7 @@ function createSleep({ tabs, ses, settings, save, permissions }) {
     }
   });
 
-  return { check, sleepNow };
+  return { check, sleepNow, mayRest };
 }
 
 module.exports = { createSleep };

@@ -31,6 +31,8 @@ const { createBookmarks } = require('./bookmarks');
 const { createErrorPage } = require('./errorpage');
 const { createGuardrails } = require('./guardrails');
 const { createPasswords } = require('./passwords');
+const { createTaskManager } = require('./taskmanager');
+const { createDefaultBrowser, urlsFrom } = require('./default-browser');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -73,6 +75,9 @@ let errorPage;
 let prompts, consent;
 let guardrails;
 let passwords;
+let taskManager, defaultBrowser;
+// Links Loui was started with (from another app, when it is the default browser).
+const launched = urlsFrom(process.argv, process.cwd());
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -191,6 +196,14 @@ function createWindow() {
     emit: (event) => send('chat', event),
   });
 
+  taskManager = createTaskManager({
+    tabs, sleep, lockToApp,
+    pages: () => [{ label: 'Window chrome', wc: win.webContents }, { label: 'Address suggestions', wc: suggest.webContents }],
+    claude: () => chat.process(),
+    focusMain: () => { if (win.isMinimized()) win.restore(); win.focus(); },
+  });
+  defaultBrowser = createDefaultBrowser({ getWin: () => win, tabs });
+
   tabs.on('change', pushState);
   tabs.on('point', (tab, point) => actions.picker.at(tab, point));
   win.on('closed', () => app.quit());
@@ -203,7 +216,8 @@ function createWindow() {
   }
 
   win.loadFile(path.join(__dirname, '../ui/index.html'));
-  if (!restore.reopenSaved()) tabs.create(process.env.LOUI_START_URL || '', { show: true });
+  if (!restore.reopenSaved() && !launched.length) tabs.create(process.env.LOUI_START_URL || '', { show: true });
+  if (launched.length) defaultBrowser.open(launched);
 }
 
 // ── requests from the window chrome ─────────────────────────────────────────
@@ -310,6 +324,7 @@ async function testHook({ ui, arg }) {
   if (ui === 'panel') return actions.run(arg.tool, arg.args || {}, sessions.panel);
   if (bookmarks.probes[ui]) return bookmarks.probes[ui](arg);
   if (passwords.probes[ui]) return passwords.probes[ui](arg);
+  if (taskManager.probes[ui]) return taskManager.probes[ui](arg);
   // The next failed page reads as the network being down (the tests can't unplug it).
   if (ui === 'pretend-offline') { errorPage.pretend(-106, 'ERR_INTERNET_DISCONNECTED'); return 'ok'; }
   // A page trying to take over the window chrome, as a dropped link would.
@@ -364,6 +379,7 @@ function appMenu() {
         { label: 'Save as PDF…', click: handlers['print:save-pdf'] },
         { label: `Open in ${brave?.name() || 'Brave'}`, click: handlers['brave:open'] },
         { label: 'Settings…', click: () => send('show-settings') },
+        ...defaultBrowser.menuItems(),
         { type: 'separator' },
         ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{
@@ -404,6 +420,7 @@ function appMenu() {
           })),
         },
         { type: 'separator' },
+        { label: 'Task manager', accelerator: 'Shift+Esc', click: () => taskManager.open() },
         { label: 'Developer tools', accelerator: 'F12', click: handlers.devtools },
       ],
     },
@@ -443,14 +460,13 @@ function zoom(step) {
   if (wc) wc.setZoomFactor(step ? Math.min(3, Math.max(0.3, wc.getZoomFactor() + step)) : 1);
 }
 
-if (!app.requestSingleInstanceLock()) {
+// A second Loui started (a link opened in another app, say) hands its links to
+// this one and quits.
+if (!app.requestSingleInstanceLock({ urls: launched })) {
   app.quit();
 } else {
   app.on('before-quit', () => { history?.flush(); bookmarks?.flush(); });
-  app.on('second-instance', () => {
-    if (win.isMinimized()) win.restore();
-    win.focus();
-  });
+  app.on('second-instance', (_e, argv, cwd, data) => defaultBrowser?.secondInstance(argv, cwd, data));
   app.whenReady().then(() => {
     for (const [name, fn] of Object.entries(handlers)) ipcMain.on(name, (_e, arg) => fn(arg));
     createWindow();
