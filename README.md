@@ -231,8 +231,8 @@ and Loui does not pretend to be another browser to get past that. Instead:
 `Ctrl+D` or the star in the address bar bookmarks the page onto the bookmarks
 bar and opens a strip under the toolbar to rename it, change its address or
 put it in a folder; on a page that is already bookmarked they edit its
-bookmark. The bar (`Ctrl+Shift+B` shows or hides it) holds bookmarks and
-folders; a folder opens as a menu, what does not fit goes under », and
+bookmark. The bar appears with the first bookmark (`Ctrl+Shift+B` shows or
+hides it) and holds bookmarks and folders; a folder opens as a menu, what does not fit goes under », and
 *Other bookmarks* sits at the right end. Right-click the bar for *Add folder*,
 *Edit*, *Delete* and the rest. *Bookmarks* (`Ctrl+Shift+O`) lists them all in
 their folders, with search. Bookmarks come first in address bar suggestions,

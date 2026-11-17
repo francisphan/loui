@@ -71,12 +71,14 @@ const all = (data) => [...data.bar, ...data.other];
 test('Ctrl+D bookmarks the page on screen onto the bar, and the star lights up', async () => {
   await visit(b.base + '/');
   assert.equal((await b.state()).bookmark, null);
+  assert.equal(await chrome("document.getElementById('bookmarks-bar').hidden"), true, 'no bar until there are bookmarks');
   assert.equal(await key('CmdOrCtrl+D'), 'ok');
   const id = await until(async () => (await b.state()).bookmark, 'the page to be bookmarked');
   const e = await editorOpen();
   assert.equal(e.heading, 'Bookmark added');
   assert.equal(e.name, 'Fixture');
   await barShows(['Fixture']);
+  assert.equal(await chrome("document.getElementById('bookmarks-bar').hidden"), false);
   assert.equal(await chrome("document.getElementById('star').classList.contains('on')"), true);
   assert.equal((await saved()).bar[0].id, id);
   assert.equal((await saved()).bar[0].url, b.base + '/');

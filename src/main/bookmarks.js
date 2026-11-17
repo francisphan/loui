@@ -30,7 +30,9 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     [BAR]: { id: BAR, title: ROOT_TITLES[BAR], children: [] },
     [OTHER]: { id: OTHER, title: ROOT_TITLES[OTHER], children: [] },
   };
-  let showBar = true;
+  // Whether the bar shows: the user's choice (Ctrl+Shift+B), or until they
+  // make one, whenever there are bookmarks to show.
+  let showBar = null;
   let next = 1;
   try {
     const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -145,6 +147,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     save();
   }
 
+  const barShown = () => showBar ?? (roots[BAR].children.length + roots[OTHER].children.length > 0);
   function setBar(show) {
     showBar = !!show;
     save();
@@ -282,7 +285,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     };
     walk(roots[BAR], []);
     walk(roots[OTHER], []);
-    return { type: 'data', showBar, bar: roots[BAR].children.map(brief), other: roots[OTHER].children.length, folders };
+    return { type: 'data', showBar: barShown(), bar: roots[BAR].children.map(brief), other: roots[OTHER].children.length, folders };
   }
   const publish = () => send('bookmarks', data());
   win.webContents.on('did-finish-load', publish);
@@ -393,7 +396,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
     items.push(
       { label: 'Add folder', click: () => editing(addFolder().id) },
       { type: 'separator' },
-      { label: 'Show bookmarks bar', type: 'checkbox', checked: showBar, click: () => setBar(!showBar) },
+      { label: 'Show bookmarks bar', type: 'checkbox', checked: barShown(), click: () => setBar(!barShown()) },
       { label: 'Bookmark manager', click: () => send('bookmarks', { type: 'panel' }) },
       { label: 'Import bookmarks…', click: chooseImport },
     );
@@ -408,7 +411,7 @@ function createBookmarks({ file, win, tabs, ses, send, changed = () => {}, delay
       { label: 'Import bookmarks…', click: chooseImport },
     ],
     view: () => [
-      { label: 'Show or hide the bookmarks bar', accelerator: 'CmdOrCtrl+Shift+B', click: () => setBar(!showBar) },
+      { label: 'Show or hide the bookmarks bar', accelerator: 'CmdOrCtrl+Shift+B', click: () => setBar(!barShown()) },
       { type: 'separator' },
     ],
   };
