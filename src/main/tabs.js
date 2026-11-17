@@ -87,7 +87,8 @@ class Tabs extends EventEmitter {
 
   // show: put the new tab on screen. Left unset, a tab opened in the group the
   // user is watching is shown, and one opened elsewhere stays in the background.
-  create(url, { group = YOU, show } = {}) {
+  // device and history: what a restored tab had (see restore.js).
+  create(url, { group = YOU, show, device, history } = {}) {
     const view = new WebContentsView({
       // Not throttled in the background: Claude works in tabs the user is not looking at.
       webPreferences: { session: this.ses, sandbox: true, contextIsolation: true, backgroundThrottling: false },
@@ -162,10 +163,12 @@ class Tabs extends EventEmitter {
     const g = this.group(group);
     const watching = this.active()?.group === group;
     if (!g.current) g.current = tab.id;
+    if (device) this.setDevice(tab, device); // before loading, so the first request has its user agent
     this.win.contentView.addChildView(view);
     if (show ?? (watching || !this.active())) this.select(tab.id);
     else this.peek(tab);
-    wc.loadURL(toUrl(url || '')).catch(() => {});
+    if (history) wc.navigationHistory.restore(history).catch(() => {});
+    else wc.loadURL(toUrl(url || '')).catch(() => {});
     changed();
     return tab;
   }
@@ -218,6 +221,7 @@ class Tabs extends EventEmitter {
     if (!tab) return;
     const peers = this.in(tab.group);
     const next = peers[peers.indexOf(tab) + 1] || peers[peers.indexOf(tab) - 1] || null;
+    this.emit('closing', tab); // still in the list, its page and history intact
     this.list.splice(this.list.indexOf(tab), 1);
     this.emit('leaving', tab);
     this.win.contentView.removeChildView(tab.view);

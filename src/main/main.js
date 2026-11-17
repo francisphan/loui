@@ -14,6 +14,7 @@ const { createActions } = require('./actions');
 const { createChat } = require('./chat');
 const { createLink } = require('./link');
 const { createUpdater } = require('./updater');
+const { createRestore } = require('./restore');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -40,7 +41,7 @@ function setTheme(theme) {
 
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
 
-let win, tabs, sessions, actions, chat, link, handle, updater;
+let win, tabs, sessions, actions, chat, link, handle, updater, restore;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -89,6 +90,7 @@ function createWindow() {
   });
 
   tabs = new Tabs(win, ses);
+  restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState });
   handle = rpc.createHandler({ run: actions.run, sessions, extra: process.env.LOUI_TEST ? testHook : null });
@@ -127,7 +129,7 @@ function createWindow() {
   }
 
   win.loadFile(path.join(__dirname, '../ui/index.html'));
-  tabs.create(process.env.LOUI_START_URL || '', { show: true });
+  if (!restore.reopenSaved()) tabs.create(process.env.LOUI_START_URL || '', { show: true });
 }
 
 // ── requests from the window chrome ─────────────────────────────────────────
@@ -150,6 +152,7 @@ const handlers = {
   'tab:new': (url) => { tabs.create(url || '', { show: true }); if (!url) send('focus-address'); },
   'tab:select': (id) => tabs.select(id),
   'tab:close': (id) => tabs.close(id),
+  'tab:reopen': () => restore.reopenClosed(),
   'tab:menu': (id) => tabs.tabMenu(id),
   go: (input) => { active()?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
   back: () => active()?.wc.navigationHistory.goBack(),
@@ -208,6 +211,7 @@ function appMenu() {
       submenu: [
         { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => handlers['tab:new']() },
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => active() && tabs.close(active().id) },
+        { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
         { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
         { type: 'separator' },
         ...updateMenu(),
