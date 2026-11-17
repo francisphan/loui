@@ -86,6 +86,18 @@ copy this repository there, run `npm install --omit=dev`, start
 
 ## Tab groups
 
+- **Loui asks before a new session first uses it.** "Let Claude Code · pung
+  use Loui?" appears in the tab row, and the session's first call waits for
+  your answer (two minutes, then it is refused and may ask again). *Always
+  allow* remembers the connector it signed in with (the relay key, or one
+  approved Claude connector), never the single session; *File › Settings*
+  lists those and revokes them. They are kept in `consent.json` in the
+  profile. A session you deny gets no tab group and is refused until it ends.
+  The Claude panel is never asked.
+- **One question at a time.** Questions from sessions (may it come in, may it
+  have this tab, point at something) wait in line in the tab row, each naming
+  the session asking, with a count of those still waiting. Each gets its full
+  time once it is shown; a session that ends takes its questions with it.
 - **A session is responsible for a tab group.** The first time a session uses
   the browser it gets a group, named after it ("Claude Code · pung"). Its tools
   see and act on only that group. It works in the background: the tab you are
@@ -266,6 +278,8 @@ src/shared/tools.js   the tool list (relay and panel both advertise it)
 src/main/main.js      window, menu, requests from the window chrome
 src/main/tabs.js      views, tab groups, console and network history, device sizes
 src/main/sessions.js  sessions and their groups, take over, hand-over
+src/main/prompts.js   sessions' questions to the user, one at a time in the tab row
+src/main/consent.js   asking before a new session first uses the browser (consent.json)
 src/main/restore.js   your tabs across restarts (tabs.json), reopening closed tabs
 src/main/actions.js   what each tool does
 src/main/link.js      the connection out to the relay
@@ -325,6 +339,6 @@ break:
 ## Not here yet
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
-- Dragging tabs between groups; a prompt when a new session first connects.
+- Dragging tabs between groups.
 - Password manager,
   extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).

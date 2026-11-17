@@ -43,3 +43,7 @@
 #elsewhere-list li { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 #elsewhere-list .site { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 #elsewhere-list .none { color: var(--ink-2); }
+#consent-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+#consent-list li { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+#consent-list .site { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+#consent-list .none { color: var(--ink-2); }

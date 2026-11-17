@@ -68,8 +68,10 @@ async function launch(env = {}, { home: reuse } = {}) {
   const call = (tool, args = {}) => ask({ tool, args });
   const text = async (tool, args) => words(await call(tool, args));
   // The same tools, called as a named Claude session with a tab group of its own.
-  const as = (id, label = id) => {
-    const session = { id, label, source: 'code' };
+  // extra: { ask: true } to be asked about like a session from the relay, and
+  // { connector: { id, name, kind } } as the relay would send it.
+  const as = (id, label = id, extra = {}) => {
+    const session = { id, label, source: 'code', ...extra };
     return {
       call: (tool, args = {}) => ask({ tool, args, session }),
       text: async (tool, args = {}) => words(await ask({ tool, args, session })),

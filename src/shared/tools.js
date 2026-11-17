@@ -156,7 +156,8 @@ module.exports = [
     name: 'request_tab',
     description:
       'Ask the user to hand you the tab they are looking at, so you can work in it. Use this ' +
-      'when they refer to a page they have open. Waits up to a minute for their answer.',
+      'when they refer to a page they have open. Waits its turn behind other questions to the ' +
+      'user, then up to a minute for their answer.',
     shape: {},
   },
   {
@@ -169,8 +170,9 @@ module.exports = [
   {
     name: 'ask_user_to_pick',
     description:
-      'Ask the user to click an element in the page to show which one they mean. Waits for ' +
-      'their click (up to two minutes) and returns that element.',
+      'Ask the user to click an element in the page to show which one they mean. Waits its ' +
+      'turn behind other questions to the user, then for their click (up to two minutes), and ' +
+      'returns that element.',
     shape: { message: z.string().describe('What to click, shown to the user') },
   },
 ];

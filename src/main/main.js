@@ -10,6 +10,8 @@ const { app, BrowserWindow, Menu, ipcMain, session, nativeTheme } = require('ele
 const paths = require('../shared/paths');
 const { Tabs, PRESETS, toUrl, YOU } = require('./tabs');
 const { createSessions } = require('./sessions');
+const { createPrompts } = require('./prompts');
+const { createConsent } = require('./consent');
 const { createActions } = require('./actions');
 const { createChat } = require('./chat');
 const { createLink } = require('./link');
@@ -66,6 +68,7 @@ let shields;
 let search, brave, print;
 let bookmarks;
 let errorPage;
+let prompts, consent;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -87,6 +90,8 @@ const currentState = () => ({
     id: g.id, label: g.label, source: g.source, busy: g.busy > 0, status: g.status, paused: g.paused,
   })),
   asking: sessions.asking(),
+  ...prompts.state(),
+  ...consent.state(),
   picking: actions.picker.state(),
   picks: actions.picker.recent().filter((p) => p.group === YOU)
     .map((p) => ({ id: p.id, name: p.name || p.tag, thumb: p.thumb })),
@@ -137,10 +142,12 @@ function createWindow() {
   lockToApp(suggest.webContents);
   bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), win, tabs, ses, send, changed: pushState });
   suggest.add(bookmarks);
-  sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
-  actions = createActions({ tabs, sessions, changed: pushState, refuse: brave.refuse });
+  prompts = createPrompts({ changed: () => { pushState(); if (prompts.head() && !win.isFocused()) win.flashFrame(true); } });
+  consent = createConsent({ file: path.join(paths.home, 'consent.json'), prompts, changed: pushState });
+  sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry), prompts, ended: (id) => consent.forget(id) });
+  actions = createActions({ tabs, sessions, prompts, changed: pushState, refuse: brave.refuse });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
-  handle = rpc.createHandler({ run: actions.run, sessions, extra: process.env.LOUI_TEST ? testHook : null });
+  handle = rpc.createHandler({ run: actions.run, sessions, admit: consent.admit, extra: process.env.LOUI_TEST ? testHook : null });
   link = createLink({
     home: paths.home, version: app.getVersion(), handle, sessions, changed: pushState,
     guard: (origins) => { tabs.relayOrigins = new Set(origins); },
@@ -212,6 +219,9 @@ const handlers = {
   // Take over, or hand back, the session working in a tab group.
   pause: ({ group, on }) => { const g = tabs.group(group); if (g) g.paused = !!on; pushState(); },
   'handoff:answer': (yes) => sessions.answer(!!yes),
+  // A question from a Claude session (prompts.js): value is what the user chose.
+  'prompt:answer': ({ id, value }) => prompts.answer(id, value),
+  'consent:revoke': (id) => consent.revoke(id),
   'group:close': (id) => sessions.end(id),
   'device:menu': () => deviceMenu(),
   'relay:set': (settings) => link.configure(settings),

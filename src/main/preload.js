@@ -13,6 +13,7 @@ const SEND = new Set([
   'shields:menu', 'shields:set',
   'print', 'print:save-pdf', 'search:set', 'brave:open', 'brave:add', 'brave:remove',
   'bookmarks',
+  'prompt:answer', 'consent:revoke',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',

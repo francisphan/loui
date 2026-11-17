@@ -244,7 +244,17 @@ function createAuth(home) {
     res.redirect(back.href);
   }
 
-  return { key, isKey, provider, approve };
+  // Who a session signed in as, for the browser to remember "always allow"
+  // by (Loui's consent.js): the relay key, or one OAuth connector. The id is a
+  // hash, so neither the client id nor anything of the key reaches the
+  // browser, and it changes with the key, so a new key asks again.
+  function connector(clientId) {
+    const id = crypto.createHash('sha256').update(`loui-connector:${generation}:${clientId}`).digest('base64url').slice(0, 22);
+    if (clientId === 'owner') return { id, name: 'the relay key', kind: 'key' };
+    return { id, name: String(store.clients[clientId]?.client_name || 'Connector').slice(0, 48), kind: 'connector' };
+  }
+
+  return { key, isKey, provider, approve, connector };
 }
 
 module.exports = { createAuth };

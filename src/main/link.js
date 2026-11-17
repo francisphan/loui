@@ -4,7 +4,8 @@
 //
 //   -> {"hello": {"key": "...", "device": {"id", "name", "platform", "version"}}}
 //   <- {"welcome": true, "sessions": ["..."]}    or   {"denied": "why"}
-//   <- {"id", "tool", "args", "session": {"id", "label", "source"}}     -> {"id", "content" | "error"}
+//   <- {"id", "tool", "args", "session": {"id", "label", "source", "connector"}}     -> {"id", "content" | "error"}
+//      connector: {"id", "name", "kind"}, who the session signed in as (see consent.js)
 //   <- {"end": "session id"}
 const fs = require('fs');
 const os = require('os');
@@ -84,7 +85,7 @@ function createLink({ home, version, handle, sessions, changed, guard }) {
       if (msg.denied) return set('refused', msg.denied);
       if (msg.tool) mine.add(msg.session.id);
       if (msg.end) mine.delete(msg.end);
-      const reply = await handle(msg);
+      const reply = await handle(msg, null, true); // true: from the relay, so asked about (consent.js)
       if (reply && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(reply));
     };
     sock.onerror = () => {};
