@@ -195,6 +195,13 @@ test("clicking a step's page in the Sessions panel opens it in a new tab of the 
     .find((r) => r.querySelector('.name').textContent === 'Claude Code').querySelector('.open').click()`);
   await until(() => chrome("document.querySelectorAll('.activity-step .page img').length >= 2"), 'the timeline with pictures');
   assert.match(await chrome("document.querySelector('#activity-list .activity-summary').textContent"), /ended/);
+  // Steps read as in the Claude panel's feed, and the time stays on one line.
+  const [what, timeHeight] = await chrome(`(() => {
+    const step = document.querySelector('.activity-step');
+    return [step.querySelector('.what').textContent, step.querySelector('.time').getBoundingClientRect().height];
+  })()`);
+  assert.match(what, /^Opening 127/);
+  assert.ok(timeHeight < 22, `the time is ${timeHeight}px tall`);
   const before = (await b.state()).tabs.length;
   await chrome("document.querySelector('.activity-step .page .link').click()");
   const tab = await until(async () => {
@@ -245,8 +252,18 @@ test('a session can be deleted, and all of them cleared', async () => {
   await until(async () => !(await list()).some((x) => x.id === one.id), 'the session to go');
   assert.ok(!fs.existsSync(path.join(dir, `${one.id}.json`)));
 
+  // Delete on the session on show asks first, then goes back to the list.
+  const count = (await list()).length;
+  const del = "document.querySelectorAll('#activity-list .activity-summary .row button')[1]";
+  assert.equal(await chrome(`${del}.textContent`), 'Delete');
+  await chrome(`${del}.click()`);
+  assert.equal(await chrome(`${del}.textContent`), 'Delete what it did?');
+  await sleep(300);
+  assert.equal((await list()).length, count, 'nothing deleted yet');
+  await chrome(`${del}.click()`);
+  await until(async () => (await list()).length === count - 1, 'the session on show to go');
+
   // Clear all, from the panel, after confirming.
-  await chrome("document.querySelector('#activity-list .activity-summary .quiet').click()"); // back to the list
   await until(() => chrome("!!document.querySelector('#activity-list .activity-row')"), 'the list');
   await chrome("document.getElementById('activity-clear').click()");
   assert.equal(await chrome("document.getElementById('activity-confirm').hidden"), false);

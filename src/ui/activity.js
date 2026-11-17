@@ -6,6 +6,7 @@
 // togglePanel it uses.
 (() => {
   ICON.trash = svg('<path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/>', 14);
+  ICON.left = svg('<path d="M10 3 5 8l5 5"/>', 14);
   setIcon($('activity-close'), 'close');
   const panel = $('activity');
   const list = $('activity-list');
@@ -28,7 +29,8 @@
     if (open) {
       viewing = null;
       ask({ do: 'list' });
-    }
+      $('activity-close').focus(); // the panel has the keyboard, so Esc closes it
+    } else focusPage();
   }
   $('activity-open').onclick = () => show(true);
   $('activity-close').onclick = () => show(false);
@@ -63,6 +65,7 @@
   $('activity-keep').onchange = () => ask({ do: 'keep', days: Number($('activity-keep').value) });
 
   function back() {
+    deleting = null;
     viewing = null;
     ask({ do: 'list' });
   }
@@ -174,16 +177,29 @@
   }
 
   // ── one session ─────────────────────────────────────────────────────────
+  let deleting = null; // the session whose Delete asks "Delete what it did?"
   function drawSession(log) {
     $('activity-clear').hidden = true;
     const head = el('div', 'activity-summary');
     const tools = el('div', 'row');
-    const all = el('button', 'quiet', 'All sessions');
-    all.type = 'button';
-    all.onclick = back;
-    const del = el('button', 'quiet', 'Delete');
-    del.type = 'button';
-    del.onclick = () => { ask({ do: 'delete', id: log.id }); back(); };
+    const tool = (icon, label, cls, onclick) => {
+      const b = el('button', cls);
+      b.type = 'button';
+      b.innerHTML = ICON[icon];
+      b.append(label);
+      b.onclick = onclick;
+      return b;
+    };
+    const all = tool('left', 'All sessions', 'quiet', back);
+    // Deleting cannot be undone, so Delete asks first, as "Clear all" does.
+    const sure = deleting === log.id;
+    const del = tool('trash', sure ? 'Delete what it did?' : 'Delete', sure ? 'quiet danger' : 'quiet', () => {
+      if (sure) { ask({ do: 'delete', id: log.id }); return back(); }
+      deleting = log.id;
+      drawSession(log);
+      list.querySelector('.activity-summary .danger')?.focus();
+    });
+    del.onkeydown = (e) => { if (e.key === 'Escape' && sure) { e.stopPropagation(); deleting = null; drawSession(log); } };
     tools.append(all, del);
     const s = {
       ...log, steps: log.steps.filter((x) => x.kind === 'tool').length,
@@ -193,7 +209,8 @@
     const nodes = [head];
     for (const step of log.steps) {
       const row = el('div', `activity-step step-${step.kind}`);
-      row.append(el('span', 'time', time(step.at)), el('span', 'what', step.label));
+      // Worded as in the Claude panel's feed: "Opening…", not "opening…".
+      row.append(el('span', 'time', time(step.at)), el('span', 'what', step.label.charAt(0).toUpperCase() + step.label.slice(1)));
       if (step.detail) row.append(el('span', 'detail', `“${step.detail}”`));
       if (step.stopped && step.kind === 'tool') row.append(el('span', 'detail', STOPPED[step.stopped] || 'Stopped'));
       else if (step.error && step.kind === 'tool') row.append(el('span', 'error', step.error));

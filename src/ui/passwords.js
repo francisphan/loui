@@ -83,12 +83,18 @@
     if (show) {
       ask({ do: 'list' });
       search.focus();
-    }
+    } else focusPage();
   }
   $('passwords-close').onclick = () => showPasswords(false);
   $('passwords-import').onclick = () => ask({ do: 'import' });
   search.oninput = () => draw();
-  search.onkeydown = (e) => { if (e.key === 'Escape') showPasswords(false); };
+  // Esc anywhere in the panel: out of "Delete?" first, then the panel closes.
+  panel.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (deleting == null) return showPasswords(false);
+    deleting = null;
+    draw();
+  });
   // Opening another panel, or asking for Claude's, closes this one.
   const instead = (claude) => () => {
     if (!isOpen()) return;
@@ -120,6 +126,7 @@
 
   function editor(p) {
     const form = el('form', 'password-edit');
+    form.dataset.id = p.id;
     const user = el('input');
     user.type = 'text';
     user.value = p.username;
@@ -204,7 +211,17 @@
         nodes.push(r);
       }
     }
-    $('passwords-list').replaceChildren(...nodes);
+    // Redrawing must not drop the keyboard: it stays on the same login's
+    // row, on the button it was on, or the one that took its place.
+    const list = $('passwords-list');
+    const at = list.contains(document.activeElement) ? document.activeElement : null;
+    const held = at?.closest('[data-id]');
+    list.replaceChildren(...nodes);
+    if (!held || (held.matches('form') && editing != null)) return; // the editor focuses its own field
+    const now = [...list.querySelectorAll('[data-id]')].find((n) => n.dataset.id === held.dataset.id);
+    if (!now) return search.focus(); // the login is gone
+    (now.querySelector(`button.${at.classList[0]}`) || now.querySelector(held.matches('form') ? 'button.edit' : 'button.remove')
+      || now.querySelector('button'))?.focus();
   }
 
   loui.on('passwords', (m) => {

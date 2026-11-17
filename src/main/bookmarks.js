@@ -410,18 +410,15 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
     Menu.buildFromTemplate(items).popup({ window: tabs.win });
   }
 
-  // For the File and View menus in main.js.
-  const menuItems = {
-    file: () => [
-      { label: 'Bookmark this page', accelerator: 'CmdOrCtrl+D', click: star },
-      { label: 'Bookmarks', accelerator: 'CmdOrCtrl+Shift+O', click: () => { tabs.win.webContents.focus(); send('bookmarks', { type: 'panel' }); } },
-      { label: 'Import bookmarks…', click: chooseImport },
-    ],
-    view: () => [
-      { label: 'Show or hide the bookmarks bar', accelerator: 'CmdOrCtrl+Shift+B', click: () => setBar(!barShown()) },
-      { type: 'separator' },
-    ],
-  };
+  // The Bookmarks menu in main.js, which keeps the checkbox current (barShown).
+  const menuItems = () => [
+    { label: 'Bookmark this page', accelerator: 'CmdOrCtrl+D', click: star },
+    { label: 'Bookmarks', accelerator: 'CmdOrCtrl+Shift+O', click: () => { tabs.win.webContents.focus(); send('bookmarks', { type: 'panel' }); } },
+    { type: 'separator' },
+    { label: 'Show bookmarks bar', id: 'bookmarks-bar', type: 'checkbox', checked: barShown(), accelerator: 'CmdOrCtrl+Shift+B', click: () => setBar(!barShown()) },
+    { type: 'separator' },
+    { label: 'Import bookmarks…', click: chooseImport },
+  ];
 
   // ── requests from the window chrome ─────────────────────────────────────
   // (x, y): where a folder's menu opens, in window coordinates.
@@ -480,7 +477,7 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   };
 
   return {
-    suggest, handle, flush, probes, menuItems,
+    suggest, handle, flush, probes, menuItems, barShown,
     state: () => ({ bookmark: byUrl.get(tabs.active()?.url)?.id || null }),
   };
 }

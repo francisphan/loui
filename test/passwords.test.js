@@ -224,8 +224,20 @@ test('the Passwords panel lists, edits and deletes', async () => {
   assert.equal((await list()).items[0].username, 'ana.b@example.com');
   assert.equal(await b.ui('passwords:reveal-now', item.id), 'edited-Secret-4');
 
-  await b.ui('passwords', { do: 'reveal', id: item.id });
+  // Showing a password redraws the list: the keyboard stays on the row's button.
+  const at = () => b.ui('chrome:eval', `(() => {
+    const a = document.activeElement;
+    return [a.classList[0] ?? null, a.textContent, a.closest('[data-id]')?.dataset.id ?? null];
+  })()`);
+  const pressRow = (cls) => b.ui('chrome:eval', `(() => { const x = document.querySelector('#passwords-list .password-row ${cls}'); x.focus(); x.click(); })()`);
+  await pressRow('.reveal');
   await until(async () => (await rows())[0]?.includes('edited-Secret-4'), 'the revealed password');
+  assert.deepEqual(await at(), ['reveal', '', String(item.id)]);
+  // And through "Delete?" and back out of it.
+  await pressRow('.remove');
+  assert.deepEqual(await at(), ['quiet', 'Cancel', String(item.id)]);
+  await pressRow('button');
+  assert.deepEqual(await at(), ['remove', '', String(item.id)]);
 
   await b.ui('passwords', { do: 'remove', id: item.id });
   assert.deepEqual((await list()).items, []);

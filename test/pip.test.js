@@ -49,6 +49,14 @@ test('a session\'s tab menu opens the small window, which shows the session\'s t
   assert.ok((await b.ui('pip:menu', { id: tab.id, click: 'Watch in a small window' })).includes('Watch in a small window'));
   const s = await until(pip, (p) => p.open && p.sent > 0);
   assert.equal(s.group, 'w');
+  // It opens at the bottom left of the page area, clear of the Claude panel's composer.
+  const [left, right, bottom] = await b.ui('chrome:eval', `(() => {
+    const r = document.getElementById('stage').getBoundingClientRect();
+    return [screenX + r.left, screenX + r.right, screenY + outerHeight];
+  })()`);
+  assert.ok(s.bounds.x - left >= 0 && s.bounds.x - left < 40, `at the left: ${JSON.stringify(s.bounds)}`);
+  assert.ok(s.bounds.x + s.bounds.width <= right, 'not over the panel');
+  assert.ok(s.bounds.y + s.bounds.height <= bottom && s.bounds.y > bottom / 2, 'at the bottom');
   assert.equal(s.watching, tab.id);
   const seen = await until(shows, (v) => v?.picture === 'data:image/jpeg;base64,');
   assert.equal(seen.label, 'Claude Code · pip');

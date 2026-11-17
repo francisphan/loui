@@ -171,6 +171,8 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
           const e = m.event;
           if (e.type === 'content_block_start' && e.content_block.type === 'text') emit({ type: 'text-start' });
           if (e.type === 'content_block_delta' && e.delta.type === 'text_delta') emit({ type: 'text', text: e.delta.text });
+        } else if (m.type === 'result' && stopped) {
+          // Stopped by the user: what the SDK reports about the interrupted turn is not an error.
         } else if (m.type === 'result' && m.subtype !== 'success') {
           emit({ type: 'error', text: (m.errors || []).join('\n') || `Claude stopped early (${m.subtype}).` });
         } else if (m.type === 'result' && m.is_error) {
@@ -182,20 +184,21 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
     } finally {
       active = null;
       running = null;
+      if (stopped === true) emit({ type: 'stopped' }); // one quiet line
       stopped = false;
       emit({ type: 'done' });
     }
   }
 
-  let stopped = false;
-  function stop() {
+  let stopped = false; // true: by the Stop button; 'quiet': by "New conversation", which says nothing
+  function stop(how = true) {
     if (!active) return;
-    stopped = true;
+    stopped = how;
     active.interrupt().catch(() => {});
   }
 
   function reset() {
-    stop();
+    stop('quiet');
     sessionId = null;
     emit({ type: 'reset' });
   }

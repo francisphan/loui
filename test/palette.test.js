@@ -127,7 +127,7 @@ test('runs a menu command, as the menu would', async () => {
   const p = await search('find in', (s) => titles(s, 'Commands')[0] === 'Find in page');
   const row = group(p, 'Commands').rows[0];
   assert.equal(row.hint, 'Ctrl+F', 'shows its shortcut');
-  assert.equal(row.detail, 'File', 'and where it is in the menu');
+  assert.equal(row.detail, 'Edit', 'and where it is in the menu');
   await arrowTo('Find in page');
   await key('Enter');
   await closed();

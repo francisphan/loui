@@ -57,17 +57,18 @@
 /* One session's timeline. */
 .activity-summary { display: grid; gap: 2px; margin: 4px 8px 10px; font-size: 13.5px; }
 .activity-summary .facts { color: var(--ink-2); font-size: 12.5px; }
-.activity-summary .row { display: flex; gap: 2px; margin: 4px 0 0 -6px; }
+.activity-summary .row { display: flex; justify-content: space-between; gap: 2px; margin: 0 -6px 4px; }
+.activity-summary .danger { color: var(--danger); font-weight: 650; }
 .activity-step {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr); /* "10:31 AM" on one line */
   gap: 2px 8px;
   padding: 6px 8px;
   border-top: 1px solid var(--rule);
   font-size: 13px;
   line-height: 1.35;
 }
-.activity-step .time { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.activity-step .time { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .activity-step .what { min-width: 0; overflow-wrap: anywhere; }
 .activity-step .detail { grid-column: 2; color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
 .activity-step .error { grid-column: 2; color: var(--danger); font-size: 12.5px; overflow-wrap: anywhere; }

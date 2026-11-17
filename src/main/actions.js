@@ -571,7 +571,10 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     },
 
     set_viewport: {
-      label: (a) => (a.preset === 'desktop' ? 'restoring the full window' : `switching to ${PRESETS[a.preset]?.label || `${a.width}×${a.height}`}`),
+      // Named before the arguments are checked, so bad ones still read sensibly.
+      label: (a) => (a.preset === 'desktop' ? 'restoring the full window'
+        : PRESETS[a.preset] ? `switching to ${PRESETS[a.preset].label}`
+          : !a.preset && a.width && a.height ? `switching to ${a.width}×${a.height}` : 'changing the page size'),
       async run({ preset, width, height, mobile }, c) {
         const tab = c.need();
         if (preset && preset !== 'desktop') tabs.setDevice(tab, preset);

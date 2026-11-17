@@ -204,6 +204,23 @@ test('Ctrl+Shift+B hides the bookmarks bar and shows it again', async () => {
   assert.equal((await saved()).showBar, true);
 });
 
+test('the bookmarks bar is one Tab stop, and Left and Right move along it', async () => {
+  const bar = () => chrome(`(() => {
+    const all = [...document.querySelectorAll('#bookmarks-items .bar-item:not(.overflow), #bookmarks-more:not([hidden]), #bookmarks-other:not([hidden])')];
+    return { stops: all.filter((x) => x.tabIndex === 0).length, at: all.indexOf(document.activeElement), count: all.length };
+  })()`);
+  const start = await until(async () => { const s = await bar(); return s.count >= 2 && s.stops === 1 && s; }, 'one Tab stop on the bar');
+  assert.equal(start.at, -1);
+  await chrome("document.querySelector('#bookmarks-items .bar-item').focus()");
+  await b.ui('address:key', 'Right');
+  assert.deepEqual(await bar(), { stops: 1, at: 1, count: start.count });
+  await b.ui('address:key', 'End');
+  assert.deepEqual(await bar(), { stops: 1, at: start.count - 1, count: start.count });
+  await b.ui('address:key', 'Left');
+  await b.ui('address:key', 'Home');
+  assert.deepEqual(await bar(), { stops: 1, at: 0, count: start.count });
+});
+
 test('a bookmarks file exported from Brave or Chrome imports onto the bar and into other bookmarks', async () => {
   const file = path.join(__dirname, 'fixture', 'bookmarks-export.html');
   assert.deepEqual(await b.ui('bookmarks:import-file', file), { added: 5, skipped: 1 }, 'the bookmarklet is left out');

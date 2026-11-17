@@ -9,6 +9,7 @@ const ENGINES = {
 };
 
 let template = ENGINES.brave.url;
+let name = ENGINES.brave.label; // the engine as menus name it ("Search Kagi for …")
 
 // A custom address must be a web page and say where the words go.
 const valid = (url) => typeof url === 'string' && /^https?:\/\/[^\s]+$/i.test(url.trim()) && url.includes('%s');
@@ -16,10 +17,15 @@ const valid = (url) => typeof url === 'string' && /^https?:\/\/[^\s]+$/i.test(ur
 function apply(settings) {
   template = settings.search === 'custom' && valid(settings.searchUrl) ? settings.searchUrl.trim()
     : (ENGINES[settings.search] || ENGINES.brave).url;
+  name = ENGINES[settings.search]?.label || ENGINES.brave.label;
+  if (settings.search === 'custom' && valid(settings.searchUrl)) {
+    try { name = new URL(template).hostname.replace(/^www\./, ''); } catch {}
+  }
 }
 
 // The address that searches for these words.
 const searchFor = (text) => template.split('%s').join(encodeURIComponent(text));
+const searchName = () => name;
 
 // settings: the object kept in settings.json; save writes it.
 function createSearch({ settings, save, changed }) {
@@ -45,4 +51,4 @@ function createSearch({ settings, save, changed }) {
   };
 }
 
-module.exports = { searchFor, createSearch, ENGINES };
+module.exports = { searchFor, searchName, createSearch, ENGINES };

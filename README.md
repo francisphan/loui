@@ -135,6 +135,16 @@ copy this repository there, run `npm install --omit=dev`, start
   choose *Pin tab* (or drop it among the pinned ones): pinned tabs are icons
   at the start of your tabs, come back after a restart already loaded, never
   sleep, and `Ctrl+W` leaves them open (close one from its menu).
+- **Keyboard.** `Ctrl+Tab` and `Ctrl+Shift+Tab` (or `Ctrl+PageDown` and
+  `Ctrl+PageUp`) go round your own tabs in the window, or round a session's
+  group when one of its tabs is on screen; a sleeping tab they pass over stays
+  asleep. `Ctrl+1` to `Ctrl+8` show your nth tab and `Ctrl+9` the last.
+  `Ctrl+W` on a session's tab asks first, and does nothing while the session
+  is working. Also: `F5` and `Ctrl+Shift+R` (reload, and without the cache),
+  `Alt+D` or `F6` (address bar), `F11` (full screen), `Ctrl+,` (Settings),
+  `Ctrl+Shift+Delete` (clear history), `Alt+Shift+P` (pin). In the tab strip
+  and the bookmarks bar the arrow keys move from one item to the next. Esc
+  closes any panel or strip, and the page has the keyboard again.
 - **Vertical tabs.** *View › Vertical tabs* (or *File › Settings*) moves the
   tabs to a sidebar on the left: pinned tabs as a grid of icons, your tabs,
   then each session's group with what it is doing. The button at the top
@@ -303,7 +313,7 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
   one, otherwise Claude Code inside WSL (`wsl.exe`), with your WSL login.
 - **Updates.** An installed copy checks GitHub Releases shortly after launch and
   every six hours, downloads a new version in the background, and installs it
-  when Loui quits. *Restart to update* in the toolbar (and the File menu)
+  when Loui quits. *Restart to update* in the toolbar (and the Help menu)
   installs it at once. Each download is checked against the SHA-512 published
   with the release; the builds are unsigned, so there is no publisher check.
 
@@ -405,7 +415,7 @@ hides it) and holds bookmarks and folders; a folder opens as a menu, what does n
 *Other bookmarks* sits at the right end. Right-click the bar for *Add folder*,
 *Edit*, *Delete* and the rest. *Bookmarks* (`Ctrl+Shift+O`) lists them all in
 their folders, with search. Bookmarks come first in address bar suggestions,
-above pages from history. *File › Import bookmarks…* reads the file that
+above pages from history. *Bookmarks › Import bookmarks…* reads the file that
 Brave, Chrome, Edge or Firefox export (Brave: *Bookmarks › Bookmark manager ›
 ⋮ › Export bookmarks*): their bar goes onto the bar, everything else into
 *Other bookmarks*, and importing the same file twice adds nothing. Bookmarklets
@@ -436,7 +446,7 @@ update the password if it changed. It asks only once the sign-in went through:
 the page moved on to one without a password field, or the field went away.
 On a page whose address has saved logins, a key shows in the address bar; its
 menu lists the accounts, and choosing one fills the username and password.
-Nothing is ever filled when a page loads, only when you choose. *File ›
+Nothing is ever filled when a page loads, only when you choose. *View ›
 Passwords* lists them, shows one for 30 seconds, copies one (the clipboard is
 cleared 30 seconds later), edits and deletes, and imports the CSV that Brave
 or Chrome export (Brave: *Settings › Autofill and passwords › Password manager
@@ -577,7 +587,7 @@ break:
   the camera, microphone, location, notifications and screen sharing, Loui asks
   you in a strip above the page, naming the site by its address; an answer
   lasts until you leave the page unless you tick *Remember for this site*
-  (screen sharing is asked every time). *File › Site permissions* lists what
+  (screen sharing is asked every time). *View › Site permissions* lists what
   is remembered and forgets it. Tabs in a Claude session's group, including
   tabs you handed over, are refused without asking. Every other permission is
   refused.

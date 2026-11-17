@@ -1,7 +1,7 @@
 // Site permissions in the window chrome: the question a site in the tab on
 // screen is asking (a strip above the page), and the remembered answers (a
-// sheet in the panel, opened from File › Site permissions). Uses $, el and
-// togglePanel from ui.js. The site is named by its origin, set as text; no
+// panel in the Claude panel's place, opened from View › Site permissions).
+// Uses $, el, focusPage and sidePanel from ui.js. The site is named by its origin, set as text; no
 // text from the page itself is shown.
 let askingId = null;
 
@@ -26,6 +26,7 @@ function drawPermission(p) {
 const answerPermission = (allow) => {
   if (askingId == null) return;
   loui.send('permission:answer', { id: askingId, allow, remember: $('perm-keep').checked });
+  focusPage(); // the strip goes: the page has the keyboard again
 };
 $('perm-allow').onclick = () => answerPermission(true);
 $('perm-block').onclick = () => answerPermission(false);
@@ -43,15 +44,7 @@ function drawSitePermissions(list) {
   }));
 }
 
-const showPermissions = (show) => {
-  $('perms').hidden = !show;
-  if (show) {
-    $('relay').hidden = true; // they share the same place in the panel
-    togglePanel(true);
-    $('perms-close').focus();
-  }
-};
-$('perms-close').onclick = () => showPermissions(false);
+const showPermissions = sidePanel('perms', $('perms'), () => $('perms-close').focus());
 loui.on('show-permissions', () => showPermissions(true));
 
 loui.on('state', (next) => {

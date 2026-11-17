@@ -119,6 +119,7 @@ function pushState() {
   stateQueued = true;
   setImmediate(() => {
     stateQueued = false;
+    syncMenu();
     for (const w of tabs.windows) {
       if (!w.win.isDestroyed()) tabs.as(w, () => w.win.webContents.send('state', currentState(w)));
     }
@@ -143,6 +144,8 @@ const currentState = (w = tabs.window()) => {
   return {
     window: { id: w.id, private: w.private, windows: tabs.windows.length },
     tabs: tabs.summary(w),
+    aimed: w.aim?.id ?? null, // a sleeping tab Ctrl+Tab is passing over (see cycle())
+    working: tabs.groups.filter((g) => g.busy > 0).length, // in every window: "Restart to update" asks first
     groups: tabs.groups.filter((g) => g.id === YOU || g.window === w).map((g) => ({
       id: g.id, label: g.label, source: g.source, busy: g.busy > 0, status: g.status, paused: g.paused,
     })),
@@ -413,6 +416,11 @@ function start() {
     { type: 'separator' },
   ));
   tabs.on('point', (tab, point) => actions.picker.at(tab, point));
+  // From a tab's menu and the page's.
+  tabs.on('bookmark-tab', (tab) => tabs.as(tab.window, () => { tabs.select(tab.id); bookmarks.handle({ do: 'star' }); }));
+  tabs.on('reopen-closed', (w) => tabs.as(w, () => restore.reopenClosed()));
+  tabs.on('print', (tab) => tabs.as(tab.window, () => print.print()));
+  tabs.on('open-window', ({ url, private: priv }) => tabs.create(url, { window: openWindow({ private: !!priv, blank: false }), show: true }));
   // A window left without tabs (its last one moved away) closes.
   tabs.on('empty', (w) => setImmediate(() => { if (!w.win.isDestroyed()) w.win.close(); }));
   // "Move to new window" in a tab's menu, for a tab or a session's group.
@@ -444,12 +452,28 @@ const handlers = {
     serve();
   },
   'tab:new': (url) => { tabs.create(url || '', { show: true }); if (!url) send('focus-address'); },
-  'tab:select': (id) => tabs.select(id),
+  'tab:select': (id) => {
+    const w = tabs.window();
+    clearTimeout(w?.aim?.timer); // a tab chosen by hand: Ctrl+Tab's aim (see cycle()) is off
+    if (w) w.aim = null;
+    tabs.select(id);
+  },
   'tab:close': (id) => tabs.close(id),
   'tab:reopen': () => restore.reopenClosed(),
   'tab:menu': (id) => tabs.tabMenu(id),
   // Ctrl+W. A pinned tab stays: Ctrl+W does nothing on it, as in Brave; its menu still closes it.
-  'tab:close-active': () => active() && !active().pinned && tabs.close(active().id),
+  // A session's tab is not closed under a session at work, and otherwise its × asks first.
+  'tab:close-active': () => {
+    const tab = active();
+    if (!tab || tab.pinned) return;
+    if (tab.group === YOU) return tabs.close(tab.id);
+    const g = tabs.group(tab.group);
+    if (g.busy > 0 && !g.paused) return;
+    send('tab:ask-close', tab.id);
+  },
+  // The keyboard goes back to the page: a panel or strip closed, or Esc in the address bar.
+  'page:focus': () => active()?.wc?.focus(),
+  'panel:shown': (on) => { const w = tabs.window(); if (w) w.panelShown = !!on; syncMenu(); },
   'tab:nudge': (step) => active() && tabs.nudge(active().id, step), // Ctrl+Shift+PageUp/PageDown
   'tab:move': ({ id, group, index, pinned } = {}) => tabs.drop(id, group, index, { pinned }), // dragged in the tab strip
   'tab:pin': ({ id, on } = {}) => tabs.pin(id, on),
@@ -581,6 +605,25 @@ async function testHook({ ui, arg }) {
     if (arg.click) items.find((i) => i.label === arg.click)?.click();
     return items.map((i) => i.label).filter(Boolean);
   }
+  // The items of a tab's right-click menu in the tab strip, and of a page's (p: what
+  // was clicked, as Electron describes it); with click set, chooses the one so named.
+  if (ui === 'tab:menu-items' || ui === 'page:menu-items') {
+    const tab = tabs.get(arg.id);
+    const items = ui === 'tab:menu-items' ? tabs.tabMenuItems(arg.id) : tabs.pageMenuItems(tab, { x: 5, y: 5, ...arg.p });
+    if (arg.click) items.find((i) => i.label === arg.click)?.click();
+    return items.map((i) => (i.type === 'separator' ? '-' : i.label || i.role));
+  }
+  // The application menu as it reads: each menu's name and the items listed in it.
+  if (ui === 'menu') {
+    return Menu.getApplicationMenu().items.map((m) => [
+      m.label, m.submenu.items.filter((i) => i.visible).map((i) => (i.type === 'separator' ? '-' : i.label)),
+    ]);
+  }
+  // An item of the application menu, by its id.
+  if (ui === 'menu:item') {
+    const item = Menu.getApplicationMenu().getMenuItemById(arg);
+    return item && { label: item.label, checked: item.checked, enabled: item.enabled };
+  }
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
   // Runs a script in any tab's page, which the tools only allow in a session's own tabs.
   // acted: as if the user had just clicked or typed in the tab (a page may then open a tab).
@@ -641,77 +684,112 @@ function inWindow(items) {
   }));
 }
 
+// Ctrl+Tab and Ctrl+Shift+Tab: the next of the user's own tabs in this window
+// (from a session's tab, the next in that session's group). A sleeping tab is
+// only aimed at, shown as such in the tab strip, and wakes if the user stays
+// on it for a moment: holding Ctrl and pressing Tab past several sleeping
+// tabs loads none of them but the one it stops on.
+const AIM_MS = 350;
+// The tab the keyboard chose is shown, and its page has the keyboard.
+const land = (id) => tabs.select(id)?.wc?.focus();
+function cycle(step) {
+  const w = tabs.window();
+  const from = tabs.get(w?.aim?.id) || active();
+  if (!from) return;
+  const peers = tabs.in(from.group).filter((t) => t.window === w);
+  const next = peers[(peers.indexOf(from) + step + peers.length) % peers.length];
+  clearTimeout(w.aim?.timer);
+  w.aim = null;
+  if (!next || next === active()) return pushState();
+  if (!next.asleep) return land(next.id);
+  w.aim = { id: next.id, timer: setTimeout(() => { w.aim = null; land(next.id); }, AIM_MS) };
+  pushState();
+}
+// Ctrl+1 to Ctrl+8: the nth of the user's own tabs in this window; Ctrl+9: the last.
+function nthTab(n) {
+  const mine = tabs.in(YOU).filter((t) => t.window === tabs.window());
+  const tab = n === 9 ? mine[mine.length - 1] : mine[n - 1];
+  if (tab) land(tab.id);
+}
+
+// The application menu's checkbox items follow the window the user is in:
+// what they toggle also changes from the toolbar, a tab's menu and the helm.
+function syncMenu(menu = Menu.getApplicationMenu()) {
+  if (!menu || !tabs?.focused) return;
+  tabs.as(tabs.focused, () => {
+    const tab = active();
+    const set = (id, checked, enabled = true) => {
+      const item = menu.getMenuItemById(id);
+      if (item) { item.checked = !!checked; item.enabled = enabled; }
+    };
+    set('pin-tab', tab?.pinned, tab?.group === YOU);
+    set('take-over', tabs.group(tab?.group)?.paused);
+    set('claude-panel', tabs.focused.panelShown !== false, !tabs.focused.private);
+    set('bookmarks-bar', bookmarks?.barShown());
+  });
+}
+
 function appMenu() {
-  const cycle = (step) => {
-    const list = tabs.list.filter((t) => t.window === tabs.window());
-    const i = list.indexOf(active());
-    const next = list[(i + step + list.length) % list.length];
-    if (next) tabs.select(next.id);
-  };
   const togglePause = () => {
     const g = tabs.group(active()?.group);
     if (g) handlers.pause({ group: g.id, on: !g.paused });
   };
-  return Menu.buildFromTemplate(inWindow([
+  // To the window chrome, which takes the keyboard for what it then shows.
+  const show = (channel, arg) => () => { tabs.win.webContents.focus(); send(channel, arg); };
+  // A second shortcut for a command: not listed (nor in the command palette), but its keys work.
+  const also = (accelerator, click) => ({ label: accelerator, accelerator, visible: false, click });
+  const menu = Menu.buildFromTemplate(inWindow([
     {
       label: 'File',
       submenu: [
         { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => handlers['tab:new']() },
         { label: 'New window', accelerator: 'CmdOrCtrl+N', click: () => openWindow() },
         { label: 'New private window', accelerator: 'CmdOrCtrl+Shift+N', click: () => openWindow({ private: true }) },
-        { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: handlers['tab:close-active'] },
-        { label: 'Close window', accelerator: 'CmdOrCtrl+Shift+W', click: handlers['window:close'] },
-        { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
-        { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { tabs.win.webContents.focus(); send('focus-address'); } },
-        { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
-        { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
-        { label: 'Site permissions…', click: () => send('show-permissions') },
-        { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { tabs.win.webContents.focus(); send('show-history'); } },
-        ...bookmarks.menuItems.file(),
-        ...passwords.fileMenu(),
         { type: 'separator' },
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: handlers.print },
         { label: 'Save as PDF…', click: handlers['print:save-pdf'] },
         { label: `Open in ${brave?.name() || 'Brave'}`, click: handlers['brave:open'] },
-        { label: 'Settings…', click: () => send('show-settings') },
-        ...defaultBrowser.menuItems(),
         { type: 'separator' },
-        ...updateMenu(),
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: show('show-settings') },
+        ...defaultBrowser.menuItems(),
         ...(process.platform === 'linux' ? [] : [{
           label: 'Open Loui when I sign in', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
           click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
-        }, { type: 'separator' }]),
+        }]),
+        { type: 'separator' },
+        { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: handlers['tab:close-active'] },
+        { label: 'Close window', accelerator: 'CmdOrCtrl+Shift+W', click: handlers['window:close'] },
         { role: 'quit' },
       ],
     },
-    { role: 'editMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle', label: 'Paste as plain text' },
+        { role: 'delete' }, { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
+      ],
+    },
     {
       label: 'View',
       submenu: [
         { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => active()?.wc.reload() },
-        { label: 'Back', accelerator: 'Alt+Left', click: handlers.back },
-        { label: 'Forward', accelerator: 'Alt+Right', click: handlers.forward },
-        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => cycle(1) },
-        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => cycle(-1) },
-        // The keyboard's way to do what dragging a tab does.
-        { label: 'Move tab left', accelerator: 'Ctrl+Shift+PageUp', click: () => handlers['tab:nudge'](-1) },
-        { label: 'Move tab right', accelerator: 'Ctrl+Shift+PageDown', click: () => handlers['tab:nudge'](1) },
+        also('F5', () => active()?.wc.reload()),
+        { label: 'Reload without the cache', accelerator: 'CmdOrCtrl+Shift+R', click: () => active()?.wc.reloadIgnoringCache() },
+        { type: 'separator' },
+        { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
+        { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
+        { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
+        { label: 'Full screen', accelerator: 'F11', click: () => tabs.win.setFullScreen(!tabs.win.isFullScreen()) },
         { label: 'Reader view', accelerator: 'F9', click: handlers['reader:toggle'] },
-        { label: 'Pin or unpin tab', click: () => active() && tabs.pin(active().id, !active().pinned) },
-        { label: 'Command palette…', id: 'palette', accelerator: 'CmdOrCtrl+K', click: () => palette.show() },
-        { label: 'Search tabs…', id: 'palette-tabs', accelerator: 'CmdOrCtrl+Shift+A', click: () => palette.show('tabs') },
-        { label: 'Move tab to new window', click: () => active() && tabs.emit('to-new-window', { tab: active() }) },
         { type: 'separator' },
         {
           label: 'Vertical tabs', type: 'checkbox', checked: tabStrip().vertical,
           click: (item) => setTabStrip({ vertical: item.checked }),
         },
-        { type: 'separator' },
-        ...bookmarks.menuItems.view(),
-        { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
-        { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
-        { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
-        { type: 'separator' },
         {
           label: 'Appearance',
           submenu: [['dark', 'Dark'], ['light', 'Light'], ['system', 'Match system']].map(([theme, label]) => ({
@@ -719,25 +797,76 @@ function appMenu() {
           })),
         },
         { type: 'separator' },
+        { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: show('toggle-downloads') },
+        ...passwords.fileMenu(),
+        { label: 'Site permissions…', click: show('show-permissions') },
+        { type: 'separator' },
         { label: 'Task manager', accelerator: 'Shift+Esc', click: () => taskManager.open() },
         { label: 'Developer tools', accelerator: 'F12', click: handlers.devtools },
       ],
     },
     {
+      label: 'History',
+      submenu: [
+        { label: 'Back', accelerator: 'Alt+Left', click: handlers.back },
+        { label: 'Forward', accelerator: 'Alt+Right', click: handlers.forward },
+        { type: 'separator' },
+        { label: 'History', accelerator: 'CmdOrCtrl+H', click: show('show-history') },
+        { label: 'Clear history…', accelerator: 'CmdOrCtrl+Shift+Delete', click: show('show-history', 'clear') },
+        { type: 'separator' },
+        { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
+      ],
+    },
+    { label: 'Bookmarks', submenu: bookmarks.menuItems() },
+    {
+      label: 'Tab',
+      submenu: [
+        { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: show('focus-address') },
+        also('Alt+D', show('focus-address')),
+        also('F6', show('focus-address')),
+        { label: 'Command palette…', id: 'palette', accelerator: 'CmdOrCtrl+K', click: () => palette.show() },
+        { label: 'Search tabs…', id: 'palette-tabs', accelerator: 'CmdOrCtrl+Shift+A', click: () => palette.show('tabs') },
+        { type: 'separator' },
+        { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => cycle(1) },
+        { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => cycle(-1) },
+        also('Ctrl+PageDown', () => cycle(1)),
+        also('Ctrl+PageUp', () => cycle(-1)),
+        ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => also(`CmdOrCtrl+${n}`, () => nthTab(n))),
+        { type: 'separator' },
+        {
+          label: 'Pin tab', id: 'pin-tab', type: 'checkbox', accelerator: 'Alt+Shift+P',
+          click: () => active() && tabs.pin(active().id, !active().pinned),
+        },
+        // The keyboard's way to do what dragging a tab does.
+        { label: 'Move tab left', accelerator: 'Ctrl+Shift+PageUp', click: () => handlers['tab:nudge'](-1) },
+        { label: 'Move tab right', accelerator: 'Ctrl+Shift+PageDown', click: () => handlers['tab:nudge'](1) },
+        { label: 'Move tab to new window', click: () => active() && tabs.emit('to-new-window', { tab: active() }) },
+      ],
+    },
+    {
       label: 'Claude',
       submenu: [
+        { label: 'Claude panel', id: 'claude-panel', type: 'checkbox', accelerator: 'CmdOrCtrl+Shift+L', click: () => send('toggle-panel') },
         { label: 'Point at something', accelerator: 'CmdOrCtrl+Shift+C', click: handlers['pick:start'] },
-        { label: 'Show or hide the Claude panel', accelerator: 'CmdOrCtrl+Shift+L', click: () => send('toggle-panel') },
-        { label: 'Take over / let Claude continue', accelerator: 'CmdOrCtrl+Shift+.', click: togglePause },
-        { label: 'Claude sessions…', click: () => { tabs.win.webContents.focus(); send('show-activity'); } },
+        { label: 'Take over', id: 'take-over', type: 'checkbox', accelerator: 'CmdOrCtrl+Shift+.', click: togglePause },
         { type: 'separator' },
-        { label: 'Connection to other Claude sessions…', click: () => send('show-relay') },
+        { label: 'Claude sessions…', click: show('show-activity') },
+        { label: 'Connection to other Claude sessions…', click: show('show-relay') },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        ...updateMenu(),
+        { label: `About Loui ${app.getVersion()}`, click: () => app.showAboutPanel() },
       ],
     },
   ]));
+  syncMenu(menu);
+  return menu;
 }
 
-// File menu items for updates, in installed copies only.
+// Help menu items for updates, in installed copies only.
 function updateMenu() {
   const u = updater?.state();
   if (!u) return [];
@@ -750,7 +879,8 @@ function updateMenu() {
   }[u.status] || 'Check for updates';
   const busy = u.status === 'checking' || u.status === 'downloading';
   return [
-    { label, enabled: !busy, click: () => (u.status === 'ready' ? updater.install() : updater.check()) },
+    // Restarting closes sessions' tab groups: the toolbar's button asks first while one is working.
+    { label, enabled: !busy, click: () => (u.status === 'ready' ? send('update:ask') : updater.check()) },
     { type: 'separator' },
   ];
 }
