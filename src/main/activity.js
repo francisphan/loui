@@ -186,6 +186,7 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
     try {
       const img = await wc.capturePage();
       const { width } = img.getSize();
+      if (!width && process.env.LOUI_TEST) console.error('activity: no picture: the capture was empty');
       if (!width || log.off) return;
       const jpeg = img.resize({ width: Math.min(THUMB_WIDTH, width), quality: 'good' }).toJPEG(60);
       const name = `${log.data.steps.indexOf(s)}.jpg`;
@@ -194,8 +195,9 @@ function createActivity({ dir, tabs, settings, save, changed = () => {} }) {
       if (log.off) return void fsp.rm(pictures(log.data.id), { recursive: true, force: true }).catch(() => {});
       s.thumb = name;
       dirty(log);
-    } catch {
+    } catch (e) {
       // The tab closed or could not be drawn: the step simply has no picture.
+      if (process.env.LOUI_TEST) console.error('activity: no picture:', e?.message || e);
     } finally {
       capturing.delete(tab.id);
       const next = waiting.get(tab.id);

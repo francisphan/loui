@@ -35,6 +35,8 @@ jobs:
           fi
 
       - run: npm ci
+      # Fetch Electron now, so the first test file doesn't pay for the download.
+      - run: xvfb-run -a npx electron --version
 
       - name: Test
         run: npm test
