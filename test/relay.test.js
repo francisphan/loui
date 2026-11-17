@@ -44,7 +44,7 @@ test.before(async () => {
 test.after(async () => {
   await b?.close();
   await relay.close();
-  fs.rmSync(home, { recursive: true, force: true });
+  try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} // helper processes may still be closing files
 });
 
 test('nothing gets in without signing in', async () => {

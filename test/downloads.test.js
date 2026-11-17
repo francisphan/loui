@@ -57,8 +57,8 @@ test.after(async () => {
   release();
   await b?.close();
   server.close();
-  fs.rmSync(files, { recursive: true, force: true });
-  fs.rmSync(home, { recursive: true, force: true });
+  try { fs.rmSync(files, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} // helper processes may still be closing files
+  try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} // helper processes may still be closing files
 });
 
 test('a download is saved to the downloads folder without asking, and listed', async () => {

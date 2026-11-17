@@ -11,7 +11,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
 let b;
 test.after(async () => {
   await b?.close();
-  fs.rmSync(home, { recursive: true, force: true });
+  try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} // helper processes may still be closing files
 });
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
