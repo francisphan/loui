@@ -158,6 +158,53 @@ test('one sign-in can hold only so many sessions', async () => {
   }
 });
 
+test('at the cap, the idlest session nobody is using makes room; the key may hold more than twenty', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-'));
+  const r = await start({ port: 0, home: dir, maxSessions: 3, spareMs: 300 });
+  const headers = { authorization: `Bearer ${r.key}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+  const initialize = (at = r) => fetch(at.url + '/mcp', {
+    method: 'POST', headers: { ...headers, authorization: `Bearer ${at.key}` },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'claude-code', version: '1' } },
+    }),
+  });
+  const stream = new AbortController();
+  let many;
+  try {
+    const ids = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await initialize();
+      assert.equal(res.status, 200);
+      ids.push(res.headers.get('mcp-session-id'));
+      await new Promise((ok) => setTimeout(ok, 30));
+    }
+    // All three were heard from a moment ago: none is spared for a fourth.
+    assert.equal((await initialize()).status, 429);
+    // The first holds its event stream open; the second is then the idlest without one.
+    fetch(r.url + '/mcp', { headers: { ...headers, 'mcp-session-id': ids[0] }, signal: stream.signal }).catch(() => {});
+    for (let i = 0; i < 50 && !r.sessions.get(ids[0]).streams; i++) await new Promise((ok) => setTimeout(ok, 20));
+    assert.equal(r.sessions.get(ids[0]).streams, 1);
+    await new Promise((ok) => setTimeout(ok, 400));
+    const fourth = await initialize();
+    assert.equal(fourth.status, 200, 'room was made');
+    assert.equal(r.sessions.size, 3);
+    assert.ok(r.sessions.has(ids[0]), 'the one with a stream open stays');
+    assert.ok(!r.sessions.has(ids[1]), 'the idlest one without a stream was ended');
+    assert.ok(r.sessions.has(ids[2]));
+
+    // By default the relay key, which every Claude Code session shares, may hold more than twenty.
+    many = await start({ port: 0, home: fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-')) });
+    const all = await Promise.all(Array.from({ length: 24 }, () => initialize(many)));
+    assert.equal(all.filter((res) => res.status === 200).length, 24);
+  } finally {
+    stream.abort();
+    await r.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (many) { await many.close(); fs.rmSync(many.home, { recursive: true, force: true }); }
+  }
+});
+
 test('with no browser online, a session is told so', async () => {
   const s = await connect();
   await assert.rejects(s.text('snapshot'), /No Loui browser is online/);

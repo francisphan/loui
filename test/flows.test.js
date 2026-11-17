@@ -244,6 +244,14 @@ test('a downloaded program says "Run…" and asks in its row; a finished row can
   assert.match(await chrome(`${row('setup-tool.exe')}.querySelector('.sure').textContent`), /Run this file\?/);
   await press('setup-tool.exe', 'Cancel');
   assert.deepEqual(await acts('setup-tool.exe'), ['Run…', 'Show in folder', 'Remove']);
+  // Other kinds that run, mount or change settings when opened: the main process says which.
+  for (const name of ['viewer.hta', 'disk.iso', 'install.sh', 'keys.reg']) {
+    await b.ui('go', `${url}/file/${name}`);
+    assert.equal((await download(name, (d) => d.state === 'completed', 'to finish')).runs, true, name);
+    await wait('the row', async () => (await acts(name)).length);
+    assert.deepEqual(await acts(name), ['Run…', 'Show in folder', 'Remove'], name);
+  }
+  assert.equal((await listed()).find((d) => d.name === 'report.pdf').runs, false);
 
   await press('report.pdf', 'Remove');
   await wait('the row to go', async () => !(await listed()).some((d) => d.name === 'report.pdf'));
@@ -325,6 +333,15 @@ test('a certificate error can be opened anyway by the user, in their own tab onl
     await b.ui('panel', { tool: 'click', args: { ref: ref(outline, 'button "Open anyway"') } });
     await pause(800);
     assert.equal((await onScreen()).title, 'Not secure', 'a click of Claude\'s opens nothing');
+    // Nor does a timer its script leaves behind, which fires once its call is over.
+    await b.ui('panel', { tool: 'evaluate', args: { code: "(setTimeout(() => document.getElementById('proceed').click(), 1200), 1)" } });
+    await pause(2200);
+    assert.equal((await onScreen()).title, 'Not secure', 'a click its script leaves for later opens nothing');
+    // Nor a press within ten seconds of Claude's work in the tab: nobody can say whose it is.
+    await b.ui('tab:press', { id: tab.id, ...at });
+    await pause(800);
+    assert.equal((await onScreen()).title, 'Not secure');
+    await pause(9500);
 
     // The user's own press opens it, and the address bar says "Not secure".
     await b.ui('tab:press', { id: tab.id, ...at });

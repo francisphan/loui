@@ -37,6 +37,12 @@ function freePath(dir, name, taken) {
   }
 }
 
+// Files that run when opened: programs, scripts, shortcuts, installers, disk
+// images, and files that change the system's settings. The list offers "Run…"
+// for these, and asks once more before it opens one. Windows ignores dots and
+// spaces at the end of a name.
+const RUNS = /\.(exe|msi|msix|appinstaller|bat|cmd|ps1|lnk|url|scr|com|pif|cpl|jar|vbs|vbe|js|jse|wsf|hta|reg|chm|msc|iso|img|vhd|desktop|sh)[. ]*$/i;
+
 function createDownloads({ ses, tabs, home, changed }) {
   const listFile = path.join(home, 'downloads.json');
   const saved = (() => { try { return JSON.parse(fs.readFileSync(listFile, 'utf8')); } catch { return {}; } })();
@@ -51,7 +57,7 @@ function createDownloads({ ses, tabs, home, changed }) {
   // loaded the address), and one more per page load; the rest are stopped and
   // listed as blocked, where the user can let one through.
   const started = new WeakMap(); // a tab's page -> downloads it started since it loaded
-  const allowed = new Set(); // addresses the user chose "Download anyway" for
+  const allowed = new Map(); // addresses the user chose "Download anyway" for -> the name the page gave the file
   function mayStart(tab, wc) {
     if (!started.has(wc)) wc.on('did-navigate', () => started.set(wc, 0));
     const n = started.get(wc) || 0;
@@ -73,15 +79,17 @@ function createDownloads({ ses, tabs, home, changed }) {
   const attach = (s, { private: priv = false } = {}) => s.on('will-download', (e, item, wc) => {
     const tab = wc && tabs.list.find((t) => t.wc === wc);
     const g = tab && tab.group !== YOU ? tabs.group(tab.group) : null;
-    const name = path.basename(item.getFilename() || '') || 'download';
-    const anyway = item.getURLChain().filter((u) => allowed.delete(u)).length > 0;
+    // Fetched again for "Download anyway", a file the page named (<a download>) keeps that name.
+    const again = item.getURLChain().filter((u) => allowed.has(u));
+    const name = path.basename(allowed.get(again[0]) || item.getFilename() || '') || 'download';
+    const anyway = again.filter((u) => allowed.delete(u)).length > 0;
     if (tab && !anyway && !mayStart(tab, wc)) {
       e.preventDefault();
       // One row per page however often it tries.
       if (!items.some((d) => d.state === 'blocked' && d.tab === tab.id)) {
         const d = {
           id: ++seq, name, file: '', url: item.getURLChain()[0] || item.getURL(), by: g ? g.label : null,
-          private: priv, tab: tab.id, state: 'blocked', received: 0, total: 0, at: Date.now(),
+          private: priv, tab: tab.id, page: wc.getURL(), state: 'blocked', received: 0, total: 0, at: Date.now(),
         };
         items.unshift(d);
         save();
@@ -142,14 +150,23 @@ function createDownloads({ ses, tabs, home, changed }) {
     else if (action === 'resume') item?.resume();
     else if (action === 'cancel') item?.cancel();
     else if (action === 'remove' && !item) items = items.filter((x) => x !== d);
-    else if (action === 'allow' && d.state === 'blocked') {
-      items = items.filter((x) => x !== d);
-      // From the session of the tab it came from; a private one's only while that tab is open.
-      const from = tabs.get(d.tab)?.ses || (d.private ? null : ses);
+    else if (action === 'allow' && d.state === 'blocked' && !d.lost) {
+      // Through the tab it came from while that is open: a file the page made
+      // (blob:) exists only in that page, and one in the address itself
+      // (data:) is fetched by a page, not by a session. An address on the web
+      // can also be fetched from the tab's session once the tab is gone (a
+      // private one's only while the tab is open).
+      const tab = tabs.get(d.tab);
+      const wc = tab?.wc && !tab.wc.isDestroyed() ? tab.wc : null;
+      const web = /^https?:/i.test(d.url || '');
+      const from = wc && (!/^blob:/i.test(d.url || '') || wc.getURL() === d.page) ? wc
+        : web ? tab?.ses || (d.private ? null : ses) : null;
       if (from) {
-        allowed.add(d.url);
+        items = items.filter((x) => x !== d);
+        allowed.set(d.url, d.name);
         from.downloadURL(d.url);
-      }
+      } else if (web) items = items.filter((x) => x !== d);
+      else d.lost = true; // the page that had it is gone: the row says so
     }
     // A download that was cancelled or did not finish is started again from
     // its address, in the session it came from; the new one takes its place in the list.
@@ -205,6 +222,7 @@ function createDownloads({ ses, tabs, home, changed }) {
     ask,
     items: items.filter((d) => !!d.private === !!tabs.window()?.private).slice(0, KEEP).map((d) => ({
       id: d.id, name: d.name, by: d.by, state: d.state, received: d.received, total: d.total, gone: !!d.gone, live: running.has(d.id),
+      runs: RUNS.test(d.file || d.name || ''), lost: !!d.lost,
     })),
   });
 

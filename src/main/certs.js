@@ -8,7 +8,9 @@
 //
 // Only the user's own tabs are let through. A tab in a Claude session's group
 // is always refused, also for a host the user accepted, and nothing a session
-// or the Claude panel does can accept one (see proceed()). Chromium does not
+// or the Claude panel does can accept one (see proceed(): it takes input in
+// the tab within the last second, and none of the panel's work there in the
+// last ten). Chromium does not
 // check a certificate again while it still has a connection to the site open,
 // so a session's tab is also kept from every host accepted here by a request
 // rule (attach()): what it gets is the same "can't open this page safely".
@@ -42,12 +44,17 @@ function createCerts({ tabs, changed }) {
   // the user's own tab, stopped by a certificate for this very address.
   const offer = (tab, url) => !!tab?.wc && tab.group === YOU && refused.get(tab.wc)?.url === url;
 
-  // The user pressed "Open anyway" on the error page. Not while the Claude
-  // panel is at work in the tab: a click of Claude's must not count as theirs.
+  // The user pressed "Open anyway" on the error page. Only a press of their
+  // own counts: keys or mouse that reached the tab within the last second
+  // (tab.userAt, tabs.js), so not a click a script makes, and not while the
+  // Claude panel is at work in the tab or within ten seconds of it (tab.panelAt,
+  // actions.js), so not a click of its tools, or of a timer its script left.
   function proceed(tab) {
     const r = tab?.wc && !tab.wc.isDestroyed() && refused.get(tab.wc);
     const you = tabs.group(YOU);
-    if (!r || tab.group !== YOU || (you.busy > 0 && you.current === tab.id)) return false;
+    const now = Date.now();
+    const pressed = now - (tab?.userAt || 0) <= 1000 && now - (tab?.panelAt || 0) > 10000;
+    if (!r || tab.group !== YOU || !pressed || (you.busy > 0 && you.current === tab.id)) return false;
     of(tab.ses).set(r.host, r.fingerprint);
     refused.delete(tab.wc);
     tab.wc.loadURL(r.url).catch(() => {});

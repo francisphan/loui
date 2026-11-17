@@ -143,6 +143,24 @@ test('a download from a Claude session\'s tab is saved too, marked with the sess
   s.end();
 });
 
+test('an address a session had the tab load is not the user\'s doing: its page gets one download, not several', async () => {
+  const s = b.as('dl-own', 'Claude Code · demo');
+  await s.call('navigate', { url: b.base + '/second.html' });
+  const tab = (await b.state()).tabs.find((t) => t.group === 'dl-own');
+  const start = (name) => b.ui('tab:js', {
+    id: tab.id,
+    code: `{ const a = document.createElement('a'); a.href = ${JSON.stringify(`${url}/file/`)} + ${JSON.stringify(name)}; document.body.append(a); a.click(); a.remove(); }`,
+  });
+  // Right after the session's navigate, with nobody at the keys.
+  await start('own-1.txt');
+  await finished('own-1.txt');
+  await start('own-2.txt');
+  const blocked = await waitFor('own-2.txt', (d) => d.state === 'blocked', 'was listed as blocked');
+  assert.ok(!fs.existsSync(path.join(files, 'own-2.txt')));
+  await b.ui('download:act', { id: blocked.id, action: 'remove' });
+  s.end();
+});
+
 test('a page that starts downloads by itself gets one; the rest are blocked until the user says so', async () => {
   await b.ui('go', b.base + '/second.html');
   const tab = await (async () => {
@@ -177,6 +195,35 @@ test('a page that starts downloads by itself gets one; the rest are blocked unti
   await finished('pushed-1.bin');
   assert.ok(fs.existsSync(path.join(files, 'pushed-1.bin')));
   assert.ok(!(await listed()).some((d) => d.state === 'blocked'));
+});
+
+test('"Download anyway" fetches a file the page made itself while its page is open; after, the row says to ask again', async () => {
+  const tab = (await b.state()).tabs.find((x) => x.active);
+  const make = (name) => b.ui('tab:js', {
+    id: tab.id,
+    code: `{ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['made here'])); a.download = ${JSON.stringify(name)}; document.body.append(a); a.click(); a.remove(); }`,
+  });
+  await new Promise((r) => setTimeout(r, 5200)); // well after the click in the test before
+  await make('made.txt');
+  const blocked = await waitFor('made.txt', (d) => d.state === 'blocked', 'was listed as blocked');
+  await b.ui('download:act', { id: blocked.id, action: 'allow' });
+  await finished('made.txt');
+  assert.equal(fs.readFileSync(path.join(files, 'made.txt'), 'utf8'), 'made here');
+
+  // Once the page has gone, so has the file it made.
+  await make('made-later.txt');
+  const later = await waitFor('made-later.txt', (d) => d.state === 'blocked', 'was listed as blocked');
+  await b.ui('go', b.base + '/plain.html');
+  for (let i = 0; i < 100 && (await b.state()).tabs.find((x) => x.active).url !== b.base + '/plain.html'; i++) await new Promise((r) => setTimeout(r, 100));
+  await b.ui('download:act', { id: later.id, action: 'allow' });
+  const row = await waitFor('made-later.txt', (d) => d.lost, 'said its page is gone');
+  assert.equal(row.state, 'blocked');
+  const shown = () => b.ui('chrome:eval', `(() => { const n = [...document.querySelectorAll('#downloads-list .download')].find((x) => x.querySelector('.name').textContent === 'made-later.txt');
+    return n ? { detail: n.querySelector('.detail').textContent, acts: [...n.querySelectorAll('.acts button')].map((x) => x.textContent) } : null; })()`);
+  for (let i = 0; i < 50 && !/ask the page/.test((await shown())?.detail || ''); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(await shown(), { detail: 'Blocked, and its page is gone: ask the page for the file again', acts: ['Remove'] });
+  await b.ui('download:act', { id: later.id, action: 'remove' });
+  assert.ok(!fs.existsSync(path.join(files, 'made-later.txt')));
 });
 
 test('finished downloads can be cleared from the list, and the files stay', async () => {

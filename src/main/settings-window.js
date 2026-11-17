@@ -150,7 +150,8 @@ function createSettingsWindow({
       toMain(w);
     },
     'passwords:import': () => passwords.chooseImport(win),
-    // key: only ever a new one; an empty key keeps the one saved (link.js).
+    // key: only ever a new one; an empty key keeps the one saved, unless the
+    // address now names another relay (link.js).
     relay: ({ url, key, on } = {}) => link.configure({
       url: typeof url === 'string' ? url : link.state().url,
       key: typeof key === 'string' ? key : '',

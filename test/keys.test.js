@@ -358,6 +358,15 @@ test("a page's menu covers images, links, selections and text fields, and a sess
   assert.ok(theirMenu.includes('Save image') && !theirMenu.includes('Save image as…'));
   // Nor does a session's tab ask where to save.
   assert.ok(theirMenu.includes('Save link') && theirMenu.includes('Save page') && !theirMenu.some((l) => / as…$/.test(l)), String(theirMenu));
+  assert.ok(!theirMenu.includes('View page source'), 'a session reads pages with its tools');
+  // A link or an image a page names that is not on the web is not opened from here, in anyone's tab.
+  for (const url of ['file:///etc/passwd', `view-source:${b.base}/`, 'javascript:alert(1)', 'data:text/html,hi']) {
+    for (const id of [y.id, theirs.id]) {
+      const menu = await items(id, { linkURL: url, mediaType: 'image', srcURL: url });
+      assert.ok(!menu.some((l) => /^Open /.test(l)), `${url}: ${menu}`);
+      assert.ok(menu.includes('Copy link address') && menu.includes('Copy image address'), `${url}: ${menu}`);
+    }
+  }
   await items(theirs.id, link, 'Open link in new tab');
   await until(async () => (await tabs()).some((t) => t.group === 's' && t.url === link.linkURL && t.id !== theirs.id), 'the link in the session\'s group');
   assert.equal((await mine()).length, 1);

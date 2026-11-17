@@ -110,7 +110,7 @@ function createRestore({ tabs, file, openWindow, settings = {} }) {
       show, device: was?.device || undefined, history: h || undefined, asleep, pinned: was?.pinned === true, window,
     });
     if (h) pending.set(tab, h);
-    return tab;
+    return tabs.byUser(tab);
   }
 
   // One saved window's tabs into w.

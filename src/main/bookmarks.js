@@ -325,9 +325,9 @@ function createBookmarks({ file, tabs, ses, send, broadcast = send, changed = ()
   // Claude session's: a bookmark is the user's, and opens in a tab of theirs.
   function open(url, inNewTab) {
     const tab = tabs.active();
-    if (inNewTab) return tabs.create(url, { show: false });
-    if (!tab || tab.group !== YOU) return tabs.create(url, { show: true });
-    tab.wc.loadURL(url).catch(() => {});
+    if (inNewTab) return tabs.byUser(tabs.create(url, { show: false }));
+    if (!tab || tab.group !== YOU) return tabs.byUser(tabs.create(url, { show: true }));
+    tabs.byUser(tab).wc.loadURL(url).catch(() => {});
     tab.wc.focus();
   }
 

@@ -30,9 +30,8 @@ function size(bytes) {
   return `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
 }
 
-// Files that run when opened: programs, scripts and shortcuts. "Open" on one
-// of these is "Run…", and asks once more in the row before it does.
-const RUNS = /\.(exe|msi|bat|cmd|ps1|lnk|url|scr|com|jar|vbs|js)$/i;
+// A file that runs when opened (d.runs: the main process knows the file, see
+// downloads.js) has "Run…" for "Open", and asks once more in the row before it does.
 const STALLED_MS = 10000;
 
 function lasts(seconds) {
@@ -58,7 +57,7 @@ function describe(d, pace, now = Date.now()) {
     completed: size(d.total || d.received),
     cancelled: 'Cancelled',
     interrupted: "Didn't finish",
-    blocked: 'Blocked: this page tried to download more files',
+    blocked: d.lost ? 'Blocked, and its page is gone: ask the page for the file again' : 'Blocked: this page tried to download more files',
   }[d.state] || '';
 }
 
@@ -68,9 +67,9 @@ function choices(d, stalled) {
   if (d.state === 'progressing' && stalled) return [['retry', 'Retry'], ['pause', 'Pause'], ['cancel', 'Cancel']];
   if (d.state === 'progressing') return [['pause', 'Pause'], ['cancel', 'Cancel']];
   if (d.state === 'paused' || d.live) return [['resume', 'Resume'], ['cancel', 'Cancel']];
-  if (d.state === 'completed' && !d.gone) return [RUNS.test(d.name) ? ['run', 'Run…'] : ['open', 'Open'], ['show', 'Show in folder'], ['remove', 'Remove']];
+  if (d.state === 'completed' && !d.gone) return [d.runs ? ['run', 'Run…'] : ['open', 'Open'], ['show', 'Show in folder'], ['remove', 'Remove']];
   if (d.state === 'completed') return [['remove', 'Remove']];
-  if (d.state === 'blocked') return [['allow', 'Download anyway'], ['remove', 'Remove']];
+  if (d.state === 'blocked') return d.lost ? [['remove', 'Remove']] : [['allow', 'Download anyway'], ['remove', 'Remove']];
   return [['retry', 'Retry'], ['remove', 'Remove']];
 }
 

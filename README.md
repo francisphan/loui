@@ -246,23 +246,35 @@ session is told the user declined. Ticking *Trust this session until it ends*
 stops the questions for that session.
 
 - **What is asked about:** clicking a control named like Pay, Buy, Place
-  order, Purchase, Checkout, Transfer, Subscribe, Order, Book, Reserve,
-  Upgrade, Send, Post, Publish, Share, Reply, Delete, Remove account,
-  Unsubscribe, Discard, Empty trash (and Pagar, Comprar, Reservar, Suscribirse,
-  Enviar, Publicar, Compartir, Responder, Eliminar, Borrar, Descartar,
+  order, Purchase, Checkout, Transfer, Order, Book, Reserve, Send, Post,
+  Publish, Delete, Remove account, Unsubscribe, Discard, Empty trash (and
+  Pagar, Comprar, Reservar, Enviar, Publicar, Eliminar, Borrar, Descartar,
   Transferir, Confirmar compra), whether it is a button or anything else that
-  takes clicks; Confirm or Yes in a dialog about paying or deleting;
+  takes clicks; Share, Reply, Subscribe and Upgrade (Compartir, Responder,
+  Suscribirse) only on a form's own submit button or in a dialog, since
+  elsewhere they open a menu, a box or a page; Confirm or Yes in a dialog
+  about paying or deleting;
   submitting a form that holds card, password or one-time-code fields (by a
   click, or Enter); Enter in a chat box with a Send button beside it; opening
-  a site on your list; and `evaluate` on a page with card or password fields.
+  a site on your list; `evaluate` on a page with card or password fields; and
+  `evaluate` with code that reads like it clicks, submits or calls a handler
+  (`.click(`, `.submit(`, `dispatchEvent(`, `el.onclick()`), on a page that
+  has such a control.
   A click is judged on what it will land on (something laid over the element
   counts), and again just before it is sent.
-- **What a script of Claude's does:** a click, submit or Enter that `evaluate`
-  sends to such a control is stopped in the page and asked about, then let
-  through if you allow it; so is what a `<select>` sets off when
-  `select_option` changes it, and a form either of them posts.
-- **What the page does by itself:** while a session acts in a tab, and for ten
-  seconds after, any POST, PUT, PATCH or DELETE from that tab carrying a card
+- **What a script of Claude's does:** a click, a press of the mouse, a submit
+  or an Enter that `evaluate` sends to such a control is stopped in the page
+  and asked about, then let through if you allow it; so is what a `<select>`
+  sets off when `select_option` changes it, a form `evaluate` posts (or a
+  select, when its form holds more than the select), and a DELETE request
+  without a body. The watch stays on until the page is left: what a script
+  sends later, from a timer, is stopped and the session is told. It lets by
+  what the page does in the second after real input and in the few seconds
+  after an action you allowed, so a Send button that finishes its job by
+  pressing a hidden one still works.
+- **What the page does by itself:** while a session acts in a tab, for ten
+  seconds after, and for as long as a page a script of its ran in stays
+  open, any POST, PUT, PATCH or DELETE from that tab carrying a card
   number, password or one-time code is held until you answer, however it
   started (a "Next" button whose script submits a payment form,
   `form.submit()`, `fetch`). So is the tab going to a site on your list by a
@@ -271,7 +283,9 @@ stops the questions for that session.
   (an order placed with a saved card through an API call, a delete over
   `fetch`) unless the control that started it is named like one; a control
   with a name outside the list; a page acting more than ten seconds after the
-  session's last action; WebSockets.
+  session's last action (where no script of the session's ran); a script that
+  calls a handler in a way its text does not show (Loui sees events, not
+  function calls); WebSockets.
 - It covers every Claude session and the Claude panel (in your tabs, only while
   the panel is acting). Your own clicks are never interrupted.
 - *File › Settings* turns it off, edits the list of sites, and forgets
@@ -359,8 +373,8 @@ overrides the folder). A file never replaces one already there: the second
 (`Ctrl+J`) shows how far running downloads have got and opens the list, where
 you can pause, resume or cancel them, try a cancelled or failed one again,
 open a finished file or show it in its folder, and remove single rows. A
-program, script or shortcut says *Run…* instead of *Open* and asks once more
-in its row. A running download shows its speed and time left, and *Stalled*
+program, script, shortcut, installer, disk image or registry file says *Run…*
+instead of *Open* and asks once more in its row. A running download shows its speed and time left, and *Stalled*
 after ten seconds without a byte. *Ask where to save each file* there brings back the Save As dialog
 for downloads you start. Downloads that start in a Claude session's tab are
 saved and listed too, with the session's name; they never open a dialog, and
@@ -631,7 +645,8 @@ with a self-signed one) has *Advanced › Open anyway* on that page, in your own
 tabs only. Loui then accepts that one certificate for that site until you quit
 (`src/main/certs.js`; nothing is written down) and marks the address bar *Not
 secure* while you are there. Claude sessions' tabs are never let through, and
-a press by Claude does not count. A page whose process crashed gets the same
+a press by Claude does not count: only your own keys or mouse in the tab, and
+not within ten seconds of the Claude panel working in it. A page whose process crashed gets the same
 page, saying so, with *Reload*.
 
 The page is drawn into Chromium's own error document (`src/ui/errorpage.*`,
