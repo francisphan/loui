@@ -125,7 +125,7 @@ function createWindow() {
   win.on('closed', () => app.quit());
   win.webContents.on('did-finish-load', () => {
     pushState();
-    setTimeout(serve, 3000);
+    setTimeout(serve, 10000); // last resort: the window reports its layout as soon as its script runs
   });
   if (process.env.LOUI_DEBUG) {
     win.webContents.on('console-message', (e) => console.error('[ui]', e.message, `(${e.sourceId}:${e.lineNumber})`));

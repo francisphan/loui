@@ -76,13 +76,18 @@ $('panel-toggle').onclick = () => togglePanel();
 $('panel-toggle').classList.add('on');
 loui.on('toggle-panel', () => togglePanel());
 
-// The page is a native view placed over #stage; tell the main process where that is.
-new ResizeObserver(() => {
+// The page is a native view placed over #stage; tell the main process where
+// that is. Once straight away (measuring forces layout, so this needs no
+// repaint, which a covered or busy window may not get for a while), and again
+// whenever it changes.
+const sendLayout = () => {
   const r = $('stage').getBoundingClientRect();
   loui.send('layout', {
     x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height),
   });
-}).observe($('stage'));
+};
+sendLayout();
+new ResizeObserver(sendLayout).observe($('stage'));
 
 function drawTab(t) {
   const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : ''));
