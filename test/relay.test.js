@@ -12,6 +12,8 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const { start } = require('../relay/server');
 const { launch } = require('./drive');
+const { spawn } = require('child_process');
+const { socketFor } = require('../src/shared/paths');
 
 let relay, b, home;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -21,12 +23,19 @@ const until = async (check, what, ms = 8000) => {
 };
 
 // A Claude session: an MCP client signed in with a bearer token.
-async function connect(name = 'claude-code', token = relay.key) {
+async function connect(name = 'claude-code', token = relay.key, again = true) {
   const transport = new StreamableHTTPClientTransport(new URL(relay.url + '/mcp'), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
   const client = new Client({ name, version: '1.0.0' });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (e) {
+    // After a long gap, fetch can pick a kept-alive connection the relay has
+    // since closed; nothing was sent, so once more.
+    if (again && /fetch failed/.test(String(e?.message))) return connect(name, token, false);
+    throw e;
+  }
   const text = async (tool, args = {}) => {
     const r = await client.callTool({ name: tool, arguments: args });
     const words = r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
@@ -66,6 +75,87 @@ test('a browser with the wrong key is turned away', async () => {
   });
   assert.match(reply.denied, /key is wrong/);
   assert.equal(relay.devices.size, 0);
+});
+
+// A stand-in for a browser, signed in. options: as ws takes them.
+function device(r, id, options) {
+  const ws = new WebSocket(r.url.replace('http', 'ws') + '/device', options);
+  ws.on('error', () => {});
+  ws.on('open', () => ws.send(JSON.stringify({ hello: { key: r.key, device: { id, name: id } } })));
+  return ws;
+}
+
+test('a message that is not what the relay expects closes that connection, and the relay carries on', async () => {
+  // Before signing in, and after.
+  for (const bad of ['null', '7', '"hello"', 'not json', '{"hello":null}', '{"hello":{"key":7,"device":null}}']) {
+    const ws = new WebSocket(relay.url.replace('http', 'ws') + '/device');
+    await new Promise((resolve) => {
+      ws.on('open', () => ws.send(bad));
+      ws.on('close', resolve);
+    });
+  }
+  const ws = device(relay, 'odd');
+  await until(() => relay.devices.has('odd'), 'the stand-in to sign in');
+  ws.send('null');
+  await until(() => !relay.devices.has('odd'), 'the stand-in to be dropped');
+  assert.equal((await fetch(relay.url + '/healthz')).status, 200);
+});
+
+test('a web page cannot open the browsers\' connection', async () => {
+  const ws = new WebSocket(relay.url.replace('http', 'ws') + '/device', { origin: 'http://localhost:8000' });
+  const outcome = await new Promise((resolve) => {
+    ws.on('open', () => resolve('opened'));
+    ws.on('error', () => resolve('refused'));
+  });
+  ws.terminate();
+  assert.equal(outcome, 'refused');
+});
+
+test('a browser that stops answering pings is taken offline', async () => {
+  const r = await start({ port: 0, home: fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-')), pingMs: 150 });
+  try {
+    const well = device(r, 'well');
+    const gone = device(r, 'gone', { autoPong: false }); // as if its network had gone
+    await until(() => r.devices.size === 2, 'both to sign in');
+    await until(() => !r.devices.has('gone'), 'the silent one to be dropped', 3000);
+    await sleep(400);
+    assert.ok(r.devices.has('well'), 'one that answers stays');
+    // What Loui sends to hear that the relay is there.
+    const pong = new Promise((resolve) => well.on('message', (data) => resolve(JSON.parse(data))));
+    well.send(JSON.stringify({ ping: 1 }));
+    assert.deepEqual(await pong, { pong: 1 });
+    well.terminate();
+  } finally {
+    await r.close();
+    fs.rmSync(r.home, { recursive: true, force: true });
+  }
+});
+
+test('one sign-in can hold only so many sessions', async () => {
+  const r = await start({ port: 0, home: fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-')), maxSessions: 3 });
+  const initialize = () => fetch(r.url + '/mcp', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${r.key}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'claude-code', version: '1' } },
+    }),
+  });
+  try {
+    const all = await Promise.all(Array.from({ length: 12 }, initialize)); // at once, as a flood would be
+    assert.equal(all.filter((res) => res.status === 200).length, 3);
+    const refused = all.find((res) => res.status !== 200);
+    assert.equal(refused.status, 429);
+    assert.match((await refused.json()).error.message, /already has 3 sessions open/);
+    assert.equal(r.sessions.size, 3);
+    // Ending one makes room for another.
+    const id = all.find((res) => res.status === 200).headers.get('mcp-session-id');
+    await fetch(r.url + '/mcp', { method: 'DELETE', headers: { authorization: `Bearer ${r.key}`, 'mcp-session-id': id } });
+    assert.equal((await initialize()).status, 200);
+  } finally {
+    await r.close();
+    fs.rmSync(r.home, { recursive: true, force: true });
+  }
 });
 
 test('with no browser online, a session is told so', async () => {
@@ -168,27 +258,29 @@ test('a session that just disappears is closed after the grace period', async ()
   await until(async () => (await groups()).length === 0, 'the abandoned group to close', 6000);
 });
 
-const register = (redirect) => fetch(relay.url + '/register', {
+const register = (redirect, r = relay) => fetch(r.url + '/register', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ client_name: 'Claude', redirect_uris: [redirect], token_endpoint_auth_method: 'none' }),
 });
 
 // Registers a client and starts a sign-in; returns what the approval step needs.
-async function startSignIn(redirect) {
-  const registered = await (await register(redirect)).json();
+// client: one already registered, to sign in again.
+async function startSignIn(redirect, r = relay, client) {
+  const registered = client || await (await register(redirect, r)).json();
   assert.ok(registered.client_id);
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-  const authorize = new URL(relay.url + '/authorize');
+  const authorize = new URL(r.url + '/authorize');
   authorize.search = new URLSearchParams({
     response_type: 'code', client_id: registered.client_id, redirect_uri: redirect,
     code_challenge: challenge, code_challenge_method: 'S256', state: 'abc',
   });
   const toApproval = await fetch(authorize, { redirect: 'manual' });
   assert.equal(toApproval.status, 302);
-  const approvePage = new URL(toApproval.headers.get('location'), relay.url);
-  const answer = (key) => fetch(relay.url + '/approve', {
+  const approvePage = new URL(toApproval.headers.get('location'), r.url);
+  if (approvePage.searchParams.get('error')) return { registered, refused: approvePage.searchParams.get('error') };
+  const answer = (key) => fetch(r.url + '/approve', {
     method: 'POST', redirect: 'manual',
     body: new URLSearchParams({ request: approvePage.searchParams.get('request'), key }),
   });
@@ -280,6 +372,147 @@ test("Claude's connector signs in with OAuth, approved with the relay key", asyn
   });
   assert.equal(res.status, 404);
   await s.transport.terminateSession();
+});
+
+// A relay with small limits and a short grace period, and a connector signed in to it.
+async function small(limits) {
+  const r = await start({ port: 0, home: fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-')), auth: limits });
+  const stop = async () => { await r.close(); fs.rmSync(r.home, { recursive: true, force: true }); };
+  return { r, stop };
+}
+const redirect = 'https://claude.ai/api/mcp/auth_callback';
+async function signIn(r) {
+  const { registered, verifier, answer } = await startSignIn(redirect, r);
+  const back = new URL((await answer(r.key)).headers.get('location'));
+  const tokens = await (await fetch(r.url + '/token', {
+    method: 'POST',
+    body: new URLSearchParams({
+      grant_type: 'authorization_code', code: back.searchParams.get('code'), code_verifier: verifier,
+      client_id: registered.client_id, redirect_uri: redirect,
+    }),
+  })).json();
+  const refresh = (token) => fetch(r.url + '/token', {
+    method: 'POST',
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token, client_id: registered.client_id }),
+  });
+  const works = async (token) => (await fetch(r.url + '/mcp', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  })).status !== 401;
+  return { tokens, refresh, works };
+}
+
+test('refreshes at the same moment get the same new tokens, not one set each', async () => {
+  const { r, stop } = await small({ refreshGraceMs: 400 });
+  try {
+    const { tokens, refresh, works } = await signIn(r);
+    const three = await Promise.all([1, 2, 3].map(async () => (await refresh(tokens.refresh_token)).json()));
+    assert.ok(three[0].refresh_token && three[0].refresh_token !== tokens.refresh_token);
+    assert.deepEqual(three.map((t) => t.refresh_token), Array(3).fill(three[0].refresh_token));
+    assert.deepEqual(three.map((t) => t.access_token), Array(3).fill(three[0].access_token));
+    const stored = JSON.parse(fs.readFileSync(path.join(r.home, 'oauth.json'), 'utf8')).refresh;
+    assert.equal(Object.values(stored).filter((x) => !x.retiredAt).length, 1, 'one refresh token in use');
+
+    // A replaced token that turns up after the grace period was copied by
+    // someone: every token from that approval stops working.
+    assert.ok(await works(three[0].access_token));
+    await sleep(500);
+    assert.equal((await refresh(tokens.refresh_token)).status, 400);
+    assert.equal((await refresh(three[0].refresh_token)).status, 400, 'the newest one is withdrawn too');
+    assert.equal(await works(three[0].access_token), false);
+    assert.equal(await works(tokens.access_token), false);
+
+    // Another approval of the same relay is not touched by it.
+    const other = await signIn(r);
+    assert.equal((await other.refresh(other.tokens.refresh_token)).status, 200);
+  } finally {
+    await stop();
+  }
+});
+
+test("other sign-ins cannot push out an approval the owner is in the middle of", async () => {
+  const { r, stop } = await small({ maxApprovals: 3, maxClients: 5 });
+  try {
+    const owner = await startSignIn(redirect, r);
+    const crowd = [];
+    for (let i = 0; i < 4; i++) crowd.push(await startSignIn(redirect, r));
+    assert.deepEqual(crowd.map((c) => c.refused), [undefined, undefined, 'temporarily_unavailable', 'temporarily_unavailable']);
+    // Nor can registrations push out one made a moment ago.
+    assert.equal((await register(redirect, r)).status, 400);
+
+    // A client asking again replaces its own request rather than adding one.
+    const again = await startSignIn(redirect, r, crowd[0].registered);
+    assert.equal(again.refused, undefined);
+    assert.equal((await crowd[0].answer(r.key)).status, 400, 'its first request is gone');
+
+    assert.equal((await owner.answer(r.key)).status, 302, 'the owner\'s approval is still there');
+  } finally {
+    await stop();
+  }
+});
+
+test('Loui dials again when a relay it is connected to goes silent', async () => {
+  // A relay that welcomes the browser, answers its first ping, and then says nothing more.
+  const silent = new WebSocket.Server({ port: 0, host: '127.0.0.1' });
+  await new Promise((resolve) => silent.on('listening', resolve));
+  let dials = 0;
+  silent.on('connection', (ws) => {
+    dials++;
+    let pings = 0;
+    ws.on('message', (data) => {
+      const msg = JSON.parse(data);
+      if (msg.hello) ws.send(JSON.stringify({ welcome: true, sessions: [], relay: [] }));
+      if (msg.ping && !pings++) ws.send(JSON.stringify({ pong: msg.ping }));
+    });
+  });
+  const other = await launch({ LOUI_RELAY_URL: `http://127.0.0.1:${silent.address().port}`, LOUI_RELAY_KEY: 'k', LOUI_LINK_QUIET_MS: '900' });
+  try {
+    await until(async () => (await other.state()).link.status === 'connected', 'the browser to connect');
+    await until(() => dials >= 2, 'the browser to dial again', 6000);
+  } finally {
+    await other.close();
+    for (const ws of silent.clients) ws.terminate();
+    silent.close();
+  }
+});
+
+test('the local control socket is only served to the tests, or when a setting turns it on', async () => {
+  // Loui as it runs day to day (no LOUI_TEST). It dials the relay right after
+  // the point where it would open the socket, so a stand-in relay hears when.
+  const standIn = new WebSocket.Server({ port: 0, host: '127.0.0.1' });
+  await new Promise((resolve) => standIn.on('listening', resolve));
+  let dialled = 0;
+  standIn.on('connection', () => dialled++);
+  const run = async (settings) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
+    if (settings) fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings));
+    const before = dialled;
+    const app = spawn(require('electron'), [path.join(__dirname, '..'), '--no-sandbox'], {
+      env: {
+        ...process.env, LOUI_HOME: dir, LOUI_TEST: '', LOUI_RELAY_URL: `http://127.0.0.1:${standIn.address().port}`, LOUI_RELAY_KEY: 'k',
+        LOUI_SHIELDS_LISTS: 'http://127.0.0.1:1/none', // nothing to download
+      },
+      stdio: 'ignore',
+    });
+    try {
+      await until(() => dialled > before, 'Loui to start', 20000);
+      await sleep(300);
+      return fs.existsSync(socketFor(dir));
+    } finally {
+      const exited = new Promise((resolve) => app.once('exit', resolve));
+      app.kill('SIGKILL');
+      await exited;
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+    }
+  };
+  try {
+    assert.equal(await run(null), false, 'no socket in a normal run');
+    assert.equal(await run({ localSocket: true }), true, 'served when the setting is on');
+  } finally {
+    for (const ws of standIn.clients) ws.terminate();
+    standIn.close();
+  }
 });
 
 test("a session's tabs cannot open the relay itself", async () => {

@@ -46,20 +46,47 @@ function createDownloads({ ses, tabs, home, changed }) {
     (d.state === 'progressing' || d.state === 'paused' ? { ...d, state: 'interrupted' } : d));
   let seq = items.reduce((max, d) => Math.max(max, d.id || 0), 0);
   const running = new Map(); // id -> DownloadItem
+  // A page may start a download when someone just acted in its tab (or Loui
+  // loaded the address), and one more per page load; the rest are stopped and
+  // listed as blocked, where the user can let one through.
+  const started = new WeakMap(); // a tab's page -> downloads it started since it loaded
+  const allowed = new Set(); // addresses the user chose "Download anyway" for
+  function mayStart(tab, wc) {
+    if (!started.has(wc)) wc.on('did-navigate', () => started.set(wc, 0));
+    const n = started.get(wc) || 0;
+    started.set(wc, n + 1);
+    return tabs.recent(tab) || n === 0;
+  }
 
   const folder = () => process.env.LOUI_DOWNLOADS || app.getPath('downloads');
-  // A private window's downloads are listed while it is open, never written down.
+  // A private window's downloads are listed while it is open, never written
+  // down; nor are blocked ones, which belong to a tab as it is now.
   const save = () => {
     try {
-      fs.writeFileSync(listFile, JSON.stringify({ ask, items: items.filter((d) => !d.private).slice(0, KEEP) }, null, 2));
+      fs.writeFileSync(listFile, JSON.stringify({ ask, items: items.filter((d) => !d.private && d.state !== 'blocked').slice(0, KEEP) }, null, 2));
     } catch {}
   };
 
   // Each session: the user's, and each private one (main.js attaches those).
-  const attach = (s, { private: priv = false } = {}) => s.on('will-download', (_e, item, wc) => {
+  const attach = (s, { private: priv = false } = {}) => s.on('will-download', (e, item, wc) => {
     const tab = wc && tabs.list.find((t) => t.wc === wc);
     const g = tab && tab.group !== YOU ? tabs.group(tab.group) : null;
     const name = path.basename(item.getFilename() || '') || 'download';
+    const anyway = item.getURLChain().filter((u) => allowed.delete(u)).length > 0;
+    if (tab && !anyway && !mayStart(tab, wc)) {
+      e.preventDefault();
+      // One row per page however often it tries.
+      if (!items.some((d) => d.state === 'blocked' && d.tab === tab.id)) {
+        const d = {
+          id: ++seq, name, file: '', url: item.getURLChain()[0] || item.getURL(), by: g ? g.label : null,
+          private: priv, tab: tab.id, state: 'blocked', received: 0, total: 0, at: Date.now(),
+        };
+        items.unshift(d);
+        save();
+        changed();
+      }
+      return;
+    }
     const dir = folder();
     fs.mkdirSync(dir, { recursive: true });
     const taken = new Set(items.filter((d) => running.has(d.id)).map((d) => d.file));
@@ -109,6 +136,15 @@ function createDownloads({ ses, tabs, home, changed }) {
     else if (action === 'resume') item?.resume();
     else if (action === 'cancel') item?.cancel();
     else if (action === 'remove' && !item) items = items.filter((x) => x !== d);
+    else if (action === 'allow' && d.state === 'blocked') {
+      items = items.filter((x) => x !== d);
+      // From the session of the tab it came from; a private one's only while that tab is open.
+      const from = tabs.get(d.tab)?.ses || (d.private ? null : ses);
+      if (from) {
+        allowed.add(d.url);
+        from.downloadURL(d.url);
+      }
+    }
     else if ((action === 'open' || action === 'show') && d.state === 'completed') {
       if (!fs.existsSync(d.file)) d.gone = true;
       else if (action === 'open') shell.openPath(d.file);

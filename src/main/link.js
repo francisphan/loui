@@ -7,12 +7,18 @@
 //   <- {"id", "tool", "args", "session": {"id", "label", "source", "connector"}}     -> {"id", "content" | "error"}
 //      connector: {"id", "name", "kind"}, who the session signed in as (see consent.js)
 //   <- {"end": "session id"}
+//   -> {"ping": 1}    <- {"pong": 1}    is the relay still there? (below)
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
 const ORPHAN_MS = 10 * 60 * 1000; // relay unreachable this long: its sessions' groups close
+// A connection whose network path changed can stay "open" for ever without a
+// word. Loui asks the relay for a sign of life three times in this long, and
+// dials again if nothing at all arrived. (The relay's own pings are answered
+// by the WebSocket itself and never reach this code.)
+const QUIET_MS = Number(process.env.LOUI_LINK_QUIET_MS) || 90 * 1000;
 
 // "https://host" or "http://127.0.0.1:7332" as the user enters it -> the device endpoint.
 function deviceUrl(base) {
@@ -90,11 +96,21 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
     }
     ws = sock;
     set('connecting');
+    let heard = Date.now();
+    let answers = false; // a relay from before pings does not answer them, and is left alone
+    const beat = setInterval(() => {
+      if (ws !== sock) return clearInterval(beat);
+      if (sock.readyState !== WebSocket.OPEN || status !== 'connected') return;
+      if (answers && Date.now() - heard > QUIET_MS) return lost();
+      sock.send(JSON.stringify({ ping: 1 }));
+    }, QUIET_MS / 3);
     sock.onopen = () => sock.send(JSON.stringify({ hello: { key: config.key, device } }));
     sock.onmessage = async (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       if (!msg || typeof msg !== 'object') return;
+      heard = Date.now();
+      if (msg.pong) return void (answers = true);
       if (msg.welcome) {
         guard([...(Array.isArray(msg.relay) ? msg.relay : []), new URL(config.url).origin]);
         attempt = 0;
@@ -112,14 +128,17 @@ function createLink({ home, version, handle, sessions, changed, guard, cipher = 
       if (reply && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(reply));
     };
     sock.onerror = () => {};
-    sock.onclose = () => {
+    sock.onclose = () => lost();
+    function lost() {
       if (ws !== sock) return;
       ws = null;
+      clearInterval(beat);
+      try { sock.close(); } catch {}
       if (status === 'refused') return; // wrong key: wait for new settings
       set('offline', 'The relay is not reachable. Trying again.');
       retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempt++));
       orphanTimer ||= setTimeout(() => { for (const id of [...mine]) drop(id); }, ORPHAN_MS);
-    };
+    }
   }
 
   function drop(id) {

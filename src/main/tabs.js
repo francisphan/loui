@@ -400,6 +400,11 @@ class Tabs extends EventEmitter {
     wc.on('before-input-event', acted);
     // Presses only: the pointer entering or crossing the page is not an action.
     wc.on('before-mouse-event', (_e, mouse) => { if (mouse.type === 'mouseDown' || mouse.type === 'mouseUp') acted(); });
+    // An address Loui itself loads into the tab (the address bar, a bookmark,
+    // a session's navigate, a new tab's first page), as opposed to one the
+    // page went to: see recent().
+    const load = wc.loadURL.bind(wc);
+    wc.loadURL = (...args) => { tab.loadedAt = Date.now(); return load(...args); };
     wc.setWindowOpenHandler(({ url: to, disposition }) => {
       if (/^https?:|^about:blank/i.test(to) && this.mayOpen(tab)) {
         const opened = this.create(to, {
@@ -416,6 +421,13 @@ class Tabs extends EventEmitter {
     // Before its first load, so other modules can watch its navigations. Also
     // when a sleeping tab wakes, since it then has a new page.
     this.emit('created', tab);
+  }
+
+  // Whether what the tab's page does now can be put down to someone: an action
+  // in the tab (keys, mouse, a session's) or an address Loui loaded into it,
+  // within ms. Downloads and hand-overs to the other browser ask this.
+  recent(tab, ms = OPEN_WITHIN) {
+    return Date.now() - Math.max(tab.actedAt || 0, tab.loadedAt || 0) <= ms;
   }
 
   // Whether a page may open a tab now: within OPEN_WITHIN of an action in the

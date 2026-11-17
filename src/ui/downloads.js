@@ -34,6 +34,7 @@ function describe(d) {
     completed: size(d.total || d.received),
     cancelled: 'Cancelled',
     interrupted: "Didn't finish",
+    blocked: 'Blocked: this page tried to download more files',
   }[d.state] || '';
 }
 
@@ -42,6 +43,7 @@ function choices(d) {
   if (d.state === 'progressing') return [['pause', 'Pause'], ['cancel', 'Cancel']];
   if (d.state === 'paused' || d.live) return [['resume', 'Resume'], ['cancel', 'Cancel']];
   if (d.state === 'completed' && !d.gone) return [['open', 'Open'], ['show', 'Show in folder']];
+  if (d.state === 'blocked') return [['allow', 'Download anyway'], ['remove', 'Remove']];
   return [['remove', 'Remove']];
 }
 

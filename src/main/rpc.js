@@ -1,6 +1,8 @@
 // Local control socket: a Unix socket inside the profile directory, so only
 // this user can reach it and no web page can. The test suite drives the app
-// through it; Claude sessions normally arrive through the relay (link.js).
+// through it; Claude sessions arrive through the relay (link.js). Its sessions
+// are not asked about unless they opt in, so it is only served under
+// LOUI_TEST, or with "localSocket": true in settings.json (main.js).
 //
 // One JSON object per line each way:
 //   -> {"id": 1, "tool": "click", "args": {"ref": "e4"}, "session": {"id": "a", "label": "Claude Code"}}
@@ -67,6 +69,9 @@ function serve(socketPath, handle, sessions) {
       if (reply && !conn.destroyed) conn.write(JSON.stringify(reply) + '\n');
     }
   });
+  // A pipe name that is taken (or a profile that cannot hold a socket) means
+  // no control socket, not an error dialog.
+  server.on('error', () => {});
   server.listen(socketPath, () => isFile && fs.chmodSync(socketPath, 0o600));
   return server;
 }

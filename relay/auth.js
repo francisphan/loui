@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const {
-  InvalidGrantError, InvalidTokenError, InvalidClientMetadataError,
+  InvalidGrantError, InvalidTokenError, InvalidClientMetadataError, TemporarilyUnavailableError,
 } = require('@modelcontextprotocol/sdk/server/auth/errors.js');
 
 const ACCESS_MS = 60 * 60 * 1000;
@@ -27,6 +27,7 @@ const APPROVAL_MS = 10 * 60 * 1000;
 const TRIES = 3; // wrong keys per approval request before it is withdrawn
 const MAX_CLIENTS = 200; // when full, the oldest registration that was never approved makes way
 const MAX_APPROVALS = 100; // pending approvals; the oldest makes way
+const SETTLED_MS = 60 * 1000; // but nothing younger than this makes way: the owner may be typing the key
 const REFRESH_GRACE_MS = 2 * 60 * 1000; // a replaced refresh token still works this long (lost replies, retries)
 const MIN_KEY_LENGTH = 32;
 const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
@@ -39,7 +40,11 @@ const allowedHosts = () => [
   ...(process.env.LOUI_REDIRECT_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
 ];
 
-function createAuth(home) {
+// limits: refreshGraceMs, maxApprovals, maxClients, for the tests.
+function createAuth(home, limits = {}) {
+  const refreshGraceMs = limits.refreshGraceMs ?? REFRESH_GRACE_MS;
+  const maxApprovals = limits.maxApprovals ?? MAX_APPROVALS;
+  const maxClients = limits.maxClients ?? MAX_CLIENTS;
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const keyFile = path.join(home, 'key');
   if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, random() + '\n', { mode: 0o600 });
@@ -65,7 +70,8 @@ function createAuth(home) {
   try { store = JSON.parse(fs.readFileSync(storeFile, 'utf8')); } catch {}
   const save = () => fs.writeFileSync(storeFile, JSON.stringify(store, null, 2), { mode: 0o600 });
 
-  const access = new Map(); // token -> { clientId, expiresAt }
+  const access = new Map(); // token -> { clientId, family, expiresAt }
+  const replaced = new Map(); // retired refresh token -> the tokens issued in its place
   const codes = new Map(); // code -> { clientId, challenge, redirectUri, expiresAt }
   const approvals = new Map(); // id -> { client, params, expiresAt, tries }
 
@@ -98,13 +104,23 @@ function createAuth(home) {
   sweep();
   setInterval(sweep, 60 * 1000).unref();
 
-  function issue(clientId) {
+  // family: the approval these tokens descend from. Every refresh token made
+  // from one approval carries it, so they can all be withdrawn together.
+  function issue(clientId, family = random()) {
     const token = random();
-    access.set(token, { clientId, expiresAt: Date.now() + ACCESS_MS });
+    access.set(token, { clientId, family, expiresAt: Date.now() + ACCESS_MS });
     const refreshToken = random();
-    store.refresh[refreshToken] = { clientId, generation, expiresAt: Date.now() + REFRESH_MS };
+    store.refresh[refreshToken] = { clientId, generation, family, expiresAt: Date.now() + REFRESH_MS };
     save();
     return { access_token: token, token_type: 'bearer', expires_in: ACCESS_MS / 1000, refresh_token: refreshToken };
+  }
+
+  // Ends every token that came from one approval.
+  function withdraw(family, token) {
+    delete store.refresh[token];
+    for (const [t, r] of Object.entries(store.refresh)) if (family && r.family === family) delete store.refresh[t];
+    for (const [t, a] of access) if (family && a.family === family) access.delete(t);
+    save();
   }
 
   const provider = {
@@ -123,9 +139,11 @@ function createAuth(home) {
             throw new InvalidClientMetadataError(`This relay only sends sign-ins to ${hosts.join(', ')}, not ${host}.`);
           }
         }
-        if (Object.keys(store.clients).length >= MAX_CLIENTS) {
+        if (Object.keys(store.clients).length >= maxClients) {
           const busy = inUse();
-          const idle = Object.values(store.clients).filter((c) => !busy.has(c.client_id))
+          const settled = Date.now() - SETTLED_MS; // a fresh one may be on its way to the approval page
+          const idle = Object.values(store.clients)
+            .filter((c) => !busy.has(c.client_id) && (c.client_id_issued_at || 0) * 1000 < settled)
             .sort((a, b) => (a.client_id_issued_at || 0) - (b.client_id_issued_at || 0));
           if (!idle.length) throw new InvalidClientMetadataError('Too many connectors are registered with this relay.');
           delete store.clients[idle[0].client_id];
@@ -136,10 +154,20 @@ function createAuth(home) {
       },
     },
 
-    // Hands the browser to the approval page below.
+    // Hands the browser to the approval page below. A client has one pending
+    // approval at a time, and when the relay holds as many as it will, a new
+    // one is refused unless the oldest has had its minute: otherwise anyone
+    // could push out the owner's while they type the key.
     async authorize(client, params, res) {
       const id = random();
-      if (approvals.size >= MAX_APPROVALS) approvals.delete(approvals.keys().next().value);
+      for (const [k, a] of approvals) if (a.client.client_id === client.client_id) approvals.delete(k);
+      if (approvals.size >= maxApprovals) {
+        const [oldest, a] = approvals.entries().next().value;
+        if (a.expiresAt - APPROVAL_MS > Date.now() - SETTLED_MS) {
+          throw new TemporarilyUnavailableError('Too many sign-ins are waiting for approval. Try again in a minute.');
+        }
+        approvals.delete(oldest);
+      }
       approvals.set(id, { client, params, expiresAt: Date.now() + APPROVAL_MS, tries: 0 });
       res.redirect(`/approve?request=${id}`);
     },
@@ -160,16 +188,29 @@ function createAuth(home) {
       return issue(client.client_id);
     },
 
-    // Each use of a refresh token replaces it. The old one keeps working for a
-    // couple of minutes, so a reply lost on the way, or two refreshes at once,
-    // do not sign the connector out.
+    // Each use of a refresh token replaces it. For a couple of minutes the old
+    // one still answers, with the same new tokens it gave the first time, so a
+    // reply lost on the way, or several refreshes at once, do not sign the
+    // connector out (and do not multiply its tokens). A replaced token used
+    // after that was copied by someone: everything from that approval is
+    // withdrawn, and the connector has to be approved again.
     async exchangeRefreshToken(client, refreshToken) {
+      const now = Date.now();
       const r = store.refresh[refreshToken];
-      if (!r || r.clientId !== client.client_id || r.generation !== generation || r.expiresAt < Date.now()) {
+      if (!r || r.clientId !== client.client_id || r.generation !== generation || r.expiresAt < now) {
         throw new InvalidGrantError('Unknown or expired refresh token');
       }
-      r.expiresAt = Math.min(r.expiresAt, Date.now() + REFRESH_GRACE_MS);
-      return issue(client.client_id);
+      if (r.retiredAt && now - r.retiredAt > refreshGraceMs) {
+        withdraw(r.family, refreshToken);
+        throw new InvalidGrantError('This refresh token was already replaced. Connect again.');
+      }
+      if (r.retiredAt && replaced.has(refreshToken)) return replaced.get(refreshToken);
+      r.family ||= random(); // tokens from before families were kept
+      r.retiredAt ||= now;
+      const tokens = issue(client.client_id, r.family);
+      replaced.set(refreshToken, tokens);
+      setTimeout(() => replaced.delete(refreshToken), refreshGraceMs).unref();
+      return tokens;
     },
 
     async verifyAccessToken(token) {

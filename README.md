@@ -329,6 +329,10 @@ saved and listed too, with the session's name; they never open a dialog, and
 sessions have no way to open a downloaded file. The last 50 are kept in
 `downloads.json` in the profile.
 
+A page may start a download when you (or the session whose tab it is) just
+acted in the tab, and one more per page load. Any others are stopped and
+listed as blocked, with *Download anyway*.
+
 ## Appearance
 
 Dark by default. *View › Appearance* switches to Light or Match system; the
@@ -383,7 +387,11 @@ For a site that will not work in Loui:
   address to Brave (or, without Brave, the system's default browser).
 - Sites on a list in *File › Settings* (empty to begin with)
   are sent to Brave when one of your tabs opens them, and the tab says so, with
-  a link that takes the site off the list. Claude's tabs don't open them at all,
+  a link that takes the site off the list. That happens when you had a hand in
+  it (you typed the address, or clicked or typed in the tab in the last few
+  seconds); a page that goes there by itself, and any page in a private
+  window, gets a note with a link that sends it to Brave instead. Claude's
+  tabs don't open them at all,
   and a session is told to ask you; Claude never makes Loui open another
   program.
 
@@ -514,7 +522,7 @@ src/main/activity.js  the activity log: what each session did, kept after it end
 src/main/restore.js   your tabs across restarts (tabs.json), reopening closed tabs
 src/main/actions.js   what each tool does
 src/main/link.js      the connection out to the relay
-src/main/rpc.js       local control socket, used by the tests
+src/main/rpc.js       local control socket, used by the tests (off otherwise; `"localSocket": true` in settings.json serves it)
 src/main/chat.js      the Claude panel (Agent SDK)
 src/main/updater.js   updates for installed copies (GitHub Releases)
 src/main/downloads.js downloads: where they are saved, the list, pause and resume

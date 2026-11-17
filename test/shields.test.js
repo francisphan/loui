@@ -62,6 +62,13 @@ test.after(async () => {
   }
 });
 
+test('the stand-in scripts come from the release of the engine that is installed, not a branch', () => {
+  const { RESOURCES } = require('../src/main/shields');
+  const { version } = require('@ghostery/adblocker/package.json');
+  assert.equal(RESOURCES, `https://raw.githubusercontent.com/ghostery/adblocker/v${version}/packages/adblocker/assets/ublock-origin/resources.json`);
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+});
+
 test('the lists are downloaded once and kept in the profile', async () => {
   await open(`${b.base}/second.html`);
   await wait('the lists to be ready', async () => (await shields())?.ready);
