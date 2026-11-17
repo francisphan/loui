@@ -27,7 +27,8 @@ function createRestore({ tabs, file, openWindow, settings = {} }) {
   const pending = new WeakMap(); // tab -> history it was opened with, until the page commits
   let timer = null, last = '', writing = Promise.resolve(), stopped = false;
 
-  const mine = (tab) => (tab.group === YOU || tab.lent) && !tab.private;
+  // offRecord: the page Claude Code's sign-in is done on (main.js), which is not brought back.
+  const mine = (tab) => (tab.group === YOU || tab.lent) && !tab.private && !tab.offRecord;
   // A tab lent to a session sits in the session's window; it belongs to the one it came from.
   const homeOf = (tab) => (tab.lent && tab.home && tabs.windows.includes(tab.home) ? tab.home : tab.window);
 

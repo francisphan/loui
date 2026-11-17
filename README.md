@@ -231,6 +231,36 @@ The **Claude panel** in the window is different: it is your own co-driver and
 works in your tabs. It runs on your Claude Code login through the Agent SDK
 (your subscription, no API key), and has browser tools only.
 
+### Signing in to Claude
+
+The panel has no login of its own: it uses Claude Code's, which is your Claude
+subscription. Loui asks Claude Code whether it is signed in (`claude auth
+status`, through the same Claude Code the panel runs, WSL included) when the
+panel or Settings opens, and keeps the answer in memory for a few minutes.
+
+- **Not signed in** (or the login has expired): the message box gives way to a
+  card with **Sign in** and *Check again*. *Sign in* runs Claude Code's own
+  `claude auth login`. Claude Code opens your system's browser, and the card
+  waits: *Finish signing in in your browser…*, with *Cancel*. *Open the
+  sign-in page here* opens the page in a new tab of your own instead; that
+  page shows a code, which you paste into the card. When Claude Code is done
+  Loui asks again, and the message box is back, or the card says why not.
+- **Not known** (an older Claude Code without that command, or no answer in
+  time): the message box stays. If a message is then turned away for want of
+  a login, the card appears with what Claude Code said.
+- **Claude Code not installed**: the card says so, with where to get it.
+- Signed in with an API key or a cloud provider instead of a subscription:
+  nothing is in the way; the panel's name says so when you point at it.
+- *Settings › Claude › Claude account* shows the same, with *Sign in* and
+  *Check again*.
+
+No API key is involved, and Loui never reads Claude Code's credentials: it
+only runs those two commands, with the API-key variables removed from their
+environment. Nothing of the account is written down (not in `settings.json`,
+not in the sessions' log), and the sign-in page is kept out of history and of
+the tabs brought back. No tool is about any of this: a Claude session cannot
+start a sign-in, see one, or read its address or code.
+
 **Point** (`Ctrl+Shift+C`, or right-click an element) hands an element to
 Claude with its selector, text, HTML and a cropped screenshot.
 
@@ -758,7 +788,7 @@ src/main/restore.js   your tabs across restarts (tabs.json), reopening closed ta
 src/main/actions.js   what each tool does
 src/main/link.js      the connection out to the relay
 src/main/rpc.js       local control socket, used by the tests (off otherwise; `"localSocket": true` in settings.json serves it)
-src/main/chat.js      the Claude panel (Agent SDK)
+src/main/chat.js      the Claude panel (Agent SDK), and whether Claude Code is signed in
 src/main/updater.js   updates for installed copies (GitHub Releases)
 src/main/downloads.js downloads: where they are saved, the list, pause and resume
 src/main/permissions.js  camera, microphone, location, notifications, screen: asking and remembering
@@ -788,6 +818,7 @@ src/page/passwords.js runs in your own pages only: notices sign-ins, fills on re
 src/page/reader.js    with Readability, in an isolated world: finds the article, cleans it, as text
 src/ui/               tab strip, toolbar, panel
 src/ui/voice.js       the panel's speaker and microphone: reading replies aloud, recording, putting the words in the box
+src/ui/account.js     the panel's account card: sign in to Claude, check again, what to install
 src/ui/voice-page.js  the hidden page: Whisper through transformers.js, served from loui-voice://app/
 relay/                the relay and its sign-in
 test/                 end-to-end tests

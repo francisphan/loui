@@ -231,6 +231,7 @@ const currentState = (w = tabs.window()) => {
     ...reader.state(),
     ...certs.state(),
     ...voice.state(w),
+    claude: chat.account(), // whether Claude Code is signed in, for the panel
   };
 };
 
@@ -481,6 +482,17 @@ function start() {
     describePick: actions.describePick,
     cwd: paths.home,
     emit: (event) => broadcast('chat', event, false),
+    // The page Claude Code's sign-in is done on: a tab of the user's own, in the
+    // window that asked (never a private one), kept out of history and of the
+    // tabs to bring back.
+    open: (url, w) => {
+      const home = w && !w.private && tabs.windows.includes(w) ? w : tabs.normalWindow();
+      if (!home) return;
+      const tab = tabs.create(url, { window: home, show: true });
+      tab.offRecord = true;
+      tabs.byUser(tab);
+    },
+    changed: pushState,
   });
 
   // Reading replies aloud and dictation, for the Claude panel of normal windows.
@@ -537,7 +549,7 @@ function start() {
     settings, save: saveSettings, tabs, home: paths.home, lockToApp, setTheme, setTabStrip, tabStrip,
     refreshMenu: () => Menu.setApplicationMenu(appMenu()),
     search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-    guardrails, activity, reader, updater, defaultBrowser, startPage,
+    guardrails, activity, reader, updater, defaultBrowser, startPage, chat,
   });
 
   tabs.on('change', pushState);
@@ -662,6 +674,8 @@ const handlers = {
   'chat:send': (message) => { chat.send(message); },
   'chat:stop': () => chat.stop(),
   'chat:reset': () => chat.reset(),
+  // The panel's account card (src/ui/account.js): look, check, sign-in, open, code, cancel.
+  claude: ({ do: what, code } = {}) => chat.claude(what, { code, window: tabs.window() }),
   'find:open': () => find.show(),
   // Closed by the user: the page they were reading takes the keyboard back.
   'find:close': () => { find.close(); active()?.wc.focus(); },

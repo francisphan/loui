@@ -21,6 +21,11 @@ const MODEL = process.env.LOUI_MODEL || 'claude-opus-5-5';
 // Returns {} (use the SDK's own), the options that start another one, or null.
 let launcher; // cached once found; a miss is looked up again next time
 async function claudeLauncher() {
+  // The tests name a stand-in for Claude Code (test/fixture/claude); a name
+  // that is not there reads as Claude Code not being installed.
+  if (process.env.LOUI_TEST && process.env.LOUI_CLAUDE) {
+    return fs.existsSync(process.env.LOUI_CLAUDE) ? { pathToClaudeCodeExecutable: process.env.LOUI_CLAUDE } : null;
+  }
   if (launcher) return launcher;
   try {
     require.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`);
@@ -68,6 +73,48 @@ async function wslClaude() {
   }
 }
 
+// Starts Claude Code for one of its own commands (auth status, auth login)
+// the way the panel's messages start it: the same program, WSL included, and
+// the same environment.
+function startClaude(claude, args) {
+  const env = subscriptionEnv();
+  if (claude.spawnClaudeCodeProcess) return claude.spawnClaudeCodeProcess({ args, env });
+  const own = () => path.join(
+    path.dirname(require.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`)),
+    process.platform === 'win32' ? 'claude.exe' : 'claude',
+  );
+  return spawn(claude.pathToClaudeCodeExecutable || own(), args, { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
+// What `claude auth status --json` printed -> { state, kind, detail }, or
+// null if it is not that (an older Claude Code has no such command).
+// kind: 'subscription', 'api-key' or 'cloud'. detail: the account's email
+// if Claude Code prints one (shown, never kept), or the cloud provider.
+function readStatus(text) {
+  let s;
+  try { s = JSON.parse(text); } catch { return null; }
+  if (typeof s?.loggedIn !== 'boolean') return null;
+  if (!s.loggedIn) return { state: 'signed-out', kind: null, detail: '' };
+  const kind = s.authMethod === 'third_party' ? 'cloud' : /^api_key/.test(s.authMethod) ? 'api-key' : 'subscription';
+  const detail = kind === 'cloud' ? s.apiProvider : kind === 'subscription' ? s.email : '';
+  return { state: 'ready', kind, detail: typeof detail === 'string' ? detail.slice(0, 200) : '' };
+}
+
+// How Claude Code says a message failed for want of a working login: the
+// kinds it marks its own error replies with (SDKAssistantMessageError), and
+// the wording of those replies, for an error that arrives as text alone.
+const AUTH_ERRORS = new Set(['authentication_failed', 'oauth_org_not_allowed', 'account_on_hold', 'billing_error']);
+const AUTH_WORDS = /not logged in|\/login\b|claude auth login|failed to authenticate|authentication_error|authentication required|invalid api key|invalid authentication credentials|oauth token (has expired|revoked)|login (expired|reached its time limit)|does not have access to claude|organization has (been )?disabled|credit balance is too low/i;
+// The first line of an error, without the advice that is for a terminal.
+const firstLine = (text) => String(text || '').split('\n').find((l) => l.trim())?.trim()
+  .replace(/\s*·\s*Please run \/login.*$/i, '').slice(0, 300) || '';
+// Colour codes and terminal hyperlinks, which Claude Code wraps addresses in.
+const plain = (text) => text.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]/g, '');
+
+const STATUS_MS = 20000; // how long the status command may take (WSL has to start)
+const FRESH_MS = 5 * 60000; // how long an answer is good for
+const LOGIN_MS = 10 * 60000; // how long a sign-in may stay unfinished
+
 function subscriptionEnv() {
   const env = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: 'loui/0.1.0' };
   for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']) delete env[name];
@@ -93,7 +140,9 @@ entering credentials.
 You are shown in a narrow side panel. Answer in short plain prose. Use a list only when the \
 content is a list. Do not narrate each step; the user is watching the page.`;
 
-function createChat({ run, tabs, picker, describePick, cwd, emit }) {
+// open(url, window): shows a page in a new tab of the user's own. changed():
+// the account's state is different, so the windows are told.
+function createChat({ run, tabs, picker, describePick, cwd, emit, open, changed }) {
   let sessionId = null;
   let active = null; // the running query
   let sdk = null;
@@ -115,8 +164,10 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
   async function begin({ text, pickIds }) {
     const claude = await claudeLauncher();
     if (claude === null) {
+      // The panel's card says what to install (see the account, below).
       emit({ type: 'user', text, picks: [] });
-      emit({ type: 'error', text: 'This panel runs on Claude Code, which is not installed on this computer (on Windows or in WSL). Install Claude Code and sign in, then try again. Other Claude sessions can still use this browser.' });
+      account = { state: 'not-installed', kind: null, detail: '' };
+      changed();
       return emit({ type: 'done' });
     }
     sdk ??= await import('@anthropic-ai/claude-agent-sdk');
@@ -145,6 +196,12 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
     });
 
     emit({ type: 'start' });
+    let refused = null; // what Claude Code said, if it turned the message away for want of a login
+    // An error that is about the login goes to the sign-in card, not into the conversation.
+    const fail = (text) => {
+      if (refused === null && !AUTH_WORDS.test(text)) return emit({ type: 'error', text });
+      signedOut(refused || text);
+    };
     try {
       active = query({
         prompt,
@@ -171,16 +228,20 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
           const e = m.event;
           if (e.type === 'content_block_start' && e.content_block.type === 'text') emit({ type: 'text-start' });
           if (e.type === 'content_block_delta' && e.delta.type === 'text_delta') emit({ type: 'text', text: e.delta.text });
+        } else if (m.type === 'assistant' && AUTH_ERRORS.has(m.error)) {
+          refused = m.message?.content?.find?.((c) => c.type === 'text')?.text || 'Claude Code is not signed in.';
         } else if (m.type === 'result' && stopped) {
           // Stopped by the user: what the SDK reports about the interrupted turn is not an error.
         } else if (m.type === 'result' && m.subtype !== 'success') {
-          emit({ type: 'error', text: (m.errors || []).join('\n') || `Claude stopped early (${m.subtype}).` });
+          fail((m.errors || []).join('\n') || `Claude stopped early (${m.subtype}).`);
         } else if (m.type === 'result' && m.is_error) {
-          emit({ type: 'error', text: m.result || 'Claude could not answer.' });
+          fail(m.result || 'Claude could not answer.');
+        } else if (m.type === 'result') {
+          answered();
         }
       }
     } catch (e) {
-      if (!stopped) emit({ type: 'error', text: e.message || String(e) });
+      if (!stopped) fail(e.message || String(e));
     } finally {
       active = null;
       running = null;
@@ -220,7 +281,187 @@ function createChat({ run, tabs, picker, describePick, cwd, emit }) {
     return { onProcessSpawned: (pid) => { running = { pid, wsl: false }; } };
   }
 
-  return { send, stop, reset, busy: () => !!active, process: () => running };
+  // ── the account ───────────────────────────────────────────────────────────
+  // Whether Claude Code is signed in, asked of Claude Code itself (`claude
+  // auth status`): Loui never reads its login, and keeps nothing of the
+  // answer but what is in memory here. Only the window chrome and the
+  // Settings window are told; no tool and no session can ask, start a
+  // sign-in, or see one.
+  let account = { state: 'unknown', kind: null, detail: '' };
+  let checkedAt = 0;
+  let checking = null;
+  let stale = false;
+  let trouble = ''; // a message failed for want of a login: its first line, until the next look by hand or sign-in
+  let failed = ''; // why the last sign-in did not work
+  let login = null; // the sign-in under way: { child, step, url, opened, code, ... }
+
+  // The tests ask and sign in only their stand-in (LOUI_CLAUDE), never this
+  // machine's Claude Code: without one named, the account stays not known.
+  const untested = !!process.env.LOUI_TEST && !process.env.LOUI_CLAUDE;
+
+  async function status() {
+    if (untested) return { state: 'unknown', kind: null, detail: '' };
+    const claude = await claudeLauncher();
+    if (claude === null) return { state: 'not-installed', kind: null, detail: '' };
+    const text = await new Promise((done) => {
+      let out = '';
+      let child;
+      try { child = startClaude(claude, ['auth', 'status', '--json']); } catch { return done(''); }
+      const timer = setTimeout(() => { child.kill(); done(''); }, STATUS_MS);
+      child.stdout.on('data', (chunk) => { if (out.length < 65536) out += chunk; });
+      child.stderr.resume();
+      child.stdin.on('error', () => {});
+      child.stdin.end();
+      child.once('error', () => { clearTimeout(timer); done(''); });
+      child.once('close', () => { clearTimeout(timer); done(out); }); // it exits with 1 when signed out
+    });
+    return readStatus(text) || { state: 'unknown', kind: null, detail: '' };
+  }
+
+  // Asks again if the answer is old (or force). clear: the user asked, or
+  // signed in, so what an earlier failure said no longer stands.
+  function look({ force = false, clear = false } = {}) {
+    if (clear) { trouble = ''; failed = ''; }
+    if (checking && force) stale = true; // the answer on its way may be from before
+    else if (!checking && (force || Date.now() - checkedAt > FRESH_MS)) {
+      checking = (async () => {
+        do {
+          stale = false;
+          account = await status();
+          checkedAt = Date.now();
+        } while (stale);
+      })().catch(() => {}).finally(() => { checking = null; changed(); });
+    }
+    changed();
+    return checking || Promise.resolve();
+  }
+
+  function signedOut(text) {
+    trouble = firstLine(text) || 'Claude Code is not signed in.';
+    look({ force: true });
+  }
+  // A message was answered, so the login works, whatever was thought before.
+  function answered() {
+    if (trouble || account.state === 'signed-out') look({ force: true, clear: true });
+  }
+
+  // What the windows draw. Nothing of the sign-in itself: not its address, not its code.
+  function accountState() {
+    const now = trouble && account.state !== 'not-installed' ? { ...account, state: 'signed-out', detail: trouble } : account;
+    return {
+      ...now,
+      checking: !!checking,
+      failed,
+      // step: 'starting', 'browser' (Claude Code opened the system's browser),
+      // 'page' (Loui opened the page in a tab), 'finishing'.
+      // canOpen: the page can be opened here instead. code: it wants a code pasted back.
+      signIn: login && {
+        step: login.step, canOpen: !!login.url && !login.opened, code: login.opened && login.code, problem: login.problem,
+      },
+    };
+  }
+
+  // Claude Code's own sign-in (`claude auth login`), followed from here. It
+  // opens the system's browser itself and prints the address of a page that
+  // shows a code instead, to paste back: that page can be opened in a tab of
+  // the user's. Without a browser of its own to open, the page opens here
+  // straight away. What it prints stays in memory and goes nowhere else.
+  async function signIn(window) {
+    if (login || untested) return;
+    const mine = login = { child: null, step: 'starting', url: null, opened: false, code: false, problem: '', out: '', err: '', window };
+    failed = '';
+    changed();
+    const claude = await claudeLauncher();
+    if (login !== mine) return; // cancelled meanwhile
+    try {
+      if (claude === null) throw new Error('Claude Code is not installed.');
+      mine.child = startClaude(claude, ['auth', 'login', '--claudeai']);
+    } catch (e) {
+      login = null;
+      failed = firstLine(e.message);
+      return look({ force: true });
+    }
+    const { child } = mine;
+    mine.timer = setTimeout(() => { mine.gaveUp = true; child.kill(); }, LOGIN_MS);
+    child.stdin.on('error', () => {});
+    child.stdout.on('data', (chunk) => {
+      mine.out = (mine.out + chunk).slice(-20000);
+      // The address, once the whole of it has arrived.
+      const url = mine.out.match(/https?:\/\/[^\s\x00-\x1f\x7f]+(?=[\s\x07\x1b])/)?.[0];
+      const said = plain(mine.out).replace(/https?:\/\/\S+/g, '');
+      if (url && !mine.url && allowed(url)) mine.url = url;
+      mine.code = /\bcode\b/i.test(said);
+      if (mine.step === 'starting' && /\bopening (\w+ )*browser\b/i.test(said)) mine.step = 'browser';
+      else if (mine.step === 'starting' && mine.url) openPage();
+      changed();
+    });
+    child.stderr.on('data', (chunk) => {
+      mine.err = (mine.err + chunk).slice(-4000);
+      // After a code was sent: what was wrong with it (it asks again).
+      if (mine.step === 'finishing') {
+        mine.problem = firstLine(plain(mine.err).split('\n').filter((l) => l.trim()).pop());
+        mine.step = 'page';
+        changed();
+      }
+    });
+    let over = false;
+    const end = (code) => {
+      if (over) return;
+      over = true;
+      clearTimeout(mine.timer);
+      if (login !== mine) return;
+      mine.step = 'finishing';
+      mine.ended = true;
+      const lines = plain(mine.err).split('\n').map((l) => l.trim()).filter(Boolean);
+      const why = mine.cancelled ? '' : mine.gaveUp ? 'The sign-in was not finished in time.'
+        : code === 0 ? '' : firstLine((lines.find((l) => /^couldn't log in/i.test(l)) || lines.pop() || 'The sign-in did not finish.').replace(/^couldn't log in:\s*/i, ''));
+      look({ force: true, clear: true }).then(() => {
+        if (login === mine) login = null;
+        failed = why || (code === 0 && account.state === 'signed-out' ? 'Claude Code finished, but is still not signed in.' : '');
+        changed();
+      });
+    };
+    child.once('error', () => end(null));
+    child.once('close', end);
+  }
+  // Only a secure address, as Claude's are (the tests' stand-in page is on this machine).
+  const allowed = (url) => /^https:/i.test(url) || (!!process.env.LOUI_TEST && /^http:\/\/127\.0\.0\.1[:/]/.test(url));
+
+  function openPage() {
+    if (!login?.url || login.opened || login.ended) return;
+    login.opened = true;
+    login.step = 'page';
+    open(login.url, login.window);
+    changed();
+  }
+  // The code the page showed, typed into Claude Code as it would be in a terminal.
+  function giveCode(code) {
+    const text = String(code || '').replace(/\s+/g, '');
+    if (!login?.opened || login.ended || !text) return;
+    login.problem = '';
+    login.step = 'finishing';
+    login.child.stdin.write(text + '\n');
+    changed();
+  }
+  function cancel() {
+    if (!login || login.ended) return;
+    login.cancelled = true;
+    if (login.child) login.child.kill();
+    else { login = null; changed(); } // before Claude Code was started
+  }
+  process.once('exit', () => login?.child?.kill());
+
+  // What a window's chrome, or the Settings window, asks about the account.
+  function claude(what, { code, window } = {}) {
+    if (what === 'look') return look();
+    if (what === 'check') return look({ force: true, clear: true });
+    if (what === 'sign-in') signIn(window);
+    else if (what === 'open') openPage();
+    else if (what === 'code') giveCode(code);
+    else if (what === 'cancel') cancel();
+  }
+
+  return { send, stop, reset, busy: () => !!active, process: () => running, account: accountState, claude };
 }
 
 module.exports = { createChat };
