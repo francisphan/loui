@@ -25,6 +25,7 @@ const { createShields } = require('./shields');
 const { createSearch } = require('./search');
 const { createBrave } = require('./brave');
 const { createPrint } = require('./print');
+const { createBookmarks } = require('./bookmarks');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -62,6 +63,7 @@ function setTheme(theme) {
 let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
 let shields;
 let search, brave, print;
+let bookmarks;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -94,6 +96,7 @@ const currentState = () => ({
   ...shields.state(),
   ...search.state(),
   ...brave.state(),
+  ...bookmarks.state(),
 });
 
 function createWindow() {
@@ -129,6 +132,8 @@ function createWindow() {
   history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => send('history:changed') });
   suggest = createSuggest({ win, tabs, send, sources: [history] });
   lockToApp(suggest.webContents);
+  bookmarks = createBookmarks({ file: path.join(paths.home, 'bookmarks.json'), win, tabs, ses, send, changed: pushState });
+  suggest.add(bookmarks);
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState, refuse: brave.refuse });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
@@ -235,6 +240,7 @@ const handlers = {
   'brave:open': () => brave.open(active()?.url),
   'brave:add': (site) => brave.add(site),
   'brave:remove': (site) => brave.remove(site),
+  bookmarks: (request) => bookmarks.handle(request),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -253,6 +259,7 @@ async function testHook({ ui, arg }) {
   if (brave.probes[ui]) return brave.probes[ui](arg);
   if (print.probes[ui]) return print.probes[ui](arg);
   if (ui === 'to-url') return toUrl(arg);
+  if (bookmarks.probes[ui]) return bookmarks.probes[ui](arg);
   // A page trying to take over the window chrome, as a dropped link would.
   if (ui === 'chrome-navigate') {
     await win.webContents.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});
@@ -298,6 +305,7 @@ function appMenu() {
         { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
         { label: 'Site permissions…', click: () => send('show-permissions') },
         { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { win.webContents.focus(); send('show-history'); } },
+        ...bookmarks.menuItems.file(),
         { type: 'separator' },
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: handlers.print },
         { label: 'Save as PDF…', click: handlers['print:save-pdf'] },
@@ -322,6 +330,7 @@ function appMenu() {
         { label: 'Next tab', accelerator: 'Ctrl+Tab', click: () => cycle(1) },
         { label: 'Previous tab', accelerator: 'Ctrl+Shift+Tab', click: () => cycle(-1) },
         { type: 'separator' },
+        ...bookmarks.menuItems.view(),
         { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
         { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
         { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
@@ -375,7 +384,7 @@ function zoom(step) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('before-quit', () => history?.flush());
+  app.on('before-quit', () => { history?.flush(); bookmarks?.flush(); });
   app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();
     win.focus();
@@ -383,6 +392,6 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     for (const [name, fn] of Object.entries(handlers)) ipcMain.on(name, (_e, arg) => fn(arg));
     createWindow();
-    Menu.setApplicationMenu(appMenu()); // after the window: the File menu names the user's other browser
+    Menu.setApplicationMenu(appMenu()); // after the window: some items come from modules it creates
   });
 }

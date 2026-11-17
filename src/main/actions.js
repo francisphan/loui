@@ -134,6 +134,14 @@ function createActions({ tabs, sessions, changed, refuse = () => null }) {
 
   function key(tab, chord) {
     const { keyCode, modifiers } = parseKey(chord);
+    // A key Claude presses is for the page. A shortcut the page leaves alone
+    // would otherwise reach Loui's menu (Ctrl+D, Ctrl+W, ...) and act on the
+    // tab the user has on screen. The page answers a moment later, so the
+    // menu ignores this tab for a second.
+    const wc = tab.wc; // the tab may sleep (and lose its page) within the second
+    wc.setIgnoreMenuShortcuts(true);
+    clearTimeout(tab.keysOwn);
+    tab.keysOwn = setTimeout(() => { if (!wc.isDestroyed()) wc.setIgnoreMenuShortcuts(false); }, 1000);
     tab.wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
     // Text keys and Enter only take effect through a char event.
     const typed = keyCode === 'Enter' ? '\r' : keyCode === 'Space' ? ' ' : keyCode.length === 1 ? keyCode : null;

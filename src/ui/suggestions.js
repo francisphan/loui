@@ -15,7 +15,7 @@ const plain = (url) => url.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '
 
 loui.on('suggest', ({ items, chosen }) => {
   list.replaceChildren(...items.map((s, i) => {
-    const row = el('div', 'suggestion' + (i === chosen ? ' chosen' : ''), '');
+    const row = el('div', 'suggestion' + (i === chosen ? ' chosen' : '') + (s.source === 'bookmark' ? ' bookmarked' : ''), '');
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', i === chosen);
     row.dataset.url = s.url;
