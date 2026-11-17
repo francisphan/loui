@@ -14,6 +14,7 @@
 <body>
   <header id="bar">
     <div id="tabrow">
+      <button id="sidebar-toggle" class="icon" type="button" hidden></button>
       <div id="tabs" role="tablist" aria-label="Tabs"></div>
       <button id="newtab" class="icon" type="button" title="New tab (Ctrl+T)" aria-label="New tab"></button>
       <div id="helm" role="status" hidden>
@@ -90,6 +91,9 @@
     </div>
   </header>
 
+  <!-- Vertical tabs (View › Vertical tabs): ui.js moves #tabs in here. -->
+  <nav id="sidebar" aria-label="Tabs sidebar" hidden></nav>
+
   <main id="stage"></main>
 
   <aside id="panel" aria-label="Claude">
@@ -137,6 +141,7 @@
           <button type="submit" class="quiet">Use this address</button>
         </div>
       </form>
+      <label class="check"><input id="tabs-vertical" type="checkbox"> Show tabs in a sidebar on the left</label>
       <h3 id="elsewhere-title"></h3>
       <p>Loui sends these sites to your other browser instead of opening them, for sites like Google sign-in that refuse browsers like Loui. Claude's tabs never open them.</p>
       <ul id="elsewhere-list"></ul>

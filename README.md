@@ -106,10 +106,12 @@ copy this repository there, run `npm install --omit=dev`, start
   what you pointed at in them. This is about tabs, not accounts: all tabs share
   one set of logins, so a session can open any site you are signed in to in a
   tab of its own. Treat a session's access as your access.
-- **Handing a tab over.** Right-click a tab and choose *Give to …*, or a
-  session can ask (`request_tab`) and you answer in the tab row. A tab you
-  handed over comes back to you when the session ends; *Take back* does it
-  sooner.
+- **Handing a tab over.** Drag one of your tabs onto a session's group, or
+  right-click it and choose *Give to …*, or a session can ask (`request_tab`)
+  and you answer in the tab row. A tab you handed over comes back to you when
+  the session ends; dragging it back among your tabs, or *Take back*, does it
+  sooner. A session's tabs can be reordered within its group, never moved to
+  another session.
 - **Take over** pauses the session working in the group on screen: tools that
   change the page are refused until you let it continue. Other groups carry on.
 - **When a session ends, its group closes.** A session ends when its app says
@@ -128,6 +130,18 @@ copy this repository there, run `npm install --omit=dev`, start
   `"sleepAfterMinutes"` in `settings.json` in the profile (0 turns it off).
 - **Background speed.** Your tabs out of sight are throttled like in any
   browser. A session's tabs run at full speed while it works in them.
+- **Arranging tabs.** Drag a tab to reorder it, or move the tab on screen
+  with `Ctrl+Shift+PageUp` / `Ctrl+Shift+PageDown`. Right-click a tab and
+  choose *Pin tab* (or drop it among the pinned ones): pinned tabs are icons
+  at the start of your tabs, come back after a restart already loaded, never
+  sleep, and `Ctrl+W` leaves them open (close one from its menu).
+- **Vertical tabs.** *View › Vertical tabs* (or *File › Settings*) moves the
+  tabs to a sidebar on the left: pinned tabs as a grid of icons, your tabs,
+  then each session's group with what it is doing. The button at the top
+  left collapses it to icons; a collapsed sidebar opens while the pointer
+  rests on it. The page makes room rather than being covered, since nothing
+  can be drawn over a page. Kept in `settings.json` (`"verticalTabs"`,
+  `"sidebarCollapsed"`).
 
 The **Claude panel** in the window is different: it is your own co-driver and
 works in your tabs. It runs on your Claude Code login through the Agent SDK
@@ -339,6 +353,5 @@ break:
 ## Not here yet
 
 - iPhone and iPad app (needs an Apple Developer account and a Mac to build).
-- Dragging tabs between groups.
 - Password manager,
   extensions. Signing in to Google in Loui (see *Search, printing, and Brave*).

@@ -99,13 +99,15 @@ class Tabs extends EventEmitter {
   // user is watching is shown, and one opened elsewhere stays in the background.
   // device and history: what a restored tab had (see restore.js). asleep: a
   // restored tab with history starts asleep unless shown, and loads when woken.
-  create(url, { group = YOU, show, device, history, asleep = false } = {}) {
+  // pinned: only for the user's own tabs (see pin()).
+  create(url, { group = YOU, show, device, history, asleep = false, pinned = false } = {}) {
     const tab = {
       id: ++this.seq, view: null, wc: null, group, lent: false, title: '', url: '', favicon: null,
       loading: false, console: [], network: [], pointer: null, device: null, shotScale: 1,
-      asleep: false, history: null, seenAt: Date.now(),
+      asleep: false, history: null, seenAt: Date.now(), pinned: pinned && group === YOU,
     };
     this.list.push(tab);
+    this.tidy(); // a new tab goes at the end of its group
     const g = this.group(group);
     const watching = this.active()?.group === group;
     if (!g.current) g.current = tab.id;
@@ -390,18 +392,81 @@ class Tabs extends EventEmitter {
   }
 
   // lent: the user handed this tab to a session, so it returns to them when the session ends.
-  move(id, groupId, { lent = false } = {}) {
+  // at: where among the group's tabs it goes (see reorder()); the end if left out.
+  move(id, groupId, { lent = false, at = Infinity } = {}) {
     const tab = this.get(id);
     const from = this.group(tab?.group);
     const to = this.group(groupId);
     if (!tab || !to || from === to) return;
     tab.group = groupId;
     tab.lent = lent;
+    tab.pinned = false; // pinning is for the user's own tabs, and one coming back lands among the others
     if (from.current === id) from.current = this.in(from.id)[0]?.id || null;
     if (!to.current || id === this.activeId) to.current = id;
+    this.reorder(id, at);
     if (!this.in(YOU).length) this.create('', { show: false });
     this.restAll(); // in a session's group a tab runs at full speed; back with the user it rests
     this.emit('change');
+  }
+
+  // Keeps each group's tabs together, in the order of the groups, with the
+  // user's pinned tabs first, so the list reads as the tab strip does (Ctrl+Tab
+  // and restore.js follow the list). The sort is stable: order within a group stays.
+  tidy() {
+    const rank = (t) => this.groups.findIndex((g) => g.id === t.group) * 2 + (t.pinned ? 0 : 1);
+    this.list.sort((a, b) => rank(a) - rank(b));
+  }
+
+  // Puts a tab at a place among its own group's tabs: index counts the
+  // group's other tabs before it. Pinned tabs stay ahead of the others, so the
+  // index is kept to their side of that line.
+  reorder(id, index) {
+    const tab = this.get(id);
+    if (!tab) return;
+    const peers = this.in(tab.group).filter((t) => t !== tab);
+    const pins = peers.filter((t) => t.pinned).length;
+    const at = Math.round(Math.max(tab.pinned ? 0 : pins, Math.min(tab.pinned ? pins : peers.length, Number(index) || 0)));
+    this.list.splice(this.list.indexOf(tab), 1);
+    const before = peers[at];
+    if (before) this.list.splice(this.list.indexOf(before), 0, tab);
+    else if (peers.length) this.list.splice(this.list.indexOf(peers[peers.length - 1]) + 1, 0, tab);
+    else this.list.push(tab);
+    this.tidy();
+    this.emit('change');
+  }
+
+  // One place left (-1) or right (+1) within its group, from the keyboard.
+  nudge(id, step) {
+    const tab = this.get(id);
+    if (!tab) return;
+    const peers = this.in(tab.group);
+    this.reorder(id, peers.indexOf(tab) + step);
+  }
+
+  // A tab dropped in the tab strip. Within its group it is reordered. The
+  // user's tab dropped on a session's group is handed to it, and a session's
+  // tab dropped among the user's is taken back, as the tab menu's "Give to"
+  // and "Take back" do. A session's tab never goes to another session.
+  // pinned: dropped among the user's pinned tabs (true) or the others (false).
+  drop(id, groupId, index, { pinned } = {}) {
+    const tab = this.get(id);
+    if (!tab || !this.group(groupId)) return;
+    if (tab.group !== groupId) {
+      if (groupId === YOU) this.move(id, YOU);
+      else if (tab.group === YOU) this.move(id, groupId, { lent: true });
+      else return;
+    }
+    if (groupId === YOU && typeof pinned === 'boolean') tab.pinned = pinned;
+    this.reorder(id, index);
+  }
+
+  // Pinned tabs are the user's: small, first, never put to sleep, kept across restarts.
+  pin(id, on) {
+    const tab = this.get(id);
+    if (!tab || tab.group !== YOU || tab.pinned === !!on) return;
+    tab.pinned = !!on;
+    // Pinning puts it at the end of the pinned tabs, unpinning at the start of the rest.
+    this.reorder(id, this.in(YOU).filter((t) => t.pinned && t !== tab).length);
   }
 
   // The window tells us where the page area is; each tab fills it, or sits
@@ -513,6 +578,7 @@ class Tabs extends EventEmitter {
     const others = this.groups.filter((g) => g.id !== YOU && g.id !== tab.group);
     const items = [];
     if (tab.group === YOU) {
+      items.push({ label: tab.pinned ? 'Unpin tab' : 'Pin tab', click: () => this.pin(id, !tab.pinned) });
       for (const g of others) {
         items.push({ label: `Give to ${g.label}`, click: () => this.move(id, g.id, { lent: true }) });
       }
@@ -545,6 +611,7 @@ class Tabs extends EventEmitter {
       canGoForward: nav(t).canGoForward(),
       device: t.device ? t.device.label || `${t.device.width}×${t.device.height}` : null,
       asleep: !!t.asleep,
+      pinned: !!t.pinned,
     }));
   }
 }

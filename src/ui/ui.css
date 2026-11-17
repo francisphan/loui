@@ -118,6 +118,7 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
   min-width: 40px;
   height: 31px;
   box-sizing: border-box;
+  position: relative; /* for the drop bar */
   padding: 0 5px 0 10px;
   border-radius: 7px 7px 0 0;
   color: var(--ink-2);
@@ -147,6 +148,121 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; strok
 .tab:hover .close, .tab.active .close, .tab .close:focus-visible { opacity: 1; }
 .tab .close:hover { background: var(--shoal); }
 #newtab { align-self: center; margin-top: 4px; }
+
+/* The user's tabs, pinned ones first. Along the top these wrappers do not
+   draw; they only mark where a dragged tab can land (see ui.js). */
+.pins, .yours { display: contents; }
+.tab.pinned { flex: none; justify-content: center; width: 38px; min-width: 0; padding: 0; }
+.group-status { display: none; } /* along the top, the helm says what a session is doing */
+
+/* Dragging a tab: a bar shows where it lands, in magenta when it would go to
+   a Claude session, which is then washed in magenta too. */
+.tab.dragged { opacity: .45; }
+.tab.drop-before::after, .tab.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--focus);
+  pointer-events: none;
+}
+.tab.drop-before::after { left: -2px; }
+.tab.drop-after::after { right: -2px; }
+.drop-into .tab.drop-before::after, .drop-into .tab.drop-after::after { background: var(--claude); }
+.group.drop-into { background: var(--claude-wash); }
+
+/* ── vertical tabs ───────────────────────────────────────────────────────── */
+/* The sidebar sits left of the page, under the toolbar, and the page area
+   (#stage) gives it room: the page is a native view that nothing can be
+   drawn over. Collapsed it shows icons only, and opens while the pointer
+   rests on it. There is no animation: each step would resize the page. */
+body.vertical { --side-w: 244px; }
+body.vertical.sidebar-collapsed:not(.sidebar-peek) { --side-w: 52px; }
+body.vertical #stage { margin-left: var(--side-w); }
+body.vertical #newtab { display: none; }
+#sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  display: flex;
+  flex-direction: column;
+  width: var(--side-w);
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 6px 6px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-shadow: inset -1px 0 0 var(--rule);
+  background: var(--water);
+}
+#sidebar[hidden] { display: none; }
+/* Its toggle sits in the tab row above it, which along the top holds the tabs. */
+#sidebar-toggle { align-self: center; margin: 4px 0 0 -2px; }
+#sidebar-toggle[hidden] { display: none; }
+#sidebar #tabs { flex-direction: column; align-items: stretch; gap: 1px; }
+#sidebar .pins {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 4px;
+  margin-bottom: 5px;
+  padding-bottom: 6px;
+  box-shadow: inset 0 -1px 0 var(--rule);
+}
+#sidebar .pins:empty { display: none; }
+#sidebar .yours { display: flex; flex-direction: column; gap: 1px; }
+#sidebar .tab { width: auto; height: 32px; border-radius: 7px; padding: 0 4px 0 10px; }
+#sidebar .tab.pinned { height: 34px; padding: 0; background: color-mix(in srgb, var(--paper) 45%, transparent); }
+#sidebar .tab.pinned.active { background: var(--paper); }
+.side-new {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.side-new svg { flex: none; }
+.side-new:hover { background: var(--shoal); color: var(--ink); }
+#sidebar .group {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  margin: 10px 0 0;
+  padding-left: 4px;
+  border-radius: 0 7px 7px 0;
+  box-shadow: inset 2px 0 0 var(--claude);
+}
+#sidebar .group-tag { gap: 6px; height: 28px; padding: 0 0 0 6px; }
+#sidebar .group-name { flex: 0 1 auto; min-width: 0; }
+#sidebar .group-status {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 400;
+}
+#sidebar .group.busy .group-status { font-style: italic; } /* in motion */
+#sidebar .group.paused .group-status { color: var(--ink-2); }
+/* In a list the drop bar runs across, between rows; the pinned icons still flow in rows. */
+#sidebar .tab.drop-before::after, #sidebar .tab.drop-after::after { inset: auto 6px; width: auto; height: 2px; }
+#sidebar .tab.drop-before::after { top: -2px; }
+#sidebar .tab.drop-after::after { bottom: -2px; }
+#sidebar .pins .tab.drop-before::after, #sidebar .pins .tab.drop-after::after { inset: 5px auto; width: 2px; height: auto; }
+#sidebar .pins .tab.drop-before::after { left: -3px; }
+#sidebar .pins .tab.drop-after::after { right: -3px; }
+body.sidebar-collapsed:not(.sidebar-peek) #sidebar .tab,
+body.sidebar-collapsed:not(.sidebar-peek) .side-new { justify-content: center; padding: 0; }
+body.sidebar-collapsed:not(.sidebar-peek) #sidebar :is(.tab .title, .tab .close, .side-new .title, .group-tag) { display: none; }
+body.sidebar-collapsed:not(.sidebar-peek) #sidebar .group { padding: 4px 0 0; border-radius: 0 0 7px 7px; box-shadow: inset 0 2px 0 var(--claude); }
 
 /* Who is driving. Sits in the spare end of the tab row so that it can come
    and go without resizing the page underneath. */
