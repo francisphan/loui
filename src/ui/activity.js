@@ -85,16 +85,16 @@
     return `${Math.floor(min / 60)} h ${min % 60} min`;
   };
   const ENDED = {
-    ended: 'ended', closed: 'you closed it', lost: 'connection lost',
+    ended: 'ended', closed: 'you ended it', lost: 'connection lost',
     quit: 'cut short when Loui closed', refused: 'not let in',
   };
-  // A session still connected is "open" unless it is doing something or the
-  // user has taken over. Its group in this window is read from the window's
+  // A session still connected is idle unless it is doing something, has a
+  // question for the user, or the user has taken over (the helm's words). Its group in this window is read from the window's
   // state, which is newer than the list; one in another window from the list.
-  const LIVE = { working: 'working now', paused: 'paused', open: 'open' };
+  const LIVE = { working: 'working', paused: 'paused', asking: 'asking', open: 'idle' };
   const statusOf = (s) => {
     const g = state.groups.find((x) => x.id === s.session);
-    return g ? (g.paused ? 'paused' : g.busy ? 'working' : 'open') : s.status || 'open';
+    return g ? (g.paused ? 'paused' : g.asking ? 'asking' : g.busy ? 'working' : 'open') : s.status || 'open';
   };
   const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', taken: 'You took the tab back', unanswered: 'You did not answer, so it was stopped' };
   const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;

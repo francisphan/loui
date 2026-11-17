@@ -214,6 +214,16 @@ test('a private window stays out of the Claude panel\'s reach, and out of a norm
   // The panel reads the user's current tab: never one of these.
   const seen = JSON.stringify(await b.ui('panel', { tool: 'snapshot' }).catch((e) => String(e)));
   assert.ok(!seen.includes('secret-private') && !seen.includes('private-opener'), seen);
+  // While the panel works in the normal window, the private window's helm says
+  // nothing of it and its toolbar has no magenta line: Claude is not at work there.
+  const helm = (id) => from(id, 'chrome:eval', `document.getElementById('helm').hidden ? null
+    : [document.getElementById('helm-state').textContent, document.body.classList.contains('driving')]`);
+  const working = b.ui('panel', { tool: 'wait_for', args: { text: 'never there', timeout: 1500 } }).catch(() => {});
+  await wait('the normal window to say Claude is working', async () => (await helm(one))?.[0] === 'Working');
+  assert.equal((await stateOf(priv)).groups.find((g) => g.id === 'you').busy, false);
+  assert.equal(await helm(priv), null, 'nothing in the private window');
+  assert.equal(await from(priv, 'chrome:eval', `document.body.classList.contains('driving')`), false);
+  await working;
   // A tab the panel opens goes to the normal window, though the private one is focused.
   const before = (await win(priv)).tabs.length;
   await b.ui('panel', { tool: 'tabs', args: { action: 'new' } });

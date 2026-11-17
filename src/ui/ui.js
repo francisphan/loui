@@ -91,6 +91,10 @@ $('address-form').onsubmit = (e) => {
   address.blur();
 };
 address.onfocus = () => address.select();
+let addressTyped = false; // the owner has typed in the field since it took the keyboard
+let addressTab = null; // the tab whose address it shows
+address.addEventListener('focus', () => { addressTyped = false; });
+address.addEventListener('input', () => { addressTyped = true; });
 address.onkeydown = (e) => {
   if (e.key !== 'Escape') return;
   address.value = activeTab()?.url || '';
@@ -122,12 +126,51 @@ const sendLayout = () => {
 sendLayout();
 new ResizeObserver(sendLayout).observe($('stage'));
 
-// A page without an icon is marked by its site's first letter (its title's, for a page with no address).
+// A page without an icon is marked by a letter on a small tile: the first of
+// its site's own name ("G" for accounts.google.com), or of its title for a
+// page with no address. A page on this machine (localhost, an IP address) is
+// marked by its title's letter on a tile tinted by its port, so that the pages
+// being developed do not all look the same.
+const TWO_PART = /\.(com?|org|net|gov|edu|ac)\.[a-z]{2}$/; // co.uk, com.ar, com.au: the name is the label before
 function letterOf(t) {
-  let name = t.title;
-  try { name = new URL(t.url).hostname.replace(/^www\./, '') || name; } catch {}
-  return el('span', 'letter', [...(name || '').trim()][0]?.toUpperCase() || '');
+  let name = t.title, hue = '';
+  try {
+    const u = new URL(t.url);
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'localhost' || host.endsWith('.localhost') || /^[\d.]+$|^\[/.test(host)) {
+      if (!name || name === t.url) name = host; // no title yet
+      if (u.port) hue = ` hue-${u.port % 7 % 5}`;
+    } else if (host) {
+      const labels = host.split('.');
+      name = labels[Math.max(0, labels.length - (TWO_PART.test(host) ? 3 : 2))];
+    }
+  } catch {}
+  return el('span', 'letter' + hue, [...(name || '').trim()][0]?.toUpperCase() || '');
 }
+
+// Most sessions' labels start with "Claude", which tells none of them apart:
+// where room is short (a group's tag, the helm) the label is shown without
+// it, and whole in the tooltip.
+const shortName = (label) => label.replace(/^Claude\s+(?=[\p{L}\p{N}])/u, '');
+// The width some text takes when set like a given element.
+const ruler = document.createElement('canvas').getContext('2d');
+const widthOf = (text, like) => {
+  ruler.font = getComputedStyle(like).font;
+  return ruler.measureText(text).width;
+};
+// What a session is doing, as the mark on its tag: 'paused' once the user has
+// taken over, 'asking' while it has a question for them, 'working', or ''.
+// Working lingers as in the helm: no flicker between one step and the next.
+const markOf = (g) => (g.paused ? 'paused' : g.asking ? 'asking' : g.busy || lingerUntil.get(g.id) > Date.now() ? 'working' : '');
+const MARKS = { paused: 'Paused', asking: 'Asking', working: 'Working' };
+function drawMark(g) {
+  const mark = el('span', 'group-mark ' + markOf(g), markOf(g) === 'asking' ? '?' : '');
+  mark.setAttribute('role', 'img');
+  mark.setAttribute('aria-label', MARKS[markOf(g)]);
+  return mark;
+}
+const tipOf = (g) => (g.paused ? `${g.label} is paused` : g.asking ? `${g.label} is asking you something`
+  : g.busy ? `${g.label} is ${g.status}` : `${g.label}'s tabs`);
 
 function drawTab(t) {
   const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : '') + (t.pinned ? ' pinned' : '')
@@ -193,7 +236,7 @@ function placeTabs() {
   const { vertical = false, collapsed = false } = state.tabStrip || {};
   const box = $('tabs');
   if (vertical && box.parentElement !== sidebar) sidebar.append(box);
-  if (!vertical && box.parentElement !== $('tabrow')) $('sidebar-toggle').after(box);
+  if (!vertical && box.parentElement !== $('tabrow')) $('tabs-back').after(box);
   box.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
   sidebar.hidden = $('sidebar-toggle').hidden = !vertical;
   document.body.classList.toggle('vertical', vertical);
@@ -208,11 +251,14 @@ function placeTabs() {
 // Claude session with its name on it. Each run of tabs that a tab can be
 // dropped into carries its group's id (see the dragging below).
 let markTimer = 0;
+let shownActive = null; // the tab on screen as last drawn
+let following = true; // the strip keeps that tab in sight, until the user scrolls it themselves
 function drawTabs() {
   if (dragging) return; // redrawing would lose the tab being dragged; dragend draws
   // A tab that has the keyboard keeps it through the redraw.
   const at = document.activeElement;
   const held = at?.classList.contains('tab') && $('tabs').contains(at) ? at.dataset.id : null;
+  const sure = document.activeElement?.matches?.('.group-tag .close.sure'); // redrawn below: it keeps the keyboard
   placeTabs();
   const vertical = !!state.tabStrip?.vertical;
   const nodes = [];
@@ -240,9 +286,10 @@ function drawTabs() {
     const cluster = el('div', 'group' + (busy ? ' busy' : '') + (g.paused ? ' paused' : ''));
     cluster.dataset.group = g.id;
     cluster.setAttribute('aria-label', `${g.label}'s tabs`);
-    const name = el('button', 'group-name', g.label);
+    const name = el('button', 'group-name', shortName(g.label));
     name.type = 'button';
-    name.title = g.paused ? `${g.label} is paused` : g.busy ? `${g.label} is ${g.status}` : `${g.label}'s tabs`;
+    name.title = tipOf(g);
+    name.setAttribute('aria-label', name.title);
     const current = tabs.find((t) => t.current) || tabs[0];
     name.onclick = () => current && loui.send('tab:select', current.id);
     // Its menu moves the group to another window (as dragging it out of the strip does).
@@ -265,46 +312,136 @@ function drawTabs() {
     tag.title = name.title;
     tag.draggable = true;
     // The sidebar has room for what the session is doing; along the top the helm says it.
-    const status = el('span', 'group-status', g.paused ? 'Paused' : g.busy ? g.status : '');
-    // Seen from any tab, and in a collapsed sidebar: a dot while it works, a pause sign while paused.
-    if (g.paused || busy) {
-      const mark = el('span', 'group-mark ' + (g.paused ? 'paused' : 'working'));
-      mark.setAttribute('role', 'img');
-      mark.setAttribute('aria-label', g.paused ? 'Paused' : 'Working');
-      tag.append(mark);
-    }
+    const status = el('span', 'group-status', g.paused ? 'Paused' : g.asking ? 'Asking' : g.busy ? g.status : '');
+    // Seen from any tab, and in a collapsed sidebar: a dot while it works, a
+    // question mark while it waits on the user, a pause sign while paused.
+    if (markOf(g)) tag.append(drawMark(g));
     tag.append(name, status, close);
     cluster.append(tag, ...tabs.map(drawTab));
     nodes.push(cluster);
   }
   $('tabs').replaceChildren(...nodes);
   if (held) $('tabs').querySelector(`.tab[data-id="${held}"]`)?.focus();
+  if (sure) $('tabs').querySelector('.group-tag .close.sure')?.focus();
+  // Along the top a tag is as narrow as its name allows and, short of room,
+  // gives way down to a start of the name (less beside "End session?"). It is
+  // measured here, drawn whole, since CSS cannot say "the name's width, at most".
+  if (!vertical) {
+    const widthNow = (node) => node.getBoundingClientRect().width;
+    const least = [...$('tabs').querySelectorAll('.group-tag')].map((tag) => {
+      const name = widthNow(tag.querySelector('.group-name'));
+      return [tag, Math.ceil(widthNow(tag) - name + Math.min(name, tag.querySelector('.sure') ? 40 : 60))];
+    });
+    for (const [tag, width] of least) tag.style.minWidth = `${width}px`;
+  }
   // A dot that only lingers is taken away once its time is up.
   clearTimeout(markTimer);
   if (state.groups.some((g) => !g.busy && lingerUntil.get(g.id) > Date.now())) markTimer = setTimeout(drawTabs, 1450);
-  showActive();
+  const active = activeTab()?.id;
+  if (active !== shownActive) following = true;
+  shownActive = active;
+  if (following) showActive();
+  drawOverflow();
 }
 // A strip along the top that is too full to show every tab scrolls: the tab
-// on screen stays in sight, also when the window or the helm leaves it less room.
+// on screen stays in sight, also when the window or the helm leaves it less
+// room. Once the user has scrolled the strip themselves it stays where they
+// put it, until another tab comes on screen.
 function showActive() {
   if (!state.tabStrip?.vertical) $('tabs').querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
-new ResizeObserver(showActive).observe($('tabs'));
+new ResizeObserver(() => {
+  if (following) showActive();
+  drawOverflow();
+}).observe($('tabs'));
+
+// What says that the strip has more than it shows: the edge with tabs beyond
+// it fades and has a button that scrolls a page that way; and a session whose
+// tag is scrolled out of sight keeps a small one after the strip, with its
+// state on it, which brings its group back into sight.
+let strays = '';
+function drawOverflow() {
+  const box = $('tabs');
+  const flat = !state.tabStrip?.vertical;
+  const before = flat && box.scrollLeft > 1;
+  const after = flat && box.scrollLeft + box.clientWidth < box.scrollWidth - 1;
+  box.classList.toggle('more-before', before);
+  box.classList.toggle('more-after', after);
+  // The button in use goes away at the end of the strip: the keyboard moves to the other one.
+  if (document.activeElement === $('tabs-on') && !after && before) $('tabs-back').focus();
+  if (document.activeElement === $('tabs-back') && !before && after) $('tabs-on').focus();
+  $('tabs-back').hidden = !before;
+  $('tabs-on').hidden = !after;
+  const sight = box.getBoundingClientRect();
+  const away = !flat ? [] : [...box.querySelectorAll('.group')].filter((n) => {
+    const r = n.querySelector('.group-tag').getBoundingClientRect();
+    return r.right < sight.left + 30 || r.left > sight.right - 30;
+  }).map((n) => groupOf(n.dataset.group)).filter(Boolean);
+  const now = JSON.stringify(away.map((g) => [g.id, g.label, markOf(g), tipOf(g)]));
+  if (now === strays) return;
+  strays = now;
+  $('strays').replaceChildren(...away.map((g) => {
+    const stray = el('button', 'stray' + (g.paused ? ' paused' : ''));
+    stray.type = 'button';
+    stray.dataset.group = g.id;
+    stray.title = `${tipOf(g)}. Show its tabs.`;
+    stray.setAttribute('aria-label', stray.title);
+    if (markOf(g)) stray.append(drawMark(g));
+    stray.append(el('span', 'stray-name', shortName(g.label)));
+    stray.onclick = () => {
+      const group = [...box.querySelectorAll('.group')].find((n) => n.dataset.group === g.id);
+      following = false;
+      group?.querySelector('.group-tag').scrollIntoView({ block: 'nearest', inline: 'start' });
+      drawOverflow();
+      group?.querySelector('.group-name').focus(); // this button has just gone
+    };
+    stray.oncontextmenu = (e) => { e.preventDefault(); loui.send('group:menu', g.id); };
+    return stray;
+  }));
+}
+$('tabs').addEventListener('scroll', drawOverflow, { passive: true });
+$('tabs-back').innerHTML = ICON.back;
+$('tabs-on').innerHTML = ICON.forward;
+const pageTabs = (way) => () => {
+  const box = $('tabs');
+  following = false;
+  box.scrollBy({ left: way * Math.max(120, box.clientWidth - 90) });
+  drawOverflow();
+};
+$('tabs-back').onclick = pageTabs(-1);
+$('tabs-on').onclick = pageTabs(1);
 
 // Ending a session closes all its tabs and cannot be undone, so for one that
 // is working or has more than one tab the × on its tag (and "End session" in
 // its menu) first turns into "End session?", for a few seconds; pressing that
 // ends it. id null: never mind.
-let ending = null; // { id, timer } while a group's tag asks
+// The question appears right under the pointer that asked for it, so for half
+// a second it takes no answer: a second click meant for the × does not end
+// the session. Never mind (Esc, or its time is up) puts the keyboard back
+// where it was before the question took it.
+let ending = null; // { id, timer, at, back } while a group's tag asks
 function endGroup(id) {
   const g = groupOf(id);
   const sure = ending?.id === id;
+  if (g && sure && Date.now() - ending.at < 500) return;
+  const was = ending;
+  const held = document.activeElement?.matches?.('.group-tag .close.sure');
   clearTimeout(ending?.timer);
   ending = null;
   if (g && (sure || !(g.busy || state.tabs.filter((t) => t.group === id).length > 1))) loui.send('group:close', id);
-  else if (g) ending = { id, timer: setTimeout(() => endGroup(null), 5000) };
+  else if (g) ending = { id, at: Date.now(), back: was?.back || keyboardPlace(), timer: setTimeout(() => endGroup(null), 5000) };
   drawTabs();
   $('tabs').querySelector('.group-tag .close.sure')?.focus();
+  if (!g && was && held) was.back();
+}
+// Where the keyboard is now, as a way back to it after the strip has been redrawn.
+function keyboardPlace() {
+  const at = document.activeElement;
+  const tab = at?.closest?.('#tabs .tab');
+  const group = at?.closest?.('#tabs .group');
+  const find = tab ? `.tab[data-id="${tab.dataset.id}"]`
+    : group ? `.group[data-group="${CSS.escape(group.dataset.group)}"] .${at.classList[0]}` : null;
+  return () => (find ? $('tabs').querySelector(find) : at)?.focus?.();
 }
 loui.on('group:end', endGroup);
 
@@ -379,7 +516,9 @@ function dropSpot(e) {
 const tabsBox = $('tabs');
 // The wheel moves a strip along the top that is too full to show every tab.
 tabsBox.addEventListener('wheel', (e) => {
-  if (!state.tabStrip?.vertical && !e.deltaX) tabsBox.scrollLeft += e.deltaY;
+  if (state.tabStrip?.vertical) return;
+  following = false; // the user is looking along the strip: it stays where they leave it
+  if (!e.deltaX) tabsBox.scrollLeft += e.deltaY;
 }, { passive: true });
 tabsBox.addEventListener('dragstart', (e) => {
   const tag = e.target.closest?.('.group-tag');
@@ -462,7 +601,7 @@ let shownPrompt = null;
 function drawHelm() {
   const { picking, prompt } = state;
   const g = groupOf(activeTab()?.group) || { id: YOU, label: 'You' };
-  const who = g.id === YOU ? 'Claude' : g.label;
+  const who = g.id === YOU ? 'Claude' : shortName(g.label);
   for (const each of state.groups) if (each.busy) lingerUntil.set(each.id, Date.now() + 1400);
   const lingering = (lingerUntil.get(g.id) || 0) > Date.now();
   if (lingering) {
@@ -472,7 +611,8 @@ function drawHelm() {
   const driving = !g.paused && (g.busy || lingering);
   const answer = (value) => () => loui.send('prompt:answer', { id: prompt.id, value });
   // what: the state in a word or two, shown whole ahead of the text, which is what gets cut short.
-  let what = '', text = '', label = '', act = null, decline = null, no = 'Not now', always = null;
+  // named: the session the text starts with, shown without a leading "Claude" and whole in the tooltip.
+  let what = '', text = '', named = '', label = '', act = null, decline = null, no = 'Not now', always = null;
   const asked = prompt && !(picking.active && prompt.kind !== 'pick'); // the user's own pointing comes first
   if (picking.active && !asked) {
     text = picking.message || 'Click the thing you mean. Esc cancels.';
@@ -489,28 +629,42 @@ function drawHelm() {
     // Only the user's own tabs can be handed over: the one on screen when they answer.
     const theirs = activeTab()?.group === YOU;
     what = theirs ? 'Asks for this tab' : 'Asks for a tab';
-    text = theirs ? prompt.who : `${prompt.who}. Open one of your tabs to hand it over.`;
+    named = prompt.who;
+    text = theirs ? shortName(named) : `${shortName(named)}. Open one of your tabs to hand it over.`;
     if (theirs) {
       label = 'Hand it over';
       act = answer(true);
     }
     decline = answer(false);
   } else if (asked) {
-    text = `${prompt.who} asks you to point${prompt.message ? `: ${prompt.message}` : ' at something'}. Esc cancels.`;
+    what = 'Asks you to point';
+    named = prompt.who;
+    text = shortName(named) + (prompt.message ? `: ${prompt.message}` : '');
+    text += `${/[.!?…]$/.test(text) ? '' : '.'} Esc cancels.`; // a message that ends in a question mark gets no full stop after it
     label = 'Cancel';
     act = () => loui.send('pick:cancel');
   } else if (g.paused) {
     what = 'Paused';
+    named = g.id === YOU ? '' : g.label;
     text = `${who}. You're driving.`;
     label = 'Let Claude continue';
     act = () => loui.send('pause', { group: g.id, on: false });
+  } else if (g.asking) {
+    // Its question is on show in another window, or waits behind the user's own pointing.
+    what = 'Asking';
+    named = g.label;
+    text = who;
+    label = 'Take over';
+    act = () => loui.send('pause', { group: g.id, on: true });
   } else if (driving) {
     what = 'Working';
+    named = g.id === YOU ? '' : g.label;
     text = `${who}: ${g.status}`;
     label = 'Take over';
     act = () => loui.send('pause', { group: g.id, on: true });
   } else if (g.id !== YOU) {
-    what = 'Claude\'s tab';
+    what = 'Idle';
+    named = g.label;
     text = who;
     label = 'Take over';
     act = () => loui.send('pause', { group: g.id, on: true });
@@ -521,7 +675,9 @@ function drawHelm() {
   helm.classList.toggle('asking', !!asked);
   $('helm-state').textContent = what;
   $('helm-text').textContent = text;
-  $('helm-text').title = text;
+  $('helm-text').title = named.slice(0, named.length - shortName(named).length) + text;
+  // The text keeps room for a start of itself before the tabs give way, and never more room than it fills.
+  $('helm-text').style.setProperty('--full', `${Math.ceil(widthOf(text, $('helm-text'))) + 1}px`);
   $('helm-btn').hidden = !act;
   $('helm-btn').textContent = label;
   $('helm-btn').onclick = act;
@@ -684,6 +840,14 @@ loui.on('state', (next) => {
   drawUpdate();
   if (!state.groups.some((g) => g.busy)) liveStep?.classList.remove('live');
   if (document.activeElement !== address) address.value = tab?.url || '';
+  // Another tab came on screen while the field has the keyboard: it shows that
+  // tab's address, selected, so that Enter cannot load the old one in the new
+  // tab. What the owner has typed there stays.
+  else if (tab?.id !== addressTab && !addressTyped) {
+    address.value = tab?.url || '';
+    address.select();
+  }
+  addressTab = tab?.id;
   $('back').disabled = !tab?.canGoBack;
   $('forward').disabled = !tab?.canGoForward;
   setIcon($('reload'), tab?.loading ? 'stop' : 'reload');
@@ -773,7 +937,7 @@ const steps = new Map();
 let liveStep = null;
 // A step the user stopped is not one that failed.
 const STOPPED = { blocked: 'You blocked this', paused: 'Paused by you', taken: 'You took the tab back', unanswered: 'You did not answer, so it was stopped' };
-const ENDED = { closed: 'You ended this session', lost: 'Session ended: connection lost' };
+const ENDED = { closed: 'You ended it', lost: 'Session ended: connection lost' };
 loui.on('feed', (entry) => {
   if (entry.type === 'ended') {
     // The last line of a session's steps: its tab group has closed.
