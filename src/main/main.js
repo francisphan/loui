@@ -15,6 +15,7 @@ const { createChat } = require('./chat');
 const { createLink } = require('./link');
 const { createUpdater } = require('./updater');
 const { createRestore } = require('./restore');
+const { createFind } = require('./find');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -41,7 +42,7 @@ function setTheme(theme) {
 
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
 
-let win, tabs, sessions, actions, chat, link, handle, updater, restore;
+let win, tabs, sessions, actions, chat, link, handle, updater, restore, find;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -68,6 +69,7 @@ const currentState = () => ({
     .map((p) => ({ id: p.id, name: p.name || p.tag, thumb: p.thumb })),
   link: link.state(),
   update: updater.state(),
+  find: find.state(),
 });
 
 function createWindow() {
@@ -93,6 +95,7 @@ function createWindow() {
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState });
+  find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
   handle = rpc.createHandler({ run: actions.run, sessions, extra: process.env.LOUI_TEST ? testHook : null });
   link = createLink({
     home: paths.home, version: app.getVersion(), handle, sessions, changed: pushState,
@@ -172,6 +175,10 @@ const handlers = {
   'chat:send': (message) => { chat.send(message); },
   'chat:stop': () => chat.stop(),
   'chat:reset': () => chat.reset(),
+  'find:open': () => find.show(),
+  // Closed by the user: the page they were reading takes the keyboard back.
+  'find:close': () => { find.close(); active()?.wc.focus(); },
+  find: (query) => find.search(query),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
@@ -213,6 +220,7 @@ function appMenu() {
         { label: 'Close tab', accelerator: 'CmdOrCtrl+W', click: () => active() && tabs.close(active().id) },
         { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', click: handlers['tab:reopen'] },
         { label: 'Go to address', accelerator: 'CmdOrCtrl+L', click: () => { win.webContents.focus(); send('focus-address'); } },
+        { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
         { type: 'separator' },
         ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{

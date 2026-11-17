@@ -37,6 +37,14 @@
       <button id="devtools" class="icon" type="button" title="Developer tools (F12)" aria-label="Developer tools"></button>
       <button id="panel-toggle" class="icon" type="button" title="Claude panel (Ctrl+Shift+L)" aria-label="Claude panel"></button>
     </div>
+    <div id="find" role="search" hidden>
+      <input id="find-text" type="text" spellcheck="false" autocomplete="off"
+             placeholder="Find in page" aria-label="Find in page">
+      <span id="find-count" role="status"></span>
+      <button id="find-prev" class="icon" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match"></button>
+      <button id="find-next" class="icon" type="button" title="Next match (Enter)" aria-label="Next match"></button>
+      <button id="find-close" class="icon" type="button" title="Close (Esc)" aria-label="Close find bar"></button>
+    </div>
   </header>
 
   <main id="stage"></main>
@@ -86,5 +94,6 @@
   </aside>
 
   <script src="ui.js"></script>
+  <script src="find.js"></script>
 </body>
 </html>
