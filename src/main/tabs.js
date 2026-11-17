@@ -23,6 +23,7 @@
 // until it is woken by being selected or used by Claude.
 const { WebContentsView, View, Menu, clipboard, nativeTheme } = require('electron');
 const { EventEmitter } = require('events');
+const { requestRules } = require('./requests');
 
 const YOU = 'you';
 const LOG_LIMIT = 500;
@@ -467,12 +468,13 @@ class Tabs extends EventEmitter {
     };
     const all = { urls: ['<all_urls>'] };
     // Tabs that Claude sessions work in never reach the relay itself (its
-    // approval page asks for the relay key), however they get there.
-    this.ses.webRequest.onBeforeRequest(all, (d, done) => {
+    // approval page asks for the relay key), however they get there. Added
+    // first, so no other rule is asked before it (see requests.js).
+    requestRules(this.ses).add((d) => {
       const tab = owner(d);
       let origin = '';
       try { origin = new URL(d.url).origin; } catch {}
-      done({ cancel: !!tab && tab.group !== YOU && this.relayOrigins.has(origin) });
+      return !!tab && tab.group !== YOU && this.relayOrigins.has(origin) ? { cancel: true } : null;
     });
     this.ses.webRequest.onSendHeaders(all, (d) => started.set(d.id, Date.now()));
     this.ses.webRequest.onCompleted(all, (d) => record(d, { status: d.statusCode }));

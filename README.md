@@ -191,6 +191,21 @@ and how recently you visited them; the arrow keys move through them, Enter
 opens one, Esc closes the list. *History* (`Ctrl+H`, or the clock in the
 toolbar) lists everything, with search, removal of single pages, and *Clear all*.
 
+## Shields
+
+Ads and trackers are blocked in every tab, with EasyList, EasyPrivacy, Peter
+Lowe's list and uBlock Origin's filters (Ghostery's maintained copies of them,
+matched by Ghostery's engine). Requests on the lists are cancelled, or answered
+with a harmless stand-in script where the lists say so; once a page is parsed,
+the empty boxes ads leave behind are hidden. The shield in the toolbar shows how
+many requests were blocked on the page on screen; its menu turns Shields off
+for the site (its host name), which is kept in `shields.json` in the profile.
+
+The lists are not downloaded at start: the finished engine is kept in
+`shields/engine.bin` in the profile (about 7 MB on disk, about 15 MB in memory),
+and rebuilt in a background process of its own when it is more than four days
+old. Until the first download is done, nothing is blocked.
+
 ## Layout
 
 ```
@@ -208,6 +223,9 @@ src/main/downloads.js downloads: where they are saved, the list, pause and resum
 src/main/permissions.js  camera, microphone, location, notifications, screen: asking and remembering
 src/main/history.js   history: what the user visits in their own tabs (history.json)
 src/main/suggest.js   address bar suggestions: their sources, and the list in front of the page
+src/main/requests.js  the one onBeforeRequest listener: the relay guard first, then Shields
+src/main/shields.js   Shields: blocking, hiding ad boxes, the per-site switch, list updates
+src/main/shields-update.js  downloads the lists and builds the engine, in a process of its own
 src/page/lib.js       runs inside each page: outline, element lookup, pointer, picker
 src/ui/               tab strip, toolbar, panel
 relay/                the relay and its sign-in

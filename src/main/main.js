@@ -21,6 +21,7 @@ const { createPermissions } = require('./permissions');
 const { createHistory } = require('./history');
 const { createSuggest } = require('./suggest');
 const { createSleep } = require('./sleep');
+const { createShields } = require('./shields');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
@@ -55,6 +56,7 @@ function setTheme(theme) {
 }
 
 let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest, sleep;
+let shields;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -84,6 +86,7 @@ const currentState = () => ({
   find: find.state(),
   downloads: downloads.state(),
   ...permissions.state(),
+  ...shields.state(),
 });
 
 function createWindow() {
@@ -106,6 +109,7 @@ function createWindow() {
 
   lockToApp(win.webContents);
   tabs = new Tabs(win, ses);
+  shields = createShields({ ses, tabs, home: paths.home, changed: pushState }); // after Tabs: the relay guard is asked first
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
   permissions = createPermissions({ ses, tabs, home: paths.home, changed: pushState });
@@ -213,6 +217,8 @@ const handlers = {
   'history:list': (query) => send('history', { query, items: history.list(query) }),
   'history:remove': (url) => history.remove(url),
   'history:clear': () => history.clear(),
+  'shields:menu': () => shields.menu(),
+  'shields:set': (choice) => shields.set(choice),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
