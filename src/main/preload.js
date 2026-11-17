@@ -9,10 +9,11 @@ const SEND = new Set([
   'find', 'find:open', 'find:close',
   'download:act', 'download:ask', 'download:clear',
   'permission:answer', 'permission:forget',
+  'suggest:query', 'suggest:show', 'suggest:hide', 'suggest:pick', 'history:list', 'history:remove', 'history:clear',
 ]);
 const LISTEN = new Set([
   'state', 'feed', 'chat', 'focus-address', 'toggle-panel', 'show-relay', 'focus-find', 'toggle-downloads',
-  'show-permissions',
+  'show-permissions', 'suggestions', 'suggest', 'suggest:pick', 'history', 'history:changed', 'show-history',
 ]);
 
 contextBridge.exposeInMainWorld('loui', {

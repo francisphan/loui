@@ -18,10 +18,21 @@ const { createRestore } = require('./restore');
 const { createFind } = require('./find');
 const { createDownloads } = require('./downloads');
 const { createPermissions } = require('./permissions');
+const { createHistory } = require('./history');
+const { createSuggest } = require('./suggest');
 const rpc = require('./rpc');
 
 fs.mkdirSync(paths.home, { recursive: true, mode: 0o700 });
 app.setPath('userData', paths.home);
+// Loui's own pages (the window chrome, the suggestion list) carry the bridge to
+// the main process, so they must never turn into a web page: dropping a link
+// on the toolbar, for one, would otherwise navigate the chrome to it.
+function lockToApp(wc) {
+  wc.on('will-navigate', (e) => e.preventDefault());
+  wc.on('will-redirect', (e) => e.preventDefault());
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+}
+
 // Claude works in this window while it sits behind others. Without these a
 // covered window stops rendering: clicks no longer land and screenshots fail.
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion'); // Windows
@@ -42,7 +53,7 @@ function setTheme(theme) {
   Menu.setApplicationMenu(appMenu());
 }
 
-let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions;
+let win, tabs, sessions, actions, chat, link, handle, updater, restore, find, downloads, permissions, history, suggest;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -92,10 +103,14 @@ function createWindow() {
     },
   });
 
+  lockToApp(win.webContents);
   tabs = new Tabs(win, ses);
   restore = createRestore({ tabs, file: path.join(paths.home, 'tabs.json') });
   downloads = createDownloads({ ses, tabs, home: paths.home, changed: pushState });
   permissions = createPermissions({ ses, tabs, home: paths.home, changed: pushState });
+  history = createHistory({ file: path.join(paths.home, 'history.json'), tabs, changed: () => send('history:changed') });
+  suggest = createSuggest({ win, tabs, send, sources: [history] });
+  lockToApp(suggest.webContents);
   sessions = createSessions({ tabs, changed: pushState, feed: (entry) => send('feed', entry) });
   actions = createActions({ tabs, sessions, changed: pushState });
   find = createFind({ tabs, changed: pushState, focus: () => { win.webContents.focus(); send('focus-find'); } });
@@ -187,12 +202,26 @@ const handlers = {
   'download:clear': () => downloads.clear(),
   'permission:answer': (answer) => permissions.answer(answer),
   'permission:forget': (which) => permissions.forget(which),
+  'suggest:query': (text) => suggest.query(text),
+  'suggest:show': (shown) => suggest.show(shown),
+  'suggest:hide': () => suggest.hide(),
+  'suggest:pick': (url) => send('suggest:pick', url), // a click in the list, handled like Enter
+  'history:list': (query) => send('history', { query, items: history.list(query) }),
+  'history:remove': (url) => history.remove(url),
+  'history:clear': () => history.clear(),
 };
 
 // Lets the test suite do what only the window chrome can (allow a hand-over,
 // take over a group) and read the window's state. Off unless LOUI_TEST is set.
 async function testHook({ ui, arg }) {
   if (ui === 'state') return currentState();
+  if (suggest.probes[ui]) return suggest.probes[ui](arg);
+  // A page trying to take over the window chrome, as a dropped link would.
+  if (ui === 'chrome-navigate') {
+    await win.webContents.executeJavaScript(`location.href = ${JSON.stringify(arg)}`).catch(() => {});
+    await new Promise((r) => setTimeout(r, 500));
+    return win.webContents.getURL();
+  }
   handlers[ui](arg);
   return 'ok';
 }
@@ -231,6 +260,7 @@ function appMenu() {
         { label: 'Find in page', accelerator: 'CmdOrCtrl+F', click: () => handlers['find:open']() },
         { label: 'Downloads', accelerator: 'CmdOrCtrl+J', click: () => send('toggle-downloads') },
         { label: 'Site permissions…', click: () => send('show-permissions') },
+        { label: 'History', accelerator: 'CmdOrCtrl+H', click: () => { win.webContents.focus(); send('show-history'); } },
         { type: 'separator' },
         ...updateMenu(),
         ...(process.platform === 'linux' ? [] : [{
@@ -303,6 +333,7 @@ function zoom(step) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  app.on('before-quit', () => history?.flush());
   app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();
     win.focus();

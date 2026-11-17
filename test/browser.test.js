@@ -172,3 +172,13 @@ test('the user can point at an element', async () => {
   assert.equal(image.mimeType, 'image/jpeg');
   assert.match(await b.text('picks'), /selector: #card/);
 });
+
+test("Loui's own window can't be turned into a web page", async () => {
+  // Stands in for dropping a link on the toolbar: anything that tries to
+  // navigate the window chrome is stopped, and the chrome stays Loui's.
+  const before = (await b.state()).tabs.length;
+  const url = await b.ui('chrome-navigate', b.base + '/second.html');
+  assert.match(url, /^file:.*index\.html$/);
+  const state = await b.state();
+  assert.equal(state.tabs.length, before, 'the chrome still answers, with the same tabs');
+});
