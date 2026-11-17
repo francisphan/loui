@@ -367,6 +367,7 @@ function createPalette({ win, tabs, sources = {}, settings, save, extras = () =>
       return {
         open: open && view.getVisible(),
         inFront: children[children.length - 1] === view,
+        window: tabs.windows.find((w) => w.win === host)?.id ?? null,
         mode,
         ...(await view.webContents.executeJavaScript(`({
           text: document.getElementById('palette-input').value,

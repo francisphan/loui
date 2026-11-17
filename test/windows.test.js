@@ -178,6 +178,32 @@ test('a private window has Shields on', async () => {
   assert.equal(s.on, true);
 });
 
+test('the command palette opens in the window it is asked from', async () => {
+  await from(one, 'menu:key', 'CmdOrCtrl+K');
+  await wait('the palette in the first window', async () => (await from(one, 'palette')).open);
+  assert.equal((await from(one, 'palette')).window, one);
+  await from(one, 'palette:key', { key: 'Escape' });
+  await wait('the palette to close', async () => !(await from(one, 'palette')).open);
+  await from(priv, 'menu:key', 'CmdOrCtrl+K');
+  const p = await wait('the palette in the private window', async () => {
+    const now = await from(priv, 'palette');
+    return now.open && now.window === priv && now;
+  });
+  assert.equal(p.inFront, true, 'in front of the private window\'s pages');
+  await from(priv, 'palette:key', { key: 'Escape' });
+  await wait('the palette to close', async () => !(await from(priv, 'palette')).open);
+});
+
+test('reader view works in a private window', async () => {
+  await from(priv, 'go', b.base + '/article.html');
+  const tab = await loaded(priv);
+  await from(priv, 'reader:toggle');
+  await wait('reader view in the private tab', async () => (await js(tab.id, 'location.protocol').catch(() => '')) === 'loui-reader:');
+  assert.ok((await js(tab.id, 'document.body.innerText.length')) > 200, 'the article is shown');
+  assert.equal((await stateOf(priv)).tabs.find((t) => t.id === tab.id).private, true);
+  await from(priv, 'reader:toggle');
+});
+
 test('Claude sessions do not work in a private window unless handed a tab, which stays private', async () => {
   // Focused on the private window, a new session still gets a normal window.
   await b.ui('window:focus', priv);
