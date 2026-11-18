@@ -297,6 +297,53 @@ test('Settings › Claude: the account in words, Check again, and Sign in', asyn
   await b.ui('settings:close');
 });
 
+test('Settings › Claude: Sign out asks first, then runs Claude Code\'s own sign-out, and the panel shows the card', async () => {
+  tell({ status: 'subscription' });
+  await check('ready');
+  await b.ui('settings:open', 'claude');
+  const js = (code) => b.ui('settings:js', code);
+  const button = () => js(`(() => { const n = document.getElementById('set-claude-sign-out'); return n && !n.hidden ? n.textContent : null; })()`).catch(() => null);
+  const logouts = () => fake().calls.filter((c) => c === 'auth logout').length;
+  await until(async () => (await button()) === 'Sign out', 'the Sign out button');
+  await js("void document.getElementById('set-claude-sign-out').click()");
+  await until(async () => (await button()) === 'Sign out of Claude?', 'the question');
+  await pause(300);
+  assert.equal(logouts(), 0, 'nothing is done until the button is pressed again');
+  await js("void document.getElementById('set-claude-sign-out').click()");
+  await until(async () => (await js("document.getElementById('value-claude-account').textContent")) === 'Not signed in.', 'the row to say so');
+  assert.equal(logouts(), 1);
+  assert.equal(await button(), null, 'signed out, there is no Sign out');
+  const c = await until(async () => { const now = await card(); return now.shown && now; }, 'the sign-in card in the panel');
+  assert.deepEqual(c.buttons, ['Sign in', 'I’ve signed in']);
+
+  // Neither another page on the Settings window's channel nor the window chrome's own can sign out.
+  tell({ status: 'subscription' });
+  await check('ready');
+  assert.equal(await b.ui('settings:stranger', { what: 'claude:sign-out' }), null);
+  await b.ui('claude', { do: 'sign-out' });
+  await pause(300);
+  assert.equal(logouts(), 1);
+  assert.equal((await account()).state, 'ready');
+  await b.ui('settings:close');
+});
+
+test('the model chosen in Settings is the one the next message asks for', async () => {
+  tell({ status: 'subscription', query: 'answer' });
+  await check('ready');
+  // The model the stand-in is started with for a message. A message is not
+  // taken while the one before is still being answered, so it is sent until it is.
+  const asked = (text) => {
+    tell({ model: null });
+    return until(async () => { await b.ui('chat:send', { text }); await pause(300); return fake().model; }, 'the message to reach Claude Code');
+  };
+  await b.ui('settings:act', { what: 'claude:model', arg: 'haiku' });
+  assert.equal(await asked('With Haiku'), 'haiku');
+  await b.ui('settings:act', { what: 'claude:model', arg: 'not-a-model' });
+  const usual = await asked('With the usual one');
+  assert.ok(!['opus', 'sonnet', 'haiku', 'not-a-model'].includes(usual), usual);
+  await b.ui('chat:reset');
+});
+
 test('a Claude session cannot start a sign-in, see one, or read its address or code', async () => {
   const url = page();
   tell({ status: 'out', login: { url, browser: false, code: CODE } });

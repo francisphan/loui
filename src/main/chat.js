@@ -14,6 +14,9 @@ const { findClaude } = require('./claude-path');
 const { YOU } = require('./tabs');
 
 const MODEL = process.env.LOUI_MODEL || 'claude-opus-5-5';
+// The models that can be chosen instead (Settings › Claude): Claude Code's own
+// names for the latest of each family, which a subscription login accepts.
+const MODELS = ['opus', 'sonnet', 'haiku'];
 
 // How to start Claude Code. The Agent SDK brings its own program for the
 // platform it was installed on; the Windows installer and the Debian package
@@ -152,8 +155,9 @@ You are shown in a narrow side panel. Answer in short plain prose. Use a list on
 content is a list. Do not narrate each step; the user is watching the page.`;
 
 // open(url, window): shows a page in a new tab of the user's own. changed():
-// the account's state is different, so the windows are told.
-function createChat({ run, tabs, picker, describePick, cwd, emit, open, changed }) {
+// the account's state is different, so the windows are told. model(): the
+// model chosen in Settings, if one was.
+function createChat({ run, tabs, picker, describePick, model, cwd, emit, open, changed }) {
   let sessionId = null;
   let active = null; // the running query
   let sdk = null;
@@ -217,7 +221,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit, open, changed 
       active = query({
         prompt,
         options: {
-          model: MODEL,
+          model: MODELS.includes(model()) ? model() : MODEL,
           systemPrompt: SYSTEM,
           tools: [], // no built-in tools
           mcpServers: { loui: server },
@@ -462,6 +466,29 @@ function createChat({ run, tabs, picker, describePick, cwd, emit, open, changed 
   }
   process.once('exit', () => login?.child?.kill());
 
+  // Claude Code's own sign-out (`claude auth logout`), and then how things
+  // stand is asked again. It is Claude Code that is signed out, for whatever
+  // else on this computer uses its login too. Only the Settings window asks
+  // for it, after asking the user.
+  async function signOut() {
+    if (login || untested) return;
+    const claude = await claudeLauncher();
+    if (claude === null) return look({ force: true });
+    await new Promise((done) => {
+      let child;
+      try { child = startClaude(claude, ['auth', 'logout']); } catch { return done(); }
+      const timer = setTimeout(() => { child.kill(); done(); }, STATUS_MS);
+      const end = () => { clearTimeout(timer); done(); };
+      child.stdout.resume();
+      child.stderr.resume();
+      child.stdin.on('error', () => {});
+      child.stdin.end();
+      child.once('error', end);
+      child.once('close', end);
+    });
+    return look({ force: true, clear: true });
+  }
+
   // What a window's chrome, or the Settings window, asks about the account.
   function claude(what, { code, window } = {}) {
     if (what === 'look') return look();
@@ -472,7 +499,7 @@ function createChat({ run, tabs, picker, describePick, cwd, emit, open, changed 
     else if (what === 'cancel') cancel();
   }
 
-  return { send, stop, reset, busy: () => !!active, process: () => running, account: accountState, claude };
+  return { send, stop, reset, busy: () => !!active, process: () => running, account: accountState, claude, signOut, models: MODELS };
 }
 
 module.exports = { createChat };

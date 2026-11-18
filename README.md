@@ -265,12 +265,12 @@ panel or Settings opens, and keeps the answer in memory for a few minutes.
 - **Claude Code not installed**: the card says so, with where to get it.
 - Signed in with an API key or a cloud provider instead of a subscription:
   nothing is in the way; the panel's name says so when you point at it.
-- *Settings › Claude › Claude account* shows the same, with *Sign in* and
-  *Check again*.
+- *Settings › Claude › Claude account* shows the same, with *Sign in*,
+  *Check again* and *Sign out*.
 
 No API key is involved, and Loui never reads Claude Code's credentials: it
-only runs those two commands, with the API-key variables removed from their
-environment. Nothing of the account is written down (not in `settings.json`,
+only runs those commands (and `claude auth logout` when you sign out), with
+the API-key variables removed from their environment. Nothing of the account is written down (not in `settings.json`,
 not in the sessions' log), and the sign-in page is kept out of history and of
 the tabs brought back. No tool is about any of this: a Claude session cannot
 start a sign-in, see one, or read its address or code.
@@ -761,7 +761,11 @@ Settings window: sections down the left, a search box above them that finds a
 setting by its name or description, and the chosen section on the right. A
 change applies at once; there is no Save button. `Esc` or `Ctrl+W` closes it.
 
-- **General**: appearance; whether Loui starts with the tabs from last time
+- **General**: appearance; *Page zoom*, the size pages open at (`"zoom"`,
+  75 to 200%; a site zoomed from the Zoom menu keeps its own size until
+  *Reset zoom*, which goes back to this one); the languages spelling is
+  checked in (`"spellLanguages"`; Chromium's list on Windows and Debian,
+  also given to private windows); whether Loui starts with the tabs from last time
   or a new tab (`"startup"`); open at sign-in and the default browser
   (installed copies); the downloads folder and *Ask where to save each file*;
   and the start page: what new tabs open with, and its parts (see *Start
@@ -779,7 +783,11 @@ change applies at once; there is no Save button. `Esc` or `Ctrl+W` closes it.
   are not touched, and open tabs stay open.
 - **Passwords**: whether saving is offered (`"offerPasswords"`; filling
   works either way), the sites never offered, the Passwords panel, import.
-- **Claude**: the relay (address, key, on or off, status), connectors let in
+- **Claude**: the account (*Sign in*, *Check again*, and *Sign out*, which
+  asks first and then runs `claude auth logout`: it signs Claude Code out on
+  this computer, not only the panel); the panel's model (`"panelModel"`:
+  Default, or Claude Code's names `opus`, `sonnet`, `haiku`, used from the
+  next message); the relay (address, key, on or off, status), connectors let in
   without asking, guardrails, how long and how much of what sessions did is
   kept, and the local control socket.
 - **Reading**: reader view's text size, font and line width.

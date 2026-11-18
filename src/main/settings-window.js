@@ -35,11 +35,14 @@ function hostOf(input) {
 }
 
 // settings, save: settings.json (main.js). tabs: the browser's. home: the
-// profile folder. setTheme, setTabStrip, tabStrip, refreshMenu: main.js's own.
+// profile folder. setTheme, setTabStrip, tabStrip, refreshMenu: main.js's own,
+// as are pageZoom, setPageZoom (the zoom pages open at) and spelling,
+// setSpelling (the languages spelling is checked in).
 // ses: the session of the user's normal windows, whose browsing data can be cleared.
 // The rest are the modules whose settings are shown.
 function createSettingsWindow({
   settings, save, tabs, home, lockToApp, setTheme, setTabStrip, tabStrip, refreshMenu,
+  pageZoom, setPageZoom, spelling, setSpelling,
   search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
   guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice, history, ses,
 }) {
@@ -66,6 +69,8 @@ function createSettingsWindow({
     return {
       general: {
         theme: nativeTheme.themeSource,
+        zoom: pageZoom(),
+        spelling: spelling(),
         startup: settings.startup === 'new' ? 'new' : 'restore',
         start: startPage.prefs(),
         login: canLogin ? { on: login } : null,
@@ -87,6 +92,8 @@ function createSettingsWindow({
       passwords: passwords.prefs(),
       claude: {
         account: chat.account(), // in memory only: nothing of the account is kept
+        model: chat.models.includes(settings.panelModel) ? settings.panelModel : '',
+        models: chat.models,
         relay: { ...link.state(), sessions: tabs.groups.filter((g) => g.id !== YOU).length },
         connectors: consent.state().allowedConnectors,
         guardrails: guardrails.state().guardrails,
@@ -127,6 +134,8 @@ function createSettingsWindow({
   // What the page can ask for. Each goes to the function that owns the setting.
   const acts = {
     theme: (theme) => { if (['dark', 'light', 'system'].includes(theme)) setTheme(theme); },
+    zoom: (percent) => setPageZoom(Number(percent)),
+    spelling: ({ code, on } = {}) => setSpelling(String(code), !!on),
     startup: (choice) => { settings.startup = choice === 'new' ? 'new' : 'restore'; save(); },
     ...startPage.acts, // new-tab, start:…
     ...voice.acts, // voice:…
@@ -192,6 +201,14 @@ function createSettingsWindow({
       if (w) w.win.webContents.send('toggle-panel', true);
       chat.claude('sign-in', { window: w });
       toMain(w);
+    },
+    // Claude Code's own sign-out; the answer waits for it, so the page shows how things stand after.
+    'claude:sign-out': () => chat.signOut(),
+    // The panel's model, from the next message: one of chat.js's names, or none for Loui's usual one.
+    'claude:model': (model) => {
+      if (chat.models.includes(model)) settings.panelModel = model;
+      else delete settings.panelModel;
+      save();
     },
     'consent:revoke': (id) => consent.revoke(id),
     'guard:set': (on) => guardrails.set({ on: !!on }),

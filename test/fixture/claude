@@ -12,6 +12,7 @@
 //             "done" as the browser coming back would); else the address is
 //             all there is. code: the code to be pasted back. fail: why it
 //             fails instead of signing in.
+// `auth logout` leaves status 'out'. A message's --model is written back as "model".
 //   query:  'refuse' (a message is turned away: not logged in) | 'answer'
 const fs = require('fs');
 const readline = require('readline');
@@ -21,8 +22,10 @@ const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
 const write = (change) => fs.writeFileSync(file, JSON.stringify({ ...read(), ...change }));
 const args = process.argv.slice(2);
 const said = read();
+const model = args.find((a) => a.startsWith('--model=')); // as the Agent SDK passes it
 write({
   calls: [...(said.calls || []), args.slice(0, 3).join(' ')],
+  ...(model ? { model: model.slice('--model='.length) } : {}),
   // The variables an API key would arrive in: Loui must have removed them.
   keys: [...(said.keys || []), ...Object.keys(process.env).filter((k) => /^ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL)$/.test(k))],
 });
@@ -40,6 +43,10 @@ if (args[0] === 'auth' && said.status === 'old') {
 } else if (args[0] === 'auth' && args[1] === 'status') {
   process.stdout.write(JSON.stringify(STATUS[said.status], null, 2) + '\n');
   process.exit(STATUS[said.status].loggedIn ? 0 : 1);
+} else if (args[0] === 'auth' && args[1] === 'logout') {
+  write({ status: 'out' });
+  process.stdout.write('Successfully logged out from your Anthropic account.\n');
+  process.exit(0);
 } else if (args[0] === 'auth' && args[1] === 'login') {
   const { url, browser, code, fail } = said.login;
   const finish = () => {
