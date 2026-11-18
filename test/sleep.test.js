@@ -154,3 +154,21 @@ test('after a restart, only the tab on screen loads; the others start asleep', a
   await b.ui('tab:select', other.id);
   assert.equal((await loaded(other.id)).asleep, false);
 });
+
+test('a page brought back from sleep does not start playing by itself; pressing play in it works', async () => {
+  const shown = await onScreen();
+  const media = await open(b.base + '/media.html');
+  const paused = () => b.ui('tab:js', { id: media.id, code: 'document.getElementById("a").paused' });
+  await until(paused, (p) => p === false); // opened by the user: it plays, as always
+  await b.ui('tab:js', { id: media.id, code: 'document.getElementById("a").pause(); 1' }); // (a tab that is playing is not put to sleep)
+  await b.ui('tab:select', shown.id);
+  assert.equal(await b.ui('tab:sleep', media.id), true);
+  await b.ui('tab:select', media.id);
+  await loaded(media.id);
+  await pause(1200); // it would have started by now
+  assert.equal(await paused(), true, 'held until the user does something in the page');
+  // The user's own press on its play button.
+  const at = JSON.parse(await b.ui('tab:js', { id: media.id, code: 'JSON.stringify(document.getElementById("play").getBoundingClientRect())' }));
+  await b.ui('tab:press', { id: media.id, x: Math.round(at.x + at.width / 2), y: Math.round(at.y + at.height / 2) });
+  await until(paused, (p) => p === false);
+});
