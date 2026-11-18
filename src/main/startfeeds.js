@@ -358,4 +358,4 @@ function createFeeds({ settings, save }) {
   };
 }
 
-module.exports = { createFeeds, parseFeed, KNOWN_FEEDS };
+module.exports = { createFeeds, parseFeed, KNOWN_FEEDS, DEFAULT_FEEDS };
