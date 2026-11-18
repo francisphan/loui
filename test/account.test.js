@@ -231,7 +231,7 @@ test('Claude Code not installed: the card says what to install', async () => {
     assert.equal(c.shown, true);
     assert.equal(c.composer, false);
     assert.equal(c.title, 'Claude Code is not installed');
-    assert.match(c.line, /Install Claude Code on this computer \(or, on Windows, in WSL\) and sign in/);
+    assert.match(c.line, /Install Claude Code on this computer and sign in/);
     assert.deepEqual(c.buttons, ['Get Claude Code', 'Check again']);
     // A message sent anyway (from the command palette, say) is not answered with an error in red.
     await b.ui('chat:send', { text: 'Hello' });

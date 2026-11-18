@@ -95,6 +95,7 @@ function createUpdater({ changed }) {
   // cannot (why: the reason, or how its own try ended).
   let state = { status: 'idle', version: null, percent: 0, error: '', checked: 0, manual: '', why: '' };
   let deb = null; // the downloaded package
+  let debSum = ''; // its sha512 as the release states it, in hex
   const set = (next) => {
     state = { ...state, ...next };
     changed();
@@ -112,6 +113,8 @@ function createUpdater({ changed }) {
     if (!linux) return set({ status: 'ready', version: info.version });
     if (held()) return;
     deb = info.downloadedFile;
+    const entry = (info.files || []).find((f) => path.basename(f.url || '') === path.basename(deb)) || info;
+    debSum = entry.sha512 ? Buffer.from(entry.sha512, 'base64').toString('hex') : '';
     const can = await elevation();
     if (held()) return;
     set({ status: 'ready', version: info.version, ...(can.ok ? { manual: '', why: '' } : { manual: command(), why: can.why }) });
@@ -150,7 +153,14 @@ function createUpdater({ changed }) {
     if (state.status !== 'ready') return;
     if (!can.ok) return set({ manual: command(), why: can.why });
     set({ status: 'installing', manual: '', why: '' });
-    const apt = [program('apt-get') || 'apt-get', 'install', '-y', '--allow-downgrades', deb];
+    // The package was checked when it was downloaded, into a folder any of
+    // the user's programs can write to, and may sit there for hours before
+    // this. So what is installed is a copy root has taken and checked again:
+    // nothing can swap the file between the check and the install.
+    if (!/^[0-9a-f]{128}$/.test(debSum)) return set({ status: 'ready', manual: command(), why: 'the downloaded package has no checksum to check it against' });
+    const script = 'set -e; d=$(mktemp -d); trap \'rm -rf "$d"\' EXIT; cp -- "$1" "$d/loui.deb"; '
+      + 'echo "$2  $d/loui.deb" | sha512sum -c --status -; "$3" install -y --allow-downgrades "$d/loui.deb"';
+    const apt = ['/bin/sh', '-c', script, 'sh', deb, debSum, program('apt-get') || 'apt-get'];
     const { code, stderr } = can.root ? await run(apt[0], apt.slice(1)) : await run(can.pkexec, ['--disable-internal-agent', ...apt]);
     if (code === 0) return restart();
     // 126: the password prompt was dismissed. 127: polkit refused, or had nothing to ask with.

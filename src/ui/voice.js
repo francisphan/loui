@@ -414,7 +414,7 @@ const voice = (() => {
     const audio = joined(t.pieces, t.samples);
     let loudest = 0;
     for (let i = 0; i < audio.length; i++) loudest = Math.max(loudest, Math.abs(audio[i]));
-    if (audio.length < 4800 || loudest < 0.01) return finish(audio.length < 4800 ? '' : `Loui heard nothing. Is the right microphone chosen in Windows? ${FALLBACK}`);
+    if (audio.length < 4800 || loudest < 0.01) return finish(audio.length < 4800 ? '' : `Loui heard nothing. Is the right microphone chosen in ${windows ? 'Windows' : 'the system\'s sound settings'}? ${FALLBACK}`);
     try {
       const text = tidy(await seams.recogniser.transcribe(audio));
       if (take !== t) return;

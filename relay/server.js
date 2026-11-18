@@ -239,16 +239,21 @@ async function start(options = {}) {
   const onlineAs = (name) => [...devices.values()].sort((a, b) => a.since - b.since).find((d) => same(d.name, name));
   // Runs the command for the device of this name and waits for it to sign in.
   const starting = new Map(); // lower-case name -> promise
+  const started = new Map(); // device name -> when its command last ran
+  const START_EVERY = Number(process.env.LOUI_START_EVERY_MS) || 120000;
   function startDevice(name, command) {
     const key = name.toLowerCase();
-    if (!starting.has(key)) {
+    // Once per device in two minutes, whoever asks: a start that did not bring
+    // the browser online is not run again and again.
+    if (!starting.has(key) && Date.now() - (started.get(key) || 0) >= START_EVERY) {
+      started.set(key, Date.now());
       starting.set(key, (async () => {
         run(command);
         for (const end = Date.now() + startMs; Date.now() < end && !onlineAs(name);) await sleep(200);
         starting.delete(key);
       })());
     }
-    return starting.get(key);
+    return starting.get(key) || Promise.resolve('recently');
   }
 
   // Every device there is to name: online first (longest connected first),
@@ -368,9 +373,11 @@ async function start(options = {}) {
           if (!command) return say(`Loui on ${row.name} is offline, and the relay cannot start it: it can only start Loui on its own machine, and has no command for this device. ${elsewhere}`, true);
           if (!start) return say(`Loui on ${row.name} is offline. The relay can start it: call devices with name "${row.name}" and start: true.`, true);
           s.calls++; // the session is in use while it waits
-          try { await startDevice(row.name, command); } finally { s.calls--; s.lastSeen = Date.now(); }
+          let ran;
+          try { ran = await startDevice(row.name, command); } finally { s.calls--; s.lastSeen = Date.now(); }
           if (sessions.get(s.id) !== s) return say('This session has ended.', true);
           d = onlineAs(row.name);
+          if (!d && ran === 'recently') return say(`The relay ran its command for ${row.name} less than ${Math.round(START_EVERY / 60000) || 1} minutes ago and Loui there has not come online; it will not run it again so soon. ${elsewhere}`, true);
           if (!d) return say(`The relay ran its command for ${row.name}, but Loui there did not come online within ${Math.round(startMs / 1000)} seconds. ${elsewhere}`, true);
         }
         if (d.id !== s.device) {

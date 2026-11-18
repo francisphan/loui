@@ -173,6 +173,21 @@ test('the user can point at an element', async () => {
   assert.match(await b.text('picks'), /selector: #card/);
 });
 
+test('the address bar follows the page again after a click in the page', async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const tab = (await b.state()).tabs.find((t) => t.active);
+  await b.ui('tab:js', { id: tab.id, code: `location.href = ${JSON.stringify(b.base + '/plain.html')}; 1` });
+  await b.ui('chrome:eval', "document.getElementById('address').focus(); 1"); // as a new tab leaves it
+  await b.ui('tab:press', { id: tab.id, x: 300, y: 300 }); // the user clicks in the page: the field stays the chrome's active element
+  await b.ui('tab:js', { id: tab.id, code: `location.href = ${JSON.stringify(b.base + '/second.html?followed')}; 1` });
+  let shown;
+  for (const end = Date.now() + 8000; Date.now() < end; await sleep(100)) {
+    shown = await b.ui('chrome:eval', "document.getElementById('address').value");
+    if (shown.endsWith('/second.html?followed')) break;
+  }
+  assert.match(shown, /second\.html\?followed$/);
+});
+
 test("Loui's own window can't be turned into a web page", async () => {
   // Stands in for dropping a link on the toolbar: anything that tries to
   // navigate the window chrome is stopped, and the chrome stays Loui's.

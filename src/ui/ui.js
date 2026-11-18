@@ -110,6 +110,10 @@ let addressTyped = false; // the owner has typed in the field since it took the 
 let addressTab = null; // the tab whose address it shows
 address.addEventListener('focus', () => { addressTyped = false; });
 address.addEventListener('input', () => { addressTyped = true; });
+// He pressed in the page. The field would stay the chrome's active element,
+// and so never follow the page again; it lets go, unless something he typed
+// is waiting in it.
+loui.on('page-pressed', () => { if (document.activeElement === address && !addressTyped) address.blur(); });
 address.onkeydown = (e) => {
   if (e.key !== 'Escape') return;
   address.value = activeTab()?.url || '';
