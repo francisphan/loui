@@ -436,8 +436,13 @@ test('Settings has the voice: reading aloud, the voice and its speed with a samp
   await act('voice:language', { code: 'fr', on: false });
   await act('voice:language', { code: 'es', on: false });
   assert.deepEqual(await on(), ['es'], 'the last one cannot be unticked');
-  await page("[...document.querySelectorAll('[data-setting=voice-languages] .st-tick')].find((l) => l.textContent === 'English').querySelector('input').click()");
-  await wait('English to be ticked', async () => (await on()).join() === 'en,es');
+  // The list is drawn again with each change of state, so a press can land on a box about to be replaced: pressed until it takes.
+  await wait('English to be ticked', async () => {
+    if ((await on()).join() === 'en,es') return true;
+    await page("[...document.querySelectorAll('[data-setting=voice-languages] .st-tick')].find((l) => l.textContent === 'English').querySelector('input').click()").catch(() => {});
+    await new Promise((r) => setTimeout(r, 600));
+    return (await on()).join() === 'en,es';
+  });
 
   // Dictation off: the microphone goes, with its settings.
   await act('voice:dictation', false);
