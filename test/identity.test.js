@@ -101,6 +101,28 @@ test('left through a redirect, the next site gets the usual one throughout', asy
   assert.equal(sub, sent, 'nothing of the full one leaks to it');
 });
 
+test('a pop-up onto such a host has the full one in its page too, and is still its opener\'s window', async () => {
+  // As a "Sign in with Google" button does: a page elsewhere opens the sign-in in a pop-up.
+  await b.ui('go', `http://127.0.0.1:${port}/page?opener`);
+  let opener;
+  for (const end = Date.now() + 8000; Date.now() < end; await sleep(100)) {
+    opener = (await b.state()).tabs.find((x) => x.active);
+    if (opener.url.endsWith('/page?opener') && !opener.loading) break;
+  }
+  await b.ui('tab:js', { id: opener.id, acted: true, code: `window.open('http://localhost:${port}/page?popup', 'signin', 'width=480,height=600'); 1` });
+  let pop;
+  for (const end = Date.now() + 8000; Date.now() < end && !pop; await sleep(100)) {
+    pop = (await b.state()).tabs.find((x) => x.url.endsWith('/page?popup') && !x.loading && seen.some((r) => r.path === '/sub?popup'));
+  }
+  assert.ok(pop, 'the pop-up opened as a tab');
+  const sent = seen.findLast((r) => r.path === '/page?popup').agent;
+  assert.match(sent, /Electron\//, 'its request says what Loui is');
+  assert.equal(await b.ui('tab:js', { id: pop.id, code: 'navigator.userAgent' }), sent, 'and its page reads the same');
+  assert.equal(seen.findLast((r) => r.path === '/sub?popup').agent, sent, 'as do its own requests');
+  assert.equal(await b.ui('tab:js', { id: pop.id, code: '!!window.opener' }), true, 'still its opener\'s window');
+  await b.ui('tab:close', pop.id);
+});
+
 test("a Claude session's tab does the same", async () => {
   const s = b.as('id', 'Claude Code');
   await s.text('navigate', { url: `http://localhost:${port}/page?e` });

@@ -103,6 +103,7 @@ class Tabs extends EventEmitter {
     this.groups = [{ id: YOU, label: 'You', source: null, current: null, busy: 0, status: '', paused: false }];
     this.seq = 0;
     this.relayOrigins = new Set();
+    this.ending = new WeakSet(); // pages Loui is ending itself (see the 'destroyed' listener in build())
     this.iconSeq = 0;
     this.setMaxListeners(50); // every module listens for changes
     this.watchNetwork(ses);
@@ -182,7 +183,7 @@ class Tabs extends EventEmitter {
     clearTimeout(tab.tuckTimer);
     if (tab.view) {
       if (!tab.window.win.isDestroyed()) tab.window.win.contentView.removeChildView(tab.view);
-      if (!tab.wc.isDestroyed()) tab.wc.close();
+      if (!tab.wc.isDestroyed()) { this.ending.add(tab.wc); tab.wc.close(); }
     }
     const g = this.group(tab.group);
     if (g?.current === tab.id) g.current = this.fallback(g)?.id || null;
@@ -271,18 +272,25 @@ class Tabs extends EventEmitter {
   // pinned: only for the user's own tabs (see pin()). window: for the user's
   // tabs, the window it opens in (the window being served if left out); a
   // session's tabs open in its group's window.
-  create(url, { group = YOU, show, device, history, asleep = false, pinned = false, window } = {}) {
+  // adopt: a page of Chromium's own making to put in the tab (what a page
+  // opened with window.open: see the window-open handler), not one made here.
+  create(url, { group = YOU, show, device, history, asleep = false, pinned = false, window, adopt = null, opener = null } = {}) {
     const w = group === YOU ? (window || this.window()) : this.windowFor(group);
     // A new tab of the user's, given no address, opens with what Settings says
     // (startpage.js). A session's new tab is blank.
-    if (!url && !history && group === YOU) url = this.newTab?.() || '';
+    if (!url && !history && group === YOU && !adopt) url = this.newTab?.() || '';
     const tab = {
       id: ++this.seq, view: null, wc: null, group, lent: false, title: '', url: '', favicon: null,
       loading: false, console: [], network: [], pointer: null, device: null, shotScale: 1,
       asleep: false, history: null, seenAt: Date.now(), pinned: pinned && group === YOU,
-      window: w, ses: w.ses, private: w.private,
+      // A pop-up's page is in its opener's session whichever window it is shown
+      // in (a private tab lent to a session sits in a normal window).
+      window: w, ses: opener ? opener.ses : w.ses, private: opener ? opener.private : w.private,
+      openerId: opener?.id || null, // the tab whose page opened this one (a pop-up)
     };
-    this.list.push(tab);
+    // A pop-up sits beside the tab that opened it.
+    if (opener && this.list.includes(opener)) this.list.splice(this.list.indexOf(opener) + 1, 0, tab);
+    else this.list.push(tab);
     this.tidy(); // a new tab goes at the end of its group
     const g = this.group(group);
     const shown = this.get(w.activeId);
@@ -300,20 +308,28 @@ class Tabs extends EventEmitter {
       this.emit('change');
       return tab;
     }
-    this.open(tab, show, { url, history });
+    this.open(tab, show, { url, history, adopt });
     return tab;
+  }
+
+  // What every tab's page is made with.
+  pagePreferences(ses) {
+    return { session: ses, sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'tab-preload.js') };
   }
 
   // Gives a tab a new view and loads its page (or its history) into it, in
   // sight while it loads (see the note at the top).
-  open(tab, show, { url, history }) {
-    this.build(tab);
+  open(tab, show, { url, history, adopt = null }) {
+    this.build(tab, adopt);
     tab.window.win.contentView.addChildView(tab.view);
     if (show) this.select(tab.id);
     else this.peek(tab);
     this.rest(tab);
     const wc = tab.wc;
-    if (history) wc.navigationHistory.restore(history).catch(() => wc.isDestroyed() || wc.loadURL(toUrl(url || '')).catch(() => {}));
+    // An adopted page is loaded by Chromium, for the page that opened it; the
+    // agent it should carry is settled first (identity.js).
+    if (adopt) this.emit('adopted', tab, url);
+    else if (history) wc.navigationHistory.restore(history).catch(() => wc.isDestroyed() || wc.loadURL(toUrl(url || '')).catch(() => {}));
     else wc.loadURL(toUrl(url || '')).catch(() => {});
     this.emit('change');
   }
@@ -332,6 +348,8 @@ class Tabs extends EventEmitter {
   // title, icon and history stay. A tab on screen never sleeps. sleep.js
   // decides which tabs may.
   sleep(tab) {
+    // Not while a page it opened is still open: that page would go with it (a sign-in, half done).
+    if (this.list.some((t) => t.openerId === tab.id && t.wc)) return;
     if (!tab || tab.asleep || this.onScreen(tab) || !tab.wc || tab.wc.isDestroyed()) return false;
     const nav = tab.wc.navigationHistory;
     const entries = nav.getAllEntries();
@@ -341,6 +359,7 @@ class Tabs extends EventEmitter {
     clearTimeout(tab.tuckTimer);
     tab.peeking = false;
     tab.window.win.contentView.removeChildView(tab.view);
+    this.ending.add(tab.wc);
     tab.wc.close();
     tab.view = tab.wc = null;
     tab.asleep = true;
@@ -351,11 +370,11 @@ class Tabs extends EventEmitter {
   }
 
   // A view and its page for a tab, with the page's events wired to it.
-  build(tab) {
-    const view = new WebContentsView({
+  build(tab, adopt = null) {
+    const view = new WebContentsView(adopt ? { webContents: adopt } : {
       // Throttled in the background unless a Claude session works in it (see rest()).
       // The preload gives the page itself nothing (see tab-preload.js).
-      webPreferences: { session: tab.ses, sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'tab-preload.js') },
+      webPreferences: this.pagePreferences(tab.ses),
     });
     view.setBackgroundColor('#ffffff');
     const wc = view.webContents;
@@ -434,16 +453,43 @@ class Tabs extends EventEmitter {
       // The pointer at the top edge of a page that has the whole window (fullscreen.js says how to leave).
       else if (mouse.type === 'mouseMove' && mouse.y <= 2 && this.isFull(tab)) this.emit('pointer-top', tab);
     });
+    // A page's new window becomes a new tab in the same group and window. It
+    // is the page Chromium makes for the opener, put in a tab (create's
+    // adopt), so that the two can still reach each other: a sign-in pop-up
+    // reports back to the page that opened it (window.opener) and then closes
+    // itself. A tab made afresh for the address would have no opener, and
+    // such a sign-in could never finish.
     wc.setWindowOpenHandler(({ url: to, disposition }) => {
-      if (/^https?:|^about:blank/i.test(to) && this.mayOpen(tab)) {
-        const opened = this.create(to, {
-          group: tab.group, window: tab.window, show: this.onScreen(tab) && disposition !== 'background-tab',
-        });
-        if (disposition !== 'background-tab' && !(tab.group === YOU && opened.private)) {
-          this.group(tab.group).current = opened.id;
-        }
-      }
-      return { action: 'deny' };
+      if (!/^https?:|^about:blank/i.test(to) || !this.mayOpen(tab)) return { action: 'deny' };
+      const show = this.onScreen(tab) && disposition !== 'background-tab';
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { webPreferences: this.pagePreferences(tab.ses) },
+        createWindow: (options) => {
+          const opened = this.create(to, { group: tab.group, window: tab.window, show, adopt: options.webContents, opener: tab });
+          if (disposition !== 'background-tab' && !(tab.group === YOU && opened.private)) {
+            this.group(tab.group).current = opened.id;
+          }
+          return opened.wc;
+        },
+      };
+    });
+    // A page that closes itself (window.close() in a pop-up, once it has done
+    // its work) takes its tab with it, at once: nothing may be left holding a
+    // page that is gone. A page Loui itself ends (a tab closed, put to sleep,
+    // made blank) is marked in this.ending first, and is not this.
+    wc.once('destroyed', () => {
+      if (this.ending.has(wc) || tab.wc !== wc || !this.list.includes(tab)) return; // ended from here
+      if (!this.windows.includes(tab.window) || tab.window.win.isDestroyed()) return; // its window is going, and all its pages with it
+      // Its page is gone already: close() has only the empty view to take away.
+      try { tab.window.win.contentView.removeChildView(tab.view); } catch {}
+      tab.view = tab.wc = null;
+      // And the user is back on the page it was opened from (where a sign-in
+      // that just finished shows), not on whichever tab was beside it.
+      const from = this.get(tab.openerId);
+      const back = from && from.window === tab.window && from.group === tab.group && this.onScreen(tab);
+      this.close(tab.id);
+      if (back && this.list.includes(from)) { this.select(from.id); from.wc?.focus(); }
     });
     wc.on('context-menu', (_e, p) => this.contextMenu(tab, p));
     wc.on('audio-state-changed', (e) => { tab.audible = !!e.audible; this.rest(tab); });
@@ -746,6 +792,7 @@ class Tabs extends EventEmitter {
     this.emit('leaving', tab);
     if (tab.view) { // a sleeping tab has no page to close
       w.win.contentView.removeChildView(tab.view);
+      this.ending.add(tab.wc);
       tab.wc.close();
     }
     const g = this.group(tab.group);
@@ -864,6 +911,7 @@ class Tabs extends EventEmitter {
       if (!dest) return this.close(id); // a private tab whose private windows have all closed
     }
     if (from.id === YOU) this.unstart(tab);
+    this.sever(tab);
     const left = tab.window;
     this.emit('handed', tab); // whoever had it lets go of what it left in the page (actions.js)
     // What the tab logged for whoever had it is not the next one's to read.
@@ -888,6 +936,33 @@ class Tabs extends EventEmitter {
   // session's to read. Its page is thrown away and a blank one made in its
   // place, there and then: navigating it away would take a moment, in which a
   // session could read it. The start page goes from the tab's history too.
+  // A tab changing hands must not stay joined to pages that do not: a page
+  // and the pop-up it opened hold each other (window.opener, the handle
+  // window.open returned) and could drive one another across the line. So
+  // the tab gets a new page of its own for the same address and history.
+  // Pop-ups it opened itself close with its old page.
+  kin(tab) {
+    return this.list.filter((t) => t !== tab && (t.openerId === tab.id || t.id === tab.openerId));
+  }
+  sever(tab) {
+    const kin = this.kin(tab);
+    tab.openerId = null;
+    for (const t of kin) if (t.openerId === tab.id) t.openerId = null;
+    if (!kin.some((t) => t.wc) || !tab.wc || tab.wc.isDestroyed()) return;
+    const nav = tab.wc.navigationHistory;
+    const entries = nav.getAllEntries();
+    const history = entries.length ? { entries, index: nav.getActiveIndex() } : null;
+    const shown = this.onScreen(tab);
+    this.emit('leaving', tab);
+    clearTimeout(tab.tuckTimer);
+    tab.peeking = false;
+    tab.window.win.contentView.removeChildView(tab.view);
+    this.ending.add(tab.wc);
+    tab.wc.close();
+    tab.view = tab.wc = null;
+    this.open(tab, shown, { url: tab.url, history });
+  }
+
   unstart(tab) {
     const nav = tab.wc && !tab.wc.isDestroyed() ? tab.wc.navigationHistory : null;
     const entries = nav ? nav.getAllEntries() : tab.history?.entries || [];
@@ -905,7 +980,7 @@ class Tabs extends EventEmitter {
     clearTimeout(tab.tuckTimer);
     tab.peeking = false;
     tab.window.win.contentView.removeChildView(tab.view);
-    if (!tab.wc.isDestroyed()) tab.wc.close();
+    if (!tab.wc.isDestroyed()) { this.ending.add(tab.wc); tab.wc.close(); }
     tab.view = tab.wc = null;
     this.open(tab, shown, { url: 'about:blank', history });
   }

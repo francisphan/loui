@@ -66,7 +66,12 @@ function lockToApp(wc) {
 
 // Claude works in this window while it sits behind others. Without these a
 // covered window stops rendering: clicks no longer land and screenshots fail.
-app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion'); // Windows
+// One switch for all of them (a second appendSwitch of the same name replaces the first).
+// CalculateNativeWinOcclusion: Windows, as above. FedCm: Chromium offers
+// pages its built-in federated sign-in, but Electron has no account chooser
+// to show for it, so a "Sign in with Google" button that uses it does nothing
+// at all; without it such a button falls back to its pop-up, which works.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,FedCm');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Sites that sniff for these tokens serve a broken page; the few that want
@@ -849,6 +854,11 @@ async function testHook({ ui, arg }) {
     const tab = tabs.get(arg);
     const [width, height] = tab.window.win.getContentSize();
     return { view: tab.view.getBounds(), window: { width, height }, full: tab.window.full === tab.id, wide: !!tab.window.wide };
+  }
+  // A script in one of a tab's frames, found by part of its address (for looking into an embedded frame).
+  if (ui === 'frame:js') {
+    const frame = tabs.get(arg.id)?.wc?.mainFrame.framesInSubtree.find((f) => f.url.includes(arg.match));
+    return frame ? frame.executeJavaScript(arg.code, !!arg.gesture) : 'no such frame';
   }
   if (ui === 'tab:crash') { tabs.get(arg)?.wc?.forcefullyCrashRenderer(); return 'ok'; } // as a page's process dying
   // A real press of the mouse in a tab's page, at a point in it, as the user's own.

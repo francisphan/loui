@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Opener</title>
+<h1>A page that signs in through a pop-up</h1>
+<button id="open" onclick="window.pop = window.open('/popup.html?from=opener', 'signin', 'width=480,height=600')">Sign in</button>
+<p id="out">not signed in</p>
+<script>
+  addEventListener('message', (e) => { document.getElementById('out').textContent = 'heard: ' + e.data; });
+</script>
