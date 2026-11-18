@@ -521,6 +521,9 @@ const days = (n) => (n === 1 ? '1 day' : `${n} days`);
 const minutes = (n) => (n === 60 ? '1 hour' : n === 120 ? '2 hours' : n === 1 ? '1 minute' : `${n} minutes`);
 // The usual choices, with the one in use if it is none of them (set by hand in settings.json).
 const withCurrent = (usual, now, label) => (usual.some(([v]) => v === now) ? usual : [[now, label(now)], ...usual]);
+// A spell-check language by name: "British English", "Spanish (Argentina)".
+const languages = new Intl.DisplayNames(undefined, { type: 'language' });
+const languageName = (code) => { try { return languages.of(code); } catch { return code; } };
 const speed = (r) => (r === 1 ? 'Normal' : `${r}×`);
 const validSearch = (url) => /^https?:\/\/\S+$/i.test(url) && url.includes('%s');
 let customSearch = false; // "Custom address" chosen, its address not yet given
@@ -568,6 +571,29 @@ const SECTIONS = [
             help: 'How Loui looks, and the colour scheme pages are told you prefer.',
             options: () => [['dark', 'Dark'], ['light', 'Light'], ['system', 'Follow the system']],
             get: (s) => s.general.theme, set: (v) => ['theme', v],
+          }),
+          choice({
+            id: 'zoom', label: 'Page zoom',
+            help: 'How large pages open. A site you zoom from the Zoom menu keeps its own size until you choose Reset zoom there.',
+            options: (s) => s.general.zoom.choices.map((p) => [p, `${p}%`]),
+            get: (s) => s.general.zoom.percent, set: (v) => ['zoom', Number(v)],
+          }),
+        ],
+      },
+      {
+        title: 'Languages', rows: [
+          ticks({
+            id: 'spelling', label: 'Check spelling in',
+            help: 'The languages whose spelling is checked as you type in pages, also in private windows. ' +
+              'With none ticked, nothing is checked. A dictionary may be downloaded from Google the first time its language is used.',
+            shown: (s) => s.general.spelling.available.length > 0,
+            items: (s) => s.general.spelling.available.map((code) => ({ value: code, label: languageName(code), on: s.general.spelling.on.includes(code) })),
+            set: (code, on) => ['spelling', { code, on }],
+          }),
+          info({
+            id: 'spelling-system', label: 'Spell checker',
+            help: 'This system\'s own spell checker is used, in the languages chosen in the system\'s settings.',
+            shown: (s) => !s.general.spelling.available.length,
           }),
         ],
       },
@@ -903,7 +929,8 @@ const SECTIONS = [
         title: 'The Claude panel', rows: [
           info({
             id: 'claude-account', label: 'Claude account',
-            help: 'The Claude panel uses your Claude subscription through Claude Code\'s own sign-in. No API key is involved, and Loui keeps nothing of the account.',
+            help: 'The Claude panel uses your Claude subscription through Claude Code\'s own sign-in. No API key is involved, and Loui keeps nothing of the account. ' +
+              'Signing out signs Claude Code out on this computer, wherever else you use it too.',
             value: (s) => accountWords(s.claude.account),
             buttons: [
               {
@@ -911,7 +938,17 @@ const SECTIONS = [
                 shown: (s) => s.claude.account.state === 'signed-out' && !s.claude.account.signIn,
               },
               { id: 'claude-check', label: 'Check again', act: ['claude:check'], disabled: (s) => !!s.claude.account.signIn },
+              {
+                id: 'claude-sign-out', label: 'Sign out', act: ['claude:sign-out'], ask: ['Sign out of Claude?', () => true],
+                shown: (s) => s.claude.account.state === 'ready' && s.claude.account.kind !== 'cloud' && !s.claude.account.signIn,
+              },
             ],
+          }),
+          choice({
+            id: 'claude-model', label: 'Model',
+            help: 'Which Claude model answers in the panel, from your next message. Default is the one Loui usually asks for.',
+            options: (s) => [['', 'Default'], ...s.claude.models.map((m) => [m, m[0].toUpperCase() + m.slice(1)])],
+            get: (s) => s.claude.model, set: (v) => ['claude:model', v],
           }),
         ],
       },
