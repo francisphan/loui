@@ -151,9 +151,34 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
     }).catch(() => tab.pointer);
   }
 
-  function mouse(tab, p, { button = 'left', double = false } = {}) {
+  // A press inside a frame from another site. sendInputEvent reaches only the
+  // tab's own process, and such a frame lives in another, so the press would
+  // do nothing; the debugger's input goes through Chromium's own routing,
+  // which finds the frame. Attached only for the press (DevTools may want it).
+  // Resolves false where it could not be done this way.
+  async function pressInFrame(tab, at, button, double) {
+    const d = tab.wc.debugger;
+    try { d.attach('1.3'); } catch { return false; }
+    tab.sending = true; // not the user's input (tabs.js)
+    try {
+      await d.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at });
+      for (let n = 1; n <= (double ? 2 : 1); n++) {
+        await d.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button, clickCount: n });
+        await d.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button, clickCount: n });
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      tab.sending = false;
+      try { d.detach(); } catch {}
+    }
+  }
+
+  async function mouse(tab, p, { button = 'left', double = false } = {}) {
     const at = toView(tab, p);
     tab.actedAt = Date.now(); // a page may open a tab on a click (tabs.mayOpen)
+    if ((p.over?.frame || p.guard?.frame) && await pressInFrame(tab, at, button, double)) return;
     tab.wc.sendInputEvent({ type: 'mouseMove', ...at });
     for (let n = 1; n <= (double ? 2 : 1); n++) {
       tab.wc.sendInputEvent({ type: 'mouseDown', ...at, button, clickCount: n });
@@ -441,7 +466,8 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         const judge = (t) => guard.judge(c.session, tab, t.over) || guard.judge(c.session, tab, t.guard);
         const target = await approach(c, tab, look, judge, (t) => `clicking ${what(t)}`, double ? 'double-click' : 'click');
         const note = target.covered ? ` Note: <${target.covered}> sits on top of it at the click point, so the click may have landed there instead.` : '';
-        mouse(tab, target, { button, double });
+        await mouse(tab, target, { button, double });
+        c.own(tab);
         return after(c, tab, `Clicked ${what(target)}.${note}`);
       },
     },
@@ -458,7 +484,8 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
         // The field is clicked first, and that click reaches whatever is on top of it.
         const judge = (t) => guard.judge(c.session, tab, t.over) || (submit ? guard.judge(c.session, tab, t.guard) : null);
         const target = await approach(c, tab, look, judge, (t) => `typing into "${shorten(t.name || t.role)}"`, 'type');
-        mouse(tab, target);
+        await mouse(tab, target);
+        c.own(tab);
         await sleep(60);
         c.own(tab);
         check(await page(tab, 'focus', { ref, selectAll: !!clear }), ref);

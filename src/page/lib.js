@@ -406,7 +406,16 @@
         }
       }
     }
+    // A frame from another site: what is in it under the pointer cannot be
+    // read from here, so the press itself is what gets judged (guardrails.js).
+    let frame = null;
+    if (/^I?FRAME$/.test(el.tagName)) {
+      let doc = null;
+      try { doc = el.contentDocument; } catch {}
+      if (!doc) { try { frame = new URL(el.src, location.href).hostname; } catch { frame = ''; } frame = frame || 'another site'; }
+    }
     return {
+      frame,
       role, name: nameOf(t), submits, clickable, form: form ? fieldsIn(form) : {},
       href: t.closest('a[href]')?.href || null,
       near: clean(t.closest('dialog,[role=dialog],[role=alertdialog],[aria-modal=true]')?.innerText, 300) || null,
