@@ -483,6 +483,7 @@ class Tabs extends EventEmitter {
     wc.once('destroyed', () => {
       if (this.ending.has(wc) || tab.wc !== wc || !this.list.includes(tab)) return; // ended from here
       if (!this.windows.includes(tab.window) || tab.window.win.isDestroyed()) return; // its window is going, and all its pages with it
+      if (tab.openerId) this.emit('popup-closed-itself', wc); // history forgets what only it visited
       // Its page is gone already: close() has only the empty view to take away.
       try { tab.window.win.contentView.removeChildView(tab.view); } catch {}
       tab.view = tab.wc = null;
