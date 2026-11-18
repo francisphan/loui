@@ -450,6 +450,7 @@ class Tabs extends EventEmitter {
     // Presses only: the pointer entering or crossing the page is not an action.
     wc.on('before-mouse-event', (_e, mouse) => {
       if (mouse.type === 'mouseDown' || mouse.type === 'mouseUp') acted();
+      if (mouse.type === 'mouseDown' && !tab.sending) this.emit('pressed', tab); // the user's own press (the address bar lets go)
       // The pointer at the top edge of a page that has the whole window (fullscreen.js says how to leave).
       else if (mouse.type === 'mouseMove' && mouse.y <= 2 && this.isFull(tab)) this.emit('pointer-top', tab);
     });

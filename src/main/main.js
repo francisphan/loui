@@ -580,6 +580,7 @@ function start() {
 
   tabs.on('change', pushState);
   tabs.on('focus', pushState); // questions follow the window the user is in
+  tabs.on('pressed', (tab) => { if (tabs.onScreen(tab) && !tab.window.win.isDestroyed()) tab.window.win.webContents.send('page-pressed'); });
   tabs.on('end-session', (id) => handlers['group:end'](id)); // "End session" in a group's menu
   // A session's group is paused and let go on from its menu, whichever tab is on screen.
   tabs.on('group-menu', (g, items) => items.unshift(
@@ -865,6 +866,7 @@ async function testHook({ ui, arg }) {
   if (ui === 'tab:press') {
     const tab = tabs.get(arg.id);
     if (tab) tab.userAt = Date.now(); // what Loui sends a page is otherwise not the user's (tabs.js)
+    if (tab) tabs.emit('pressed', tab);
     for (const type of ['mouseDown', 'mouseUp']) tab?.wc?.sendInputEvent({ type, x: arg.x, y: arg.y, button: 'left', clickCount: 1 });
     return 'ok';
   }

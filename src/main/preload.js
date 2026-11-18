@@ -30,7 +30,7 @@ const LISTEN = new Set([
   'bookmarks', 'passwords',
   'activity', 'show-activity',
   'group:end',
-  'tab:ask-close', 'update:ask', 'show-menu', 'show-louis', 'louis:closed',
+  'tab:ask-close', 'update:ask', 'page-pressed', 'show-menu', 'show-louis', 'louis:closed',
   'hint',
   'voice',
 ]);

@@ -110,6 +110,10 @@ let addressTyped = false; // the owner has typed in the field since it took the 
 let addressTab = null; // the tab whose address it shows
 address.addEventListener('focus', () => { addressTyped = false; });
 address.addEventListener('input', () => { addressTyped = true; });
+// He pressed in the page. The field would stay the chrome's active element,
+// and so never follow the page again; it lets go, unless something he typed
+// is waiting in it.
+loui.on('page-pressed', () => { if (document.activeElement === address && !addressTyped) address.blur(); });
 address.onkeydown = (e) => {
   if (e.key !== 'Escape') return;
   address.value = activeTab()?.url || '';
@@ -990,11 +994,7 @@ loui.on('state', (next) => {
   drawLink();
   drawUpdate();
   if (!state.groups.some((g) => g.busy)) liveStep?.classList.remove('live');
-  // The field counts as in use only while the window's own chrome has the
-  // keyboard, or he has typed in it: it stays the chrome's active element
-  // after a click in the page, and would otherwise never follow the page again.
-  const using = document.activeElement === address && (document.hasFocus() || addressTyped);
-  if (!using) address.value = tab?.url || '';
+  if (document.activeElement !== address) address.value = tab?.url || '';
   // Another tab came on screen while the field has the keyboard: it shows that
   // tab's address, selected, so that Enter cannot load the old one in the new
   // tab. What the owner has typed there stays.
