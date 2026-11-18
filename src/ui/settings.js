@@ -493,7 +493,8 @@ function updateWords(u) {
     checking: 'Checking…',
     latest: `Up to date: ${u.current} is the latest version.`,
     downloading: `Downloading ${u.version}: ${u.percent}%`,
-    ready: u.manual ? `${u.version} is downloaded. Loui can't install it itself: ${u.why}. In a terminal, run:  ${u.manual}  and then restart Loui.`
+    // The command on a line of its own (the value keeps its line breaks: settings.css).
+    ready: u.manual ? `${u.version} is downloaded. Loui can't install it itself: ${u.why}. ${u.again ? 'Try again, or in a terminal run:' : 'In a terminal, run:'}\n${u.manual}\nand then restart Loui.`
       : `${u.version} is ready. Restart Loui to update.`,
     installing: `Installing ${u.version}…`,
     installed: `${u.version} is installed. Restart Loui to use it.`,
@@ -1058,7 +1059,10 @@ const SECTIONS = [
           }),
           info({
             id: 'updates', label: 'Updates',
-            help: 'New versions download in the background and install when Loui next starts.',
+            // On Linux nothing is installed as Loui quits: installing takes an administrator's password.
+            help: navigator.platform.startsWith('Linux')
+              ? 'New versions download in the background. One is installed when you press “Restart to update”, which asks for an administrator’s password.'
+              : 'New versions download in the background and install when Loui next starts.',
             value: (s) => updateWords(s.about.update),
             buttons: [
               {
@@ -1071,6 +1075,16 @@ const SECTIONS = [
                 id: 'update-install', label: 'Restart to update', act: ['update:install'],
                 shown: (s) => (s.about.update?.status === 'ready' && !s.about.update.manual) || s.about.update?.status === 'installed',
                 ask: ['A session is working. Restart anyway?', (s) => s.about.working > 0],
+              },
+              {
+                // Linux, after the password prompt was dismissed: asks for it again, then installs and restarts.
+                id: 'update-retry', label: 'Try again', act: ['update:install'],
+                shown: (s) => s.about.update?.status === 'ready' && !!s.about.update.manual && !!s.about.update.again,
+                ask: ['A session is working. Restart anyway?', (s) => s.about.working > 0],
+              },
+              {
+                id: 'update-copy', label: 'Copy the command', act: ['update:copy'], done: 'Copied',
+                shown: (s) => s.about.update?.status === 'ready' && !!s.about.update.manual,
               },
             ],
           }),

@@ -404,6 +404,36 @@ test('Reading and About', async () => {
   assert.match((await row('updates')).value, /^Updates are off in this copy/);
   assert.equal(await js("document.getElementById('set-update-check').disabled"), true);
   assert.equal(await js("document.getElementById('set-update-install').hidden"), true);
+  // On Linux nothing installs as Loui quits, and the row does not say it does.
+  const help = await js("document.getElementById('help-updates').textContent");
+  if (process.platform === 'linux') assert.match(help, /installed when you press “Restart to update”/);
+  else assert.match(help, /install when Loui next starts/);
+  // A downloaded update Loui could not install (Linux; drawn here from a made-up state, as this copy
+  // has no updater): the command has a line of its own and a button to copy it, and "Try again"
+  // is there only after a password prompt that was dismissed.
+  const command = "sudo apt install '/home/me/.cache/loui-updater/pending/loui_9.9.9_amd64.deb'";
+  const drawn = (again) => js(`(() => {
+    draw({ ...state, about: { ...state.about, update: { status: 'ready', version: '9.9.9', current: '0.0.1', percent: 100, error: '', checked: 0,
+      manual: ${JSON.stringify(command)}, why: 'the request for an administrator\\'s password was dismissed', again: ${again} } } });
+    const shown = (id) => !document.getElementById(id).hidden;
+    const value = document.getElementById('value-updates');
+    return { lines: value.textContent.split('\\n'), breaks: getComputedStyle(value).whiteSpace,
+      install: shown('set-update-install'), retry: shown('set-update-retry'), copy: shown('set-update-copy'), check: shown('set-update-check') };
+  })()`);
+  const dismissed = await drawn(true);
+  assert.equal(dismissed.lines[1], command, 'the command is a line of its own');
+  assert.equal(dismissed.breaks, 'pre-line');
+  assert.match(dismissed.lines[0], /password was dismissed\. Try again, or in a terminal run:$/);
+  assert.equal(dismissed.lines[2], 'and then restart Loui.');
+  assert.deepEqual([dismissed.install, dismissed.retry, dismissed.copy, dismissed.check], [false, true, true, false]);
+  const cannot = await drawn(false);
+  assert.match(cannot.lines[0], /In a terminal, run:$/);
+  assert.deepEqual([cannot.install, cannot.retry, cannot.copy], [false, false, true]);
+  // Copying goes through the main process, which answers with the settings as they are: the made-up state is gone.
+  await use('update-copy');
+  await until(async () => /^Updates are off/.test((await row('updates')).value), 'the real state to be drawn again');
+  assert.equal((await row('updates')).note, 'Copied');
+  assert.equal(await js("document.getElementById('set-update-copy').hidden"), true);
   // The releases page opens in a tab of the main window.
   await use('releases');
   await until(async () => (await b.state()).tabs.some((t) => /github\.com\/francisphan\/loui\/releases/.test(t.url)), 'the releases page to open in a tab');

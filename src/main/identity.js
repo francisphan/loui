@@ -33,7 +33,12 @@ function createIdentity({ tabs, full, plain, hosts = HONEST }) {
   // agent set here only in a window the browser itself has loaded something
   // into, and a pop-up's pages are loaded for the page that opened it. Such a
   // tab is marked, and its first load onto one of these hosts is taken over
-  // below (it is still its opener's window: window.opener holds).
+  // (it is still its opener's window: window.opener holds). Only a GET is:
+  // loading the address afresh would turn a form being posted into a plain
+  // request for the page, its fields lost. What a load is sending is known
+  // only once its request is about to go out, so that is where it is taken
+  // over (attach); a posted form goes through as it is, and the mark stays
+  // for the next address the pop-up goes to.
   const unloaded = new WeakSet();
   tabs.on('adopted', (tab, url) => {
     unloaded.add(tab.wc);
@@ -44,10 +49,6 @@ function createIdentity({ tabs, full, plain, hosts = HONEST }) {
     wc.on('did-start-navigation', (e) => {
       if (!e.isMainFrame || e.isSameDocument) return;
       apply(tab, e.url);
-      if (!unloaded.has(wc) || !honest(e.url) || tab.device?.mobile) return;
-      unloaded.delete(wc);
-      const url = e.url;
-      setImmediate(() => { if (!wc.isDestroyed()) wc.loadURL(url).catch(() => {}); }); // in place of the one that just began
     });
     // A redirect that crosses between the two kinds of host (a sign-in link
     // usually reaches Google through one, and "Sign in with Google" leaves
@@ -80,6 +81,13 @@ function createIdentity({ tabs, full, plain, hosts = HONEST }) {
       if (d.resourceType !== 'mainFrame') return done({});
       const tab = tabs.list.find((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === d.webContentsId);
       if (!tab || tab.device?.mobile) return done({});
+      // A pop-up's first load onto one of these hosts (see unloaded): this
+      // request is dropped, and the tab loads the address itself in its place.
+      if (unloaded.has(tab.wc) && honest(d.url) && d.method === 'GET') {
+        unloaded.delete(tab.wc);
+        tab.wc.loadURL(d.url).catch(() => {});
+        return done({ cancel: true });
+      }
       const name = Object.keys(d.requestHeaders).find((k) => k.toLowerCase() === 'user-agent') || 'User-Agent';
       done({ requestHeaders: { ...d.requestHeaders, [name]: honest(d.url) ? full : plain } });
     });

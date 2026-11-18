@@ -19,7 +19,11 @@
 // already kept, or nothing.
 const { app } = require('electron');
 const dns = require('dns');
+const http = require('http');
+const https = require('https');
 const net = require('net');
+const zlib = require('zlib');
+const { pipeline } = require('stream');
 
 const WEATHER_MS = 30 * 60 * 1000;
 const NEWS_MS = 15 * 60 * 1000;
@@ -66,23 +70,57 @@ const LOCAL = new net.BlockList();
 for (const [a, n] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
   ['172.16.0.0', 12], ['192.168.0.0', 16], ['224.0.0.0', 3]]) LOCAL.addSubnet(a, n, 'ipv4');
 for (const [a, n] of [['::', 127], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]]) LOCAL.addSubnet(a, n, 'ipv6');
-const local = (ip) => LOCAL.check(ip, net.isIPv6(ip) ? 'ipv6' : 'ipv4'); // an IPv4 address written as IPv6 is checked as IPv4
+// The IPv4 address an IPv6 one stands for where a gateway turns one into the
+// other: NAT64 (64:ff9b::/96, the last four bytes) and 6to4 (2002::/16, the
+// four after the prefix). null for any other address.
+function carried(ip) {
+  let text;
+  try { text = new URL(`http://[${ip}]`).hostname.slice(1, -1); } catch { return null; } // as hex groups, "::" once at most
+  const [head, tail] = text.split('::').map((part) => (part ? part.split(':') : []));
+  const g = [...head, ...Array(8 - head.length - (tail || []).length).fill('0'), ...(tail || [])].map((x) => parseInt(x, 16));
+  const v4 = (hi, lo) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4(g[6], g[7]);
+  if (g[0] === 0x2002) return v4(g[1], g[2]);
+  return null;
+}
+const local = (ip) => {
+  if (!net.isIPv6(ip)) return LOCAL.check(ip, 'ipv4');
+  if (LOCAL.check(ip, 'ipv6')) return true; // an IPv4 address written as IPv6 is checked as IPv4
+  const inside = carried(ip);
+  return !!inside && LOCAL.check(inside, 'ipv4');
+};
 // For the tests only: the stand-ins' own host:port (comma-separated), which are on 127.0.0.1.
 const stubs = () => (testing('LOUI_FEEDS_LOCAL') || '').split(',').filter(Boolean);
 
-// The address as a URL if it is http(s) and on the open web; throws if not.
-// The name is looked up first, so a public name for a private address is
-// refused as well.
+// The address as a URL if it is http(s) and on the open web, and the
+// addresses its name stands for; throws if not. The name is looked up first,
+// so a public name for a private address is refused as well. (found is null
+// for a test's stand-in, which is not looked up.)
 async function web(url) {
   let u;
   try { u = new URL(url); } catch { throw new Error('not a web address'); }
   if (!/^https?:$/.test(u.protocol)) throw new Error('not a web address');
-  if (stubs().includes(u.host)) return u;
+  if (stubs().includes(u.host)) return { u, found: null };
   const host = u.hostname.replace(/^\[|\]$/g, '');
-  const found = /(^|\.)localhost\.?$/i.test(host) ? [] : net.isIP(host) ? [{ address: host }] : await dns.promises.lookup(host, { all: true });
+  const found = /(^|\.)localhost\.?$/i.test(host) ? [] : net.isIP(host) ? [{ address: host, family: net.isIPv6(host) ? 6 : 4 }] : await dns.promises.lookup(host, { all: true });
   if (!found.length || found.some((a) => local(a.address))) throw new Error('an address on this machine or its network');
-  return u;
+  return { u, found };
 }
+
+// The answer's head for a GET of u. The connection is made to the addresses
+// that were checked (found), not to whatever the name answers when asked a
+// second time: a name can say a public address once and 127.0.0.1 next. So
+// this is Node's http and not fetch, which looks every name up itself.
+function ask(u, found, signal) {
+  const lookup = found && ((host, options, done) => (options.all ? done(null, found) : done(null, found[0].address, found[0].family)));
+  return new Promise((done, failed) => {
+    (u.protocol === 'https:' ? https : http).get(u, {
+      signal, agent: false, ...(lookup && { lookup }),
+      headers: { accept: '*/*', 'accept-encoding': 'gzip, deflate, br', 'user-agent': 'node' }, // what fetch said it was
+    }, done).on('error', failed);
+  });
+}
+const UNPACK = { gzip: zlib.createGunzip, 'x-gzip': zlib.createGunzip, deflate: zlib.createInflate, br: zlib.createBrotliDecompress };
 
 // The body of an http(s) address as text: within TIMEOUT_MS, and MAX_BYTES at
 // most. Redirects are followed by hand, REDIRECTS at most, each one checked
@@ -92,21 +130,30 @@ async function get(url) {
   const signal = AbortSignal.timeout(TIMEOUT_MS);
   let res;
   for (let hops = 0; ; hops++) {
-    const u = await web(url);
-    res = await fetch(u, { signal, redirect: 'manual', headers: { accept: '*/*' } });
-    const to = res.status >= 300 && res.status < 400 && res.headers.get('location');
+    const { u, found } = await web(url);
+    res = await ask(u, found, signal);
+    const to = res.statusCode >= 300 && res.statusCode < 400 && res.headers.location;
     if (!to) break;
-    res.body?.cancel().catch(() => {});
+    res.destroy();
     if (hops >= REDIRECTS) throw new Error('too many redirects');
     url = new URL(to, u).href;
   }
-  if (!res.ok) throw new Error(`status ${res.status}`);
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    res.destroy();
+    throw new Error(`status ${res.statusCode}`);
+  }
+  const unpack = UNPACK[String(res.headers['content-encoding'] || '').trim().toLowerCase()];
+  const body = unpack ? pipeline(res, unpack(), () => {}) : res;
   const parts = [];
   let size = 0;
-  for await (const part of res.body) {
-    size += part.length;
-    if (size > MAX_BYTES) break;
-    parts.push(part);
+  try {
+    for await (const part of body) {
+      size += part.length;
+      if (size > MAX_BYTES) break;
+      parts.push(part);
+    }
+  } finally {
+    res.destroy();
   }
   return Buffer.concat(parts).toString('utf8');
 }
@@ -358,4 +405,4 @@ function createFeeds({ settings, save }) {
   };
 }
 
-module.exports = { createFeeds, parseFeed, KNOWN_FEEDS, DEFAULT_FEEDS };
+module.exports = { createFeeds, parseFeed, get, local, KNOWN_FEEDS, DEFAULT_FEEDS };

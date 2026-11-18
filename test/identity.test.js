@@ -9,11 +9,11 @@ const http = require('http');
 const { launch } = require('./drive');
 
 let b, server, port;
-const seen = []; // { host, agent } of each page request
+const seen = []; // { host, path, method, agent } of each page request
 test.before(async () => {
   server = http.createServer((req, res) => {
     const host = req.headers.host.split(':')[0];
-    if (req.url.startsWith('/page') || req.url.startsWith('/sub')) seen.push({ host, path: req.url, agent: req.headers['user-agent'] });
+    if (req.url.startsWith('/page') || req.url.startsWith('/sub')) seen.push({ host, path: req.url, method: req.method, agent: req.headers['user-agent'] });
     // /to-other: a redirect to the same page on the other host, as a sign-in link makes.
     if (req.url.startsWith('/to-other')) {
       const other = host === 'localhost' ? '127.0.0.1' : 'localhost';
@@ -115,10 +115,53 @@ test('a pop-up onto such a host has the full one in its page too, and is still i
     pop = (await b.state()).tabs.find((x) => x.url.endsWith('/page?popup') && !x.loading && seen.some((r) => r.path === '/sub?popup'));
   }
   assert.ok(pop, 'the pop-up opened as a tab');
+  assert.equal(seen.filter((r) => r.path === '/page?popup').length, 1, 'asked for once');
   const sent = seen.findLast((r) => r.path === '/page?popup').agent;
   assert.match(sent, /Electron\//, 'its request says what Loui is');
   assert.equal(await b.ui('tab:js', { id: pop.id, code: 'navigator.userAgent' }), sent, 'and its page reads the same');
   assert.equal(seen.findLast((r) => r.path === '/sub?popup').agent, sent, 'as do its own requests');
+  assert.equal(await b.ui('tab:js', { id: pop.id, code: '!!window.opener' }), true, 'still its opener\'s window');
+  await b.ui('tab:close', pop.id);
+});
+
+test('a form posted into a pop-up on such a host arrives as a POST, once; the address it goes to next has the full one in its page', async () => {
+  // As a page does that opens an empty pop-up and posts a form into it.
+  await b.ui('go', `http://127.0.0.1:${port}/page?poster`);
+  let opener;
+  for (const end = Date.now() + 8000; Date.now() < end; await sleep(100)) {
+    opener = (await b.state()).tabs.find((x) => x.active);
+    if (opener.url.endsWith('/page?poster') && !opener.loading) break;
+  }
+  await b.ui('tab:js', {
+    id: opener.id, acted: true, code: `(() => {
+      window.open('', 'posted', 'width=480,height=600');
+      const form = document.createElement('form');
+      form.method = 'post';
+      form.action = 'http://localhost:${port}/page?posted';
+      form.target = 'posted';
+      form.innerHTML = '<input name="token" value="t1">';
+      document.body.append(form);
+      form.submit();
+      return 1;
+    })()`,
+  });
+  let pop;
+  for (const end = Date.now() + 8000; Date.now() < end && !pop; await sleep(100)) {
+    pop = (await b.state()).tabs.find((x) => x.url.endsWith('/page?posted') && !x.loading && seen.some((r) => r.path === '/sub?posted'));
+  }
+  assert.ok(pop, 'the pop-up opened as a tab');
+  await sleep(300); // a load taken over would ask a second time
+  assert.deepEqual(seen.filter((r) => r.path === '/page?posted').map((r) => r.method), ['POST'], 'the form arrived as it was sent, and only once');
+  assert.match(seen.find((r) => r.path === '/page?posted').agent, /Electron\//, 'saying what Loui is');
+  // The pop-up goes on to another address there, as a sign-in does: that load is the one taken over.
+  await b.ui('tab:js', { id: pop.id, code: `location.href = 'http://localhost:${port}/page?next'; 1` });
+  for (const end = Date.now() + 8000; Date.now() < end; await sleep(100)) {
+    const t = (await b.state()).tabs.find((x) => x.id === pop.id);
+    if (t.url.endsWith('/page?next') && !t.loading && seen.some((r) => r.path === '/sub?next')) break;
+  }
+  const sent = seen.findLast((r) => r.path === '/page?next').agent;
+  assert.match(sent, /Electron\//);
+  assert.equal(await b.ui('tab:js', { id: pop.id, code: 'navigator.userAgent' }), sent, 'its page reads what the request said');
   assert.equal(await b.ui('tab:js', { id: pop.id, code: '!!window.opener' }), true, 'still its opener\'s window');
   await b.ui('tab:close', pop.id);
 });

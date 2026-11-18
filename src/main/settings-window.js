@@ -16,7 +16,7 @@
 // sender. No secret goes to the page: the relay key and passwords are not in
 // state(), and the key travels one way, from the page to link.js.
 const path = require('path');
-const { BrowserWindow, ipcMain, app, nativeTheme, screen, shell } = require('electron');
+const { BrowserWindow, ipcMain, app, clipboard, nativeTheme, screen, shell } = require('electron');
 const { YOU } = require('./tabs');
 const loginItem = require('./login-item');
 
@@ -188,6 +188,8 @@ function createSettingsWindow({
     'profile:open': () => { shell.openPath(home); },
     'update:check': () => updater.check(),
     'update:install': () => updater.install(),
+    // The command that installs a downloaded update by hand (Linux): from here, not from the page.
+    'update:copy': () => { const { manual } = updater.state() || {}; if (manual) clipboard.writeText(manual); },
     // In a tab of the user's, in a normal window (a new one if only private ones are open).
     releases: () => defaultBrowser.open([RELEASES]),
   };

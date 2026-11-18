@@ -29,7 +29,7 @@ const chrome = (code) => b.ui('chrome:eval', code);
 const fake = () => JSON.parse(fs.readFileSync(script, 'utf8'));
 const tell = (change) => fs.writeFileSync(script, JSON.stringify({ ...fake(), ...change }));
 const account = async () => (await b.state()).claude;
-// Asks afresh, as "Check again" does, and waits for the answer.
+// Asks afresh, as "I’ve signed in" does, and waits for the answer.
 const check = async (state) => {
   await b.ui('claude', { do: 'check' });
   return until(async () => { const a = await account(); return !a.checking && (!state || a.state === state) && a; }, `the account to be ${state}`);
@@ -104,7 +104,7 @@ test('signed out: the card, and signing in on a page in a new tab of the owner\'
   assert.equal(c.composer, false);
   assert.equal(c.title, 'Sign in to Claude to use the panel');
   assert.equal(c.line, 'It uses your Claude subscription through Claude Code. No API key is involved.');
-  assert.deepEqual(c.buttons, ['Sign in', 'Check again']);
+  assert.deepEqual(c.buttons, ['Sign in', 'I’ve signed in']);
   assert.equal(c.code, false);
 
   const before = (await b.state()).tabs.length;
@@ -145,7 +145,7 @@ test('Claude Code opens the system\'s browser itself: Loui waits, and can open t
   const before = (await b.state()).tabs.length;
   await press('account-sign-in');
   let c = await until(async () => { const now = await card(); return now.buttons.includes('Open the sign-in page here') && now; }, 'the sign-in to start');
-  assert.equal(c.line, 'Finish signing in in your browser…');
+  assert.equal(c.line, 'Finish signing in in your default browser, or open the page here.');
   assert.deepEqual(c.buttons, ['Open the sign-in page here', 'Cancel']);
   assert.equal(c.code, false);
   assert.equal((await b.state()).tabs.length, before); // no tab of Loui's: the browser is Claude Code's to open
@@ -162,7 +162,7 @@ test('Claude Code opens the system\'s browser itself: Loui waits, and can open t
   await press('account-cancel');
   await until(async () => !(await account()).signIn, 'the sign-in to stop');
   c = await card();
-  assert.deepEqual(c.buttons, ['Sign in', 'Check again']);
+  assert.deepEqual(c.buttons, ['Sign in', 'I’ve signed in']);
   assert.equal(c.note, '');
   assert.equal((await account()).state, 'signed-out');
 
@@ -173,7 +173,16 @@ test('Claude Code opens the system\'s browser itself: Loui waits, and can open t
   const tab = await until(() => tabWith(url), 'the sign-in page');
   assert.equal(tab.group, 'you');
   await until(async () => (await card()).code, 'the code field');
+  // The code is masked as it is typed, shown when asked, and masked again once it is sent.
+  const field = () => chrome("(() => { const s = document.getElementById('account-code-show'); return [document.getElementById('account-code').type, s.textContent, s.getAttribute('aria-label')]; })()");
+  assert.deepEqual(await field(), ['password', 'Show', 'Show the code']);
+  await press('account-code-show');
+  assert.deepEqual(await field(), ['text', 'Hide', 'Hide the code']);
+  await press('account-code-show');
+  assert.deepEqual(await field(), ['password', 'Show', 'Show the code']);
+  await press('account-code-show');
   await paste(CODE);
+  assert.deepEqual(await field(), ['password', 'Show', 'Show the code']);
   await until(async () => (await account()).state === 'ready' && !(await account()).signIn, 'the sign-in to finish');
   await closeTab(url);
 });
@@ -188,9 +197,9 @@ test('a sign-in that fails says why, and the card stays', async () => {
   const c = await until(async () => { const now = await card(); return now.note && !(await account()).signIn && now; }, 'the sign-in to fail');
   assert.equal(c.note, 'That did not work: This account has no Claude subscription.');
   assert.equal(c.title, 'Sign in to Claude to use the panel');
-  assert.deepEqual(c.buttons, ['Sign in', 'Check again']);
+  assert.deepEqual(c.buttons, ['Sign in', 'I’ve signed in']);
   assert.equal((await account()).state, 'signed-out');
-  // "Check again" forgets the failure.
+  // "I’ve signed in" forgets the failure.
   await check('signed-out');
   assert.equal((await card()).note, '');
   await closeTab(url);
@@ -208,7 +217,7 @@ test('not known: the message box stays, and a message turned away for want of a 
   c = await until(async () => { const now = await card(); return now.shown && !(await account()).checking && now; }, 'the card');
   assert.equal(c.title, 'Sign in to Claude to use the panel');
   assert.equal(c.note, 'Not logged in'); // the error's first line, without the advice for a terminal
-  assert.deepEqual(c.buttons, ['Sign in', 'Check again']);
+  assert.deepEqual(c.buttons, ['Sign in', 'I’ve signed in']);
   assert.equal((await account()).state, 'signed-out');
   // Not printed raw in the conversation, which keeps what was asked.
   await until(async () => !(await b.state()).groups.find((g) => g.id === 'you').busy, 'the message to end');
@@ -232,13 +241,13 @@ test('Claude Code not installed: the card says what to install', async () => {
     assert.equal(c.composer, false);
     assert.equal(c.title, 'Claude Code is not installed');
     assert.match(c.line, /Install Claude Code on this computer and sign in/);
-    assert.deepEqual(c.buttons, ['Get Claude Code', 'Check again']);
+    assert.deepEqual(c.buttons, ['Get Claude Code', 'I’ve signed in']);
     // A message sent anyway (from the command palette, say) is not answered with an error in red.
     await b.ui('chat:send', { text: 'Hello' });
     await pause(400);
     assert.equal(await chrome("document.querySelectorAll('#feed .trouble').length"), 0);
     await b.ui('chat:reset');
-    // Installed, and "Check again": the message box is back.
+    // Installed, and "I’ve signed in": the message box is back.
     install();
     tell({ status: 'subscription' });
     await check('ready');
@@ -275,7 +284,7 @@ test('Settings › Claude: the account in words, Check again, and Sign in', asyn
   await until(async () => (await account()).signIn?.step === 'browser', 'the sign-in to start');
   assert.equal(fake().calls.filter((c) => c.startsWith('auth login')).length, calls + 1);
   assert.equal((await row()).value, 'Signing in. Finish in your browser, or in the Claude panel.');
-  assert.equal((await card()).line, 'Finish signing in in your browser…');
+  await until(async () => (await card()).line === 'Finish signing in in your default browser, or open the page here.', 'the card to say where');
   tell({ done: true });
   await until(async () => (await row()).value.startsWith('Signed in with your Claude subscription'), 'the row to say so');
 
