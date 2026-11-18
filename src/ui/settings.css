@@ -147,6 +147,7 @@
 .st-list .quiet { flex: none; }
 .st-add { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; }
 .st-words > .st-list { max-width: 420px; }
+#value-updates { white-space: pre-line; } /* the command to install an update by hand has a line of its own */
 .st-value .quiet { display: inline-flex; margin-left: 4px; text-decoration: underline; text-underline-offset: 2px; }
 /* Things to add with one press, and boxes to tick. */
 .st-offers { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }

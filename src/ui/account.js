@@ -40,15 +40,24 @@ const account = (() => {
   code.spellcheck = false;
   code.placeholder = 'Code from the sign-in page';
   code.setAttribute('aria-label', 'Code from the sign-in page');
+  // Masked until asked: "Show" lets a code typed by hand be read back.
+  const mask = (on) => {
+    code.type = on ? 'password' : 'text';
+    show.textContent = on ? 'Show' : 'Hide';
+    show.setAttribute('aria-label', on ? 'Show the code' : 'Hide the code');
+  };
+  const show = button('account-code-show', 'quiet', 'Show', () => mask(code.type !== 'password'));
+  show.setAttribute('aria-label', 'Show the code');
   const go = el('button', 'account-main', 'Continue');
   go.type = 'submit';
   go.id = 'account-code-send';
-  form.append(code, go);
+  form.append(code, show, go);
   form.onsubmit = (e) => {
     e.preventDefault();
     if (!code.value.trim()) return;
     ask('code', { code: code.value });
     code.value = '';
+    mask(true);
   };
 
   const row = el('div');
@@ -56,7 +65,7 @@ const account = (() => {
   const signIn = button('account-sign-in', 'account-main', 'Sign in', () => ask('sign-in'));
   const install = button('account-install', 'account-main', 'Get Claude Code', () => loui.send('tab:new', SETUP));
   const open = button('account-open', 'quiet', 'Open the sign-in page here', () => ask('open'));
-  const check = button('account-check', 'quiet', 'Check again', () => ask('check'));
+  const check = button('account-check', 'quiet', 'I’ve signed in', () => ask('check'));
   const cancel = button('account-cancel', 'quiet', 'Cancel', () => ask('cancel'));
   row.append(signIn, install, open, check, cancel);
 
@@ -89,7 +98,7 @@ const account = (() => {
     line.textContent = missing
       ? `The panel runs on Claude Code and your Claude subscription. Install Claude Code on this computer${navigator.platform.startsWith('Win') ? ' (or in WSL)' : ''} and sign in. Other Claude sessions can still use this browser.`
       : step === 'starting' ? 'Starting Claude Code’s sign-in…'
-        : step === 'browser' ? 'Finish signing in in your browser…'
+        : step === 'browser' ? `Finish signing in in your default browser${a.signIn.canOpen ? ', or open the page here' : ''}.`
           : step === 'page' ? `Sign in on the page that opened.${a.signIn.code ? ' If it shows a code, paste it here.' : ''}`
             : step === 'finishing' ? 'Finishing…'
               : 'It uses your Claude subscription through Claude Code. No API key is involved.';
@@ -99,12 +108,13 @@ const account = (() => {
     note.hidden = !trouble;
 
     form.hidden = !(step === 'page' && a.signIn.code);
+    if (form.hidden) mask(true);
     signIn.hidden = !!step || missing;
     install.hidden = !missing;
     open.hidden = !(step === 'browser' && a.signIn.canOpen);
     check.hidden = !!step;
     check.disabled = !!a.checking;
-    check.textContent = a.checking ? 'Checking…' : 'Check again';
+    check.textContent = a.checking ? 'Checking…' : 'I’ve signed in';
     cancel.hidden = !step || step === 'finishing';
   }
 

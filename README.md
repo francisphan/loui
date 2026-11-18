@@ -252,11 +252,12 @@ status`, through the same Claude Code the panel runs, WSL included) when the
 panel or Settings opens, and keeps the answer in memory for a few minutes.
 
 - **Not signed in** (or the login has expired): the message box gives way to a
-  card with **Sign in** and *Check again*. *Sign in* runs Claude Code's own
-  `claude auth login`. Claude Code opens your system's browser, and the card
-  waits: *Finish signing in in your browser…*, with *Cancel*. *Open the
-  sign-in page here* opens the page in a new tab of your own instead; that
-  page shows a code, which you paste into the card. When Claude Code is done
+  card with **Sign in** and *I've signed in* (which asks again). *Sign in*
+  runs Claude Code's own `claude auth login`. Claude Code opens your system's
+  browser, and the card waits: *Finish signing in in your default browser, or
+  open the page here.*, with *Cancel*. *Open the sign-in page here* opens the
+  page in a new tab of your own instead; that page shows a code, which you
+  paste into the card (masked, with *Show* beside it). When Claude Code is done
   Loui asks again, and the message box is back, or the card says why not.
 - **Not known** (an older Claude Code without that command, or no answer in
   time): the message box stays. If a message is then turned away for want of
@@ -501,7 +502,9 @@ your profile.
   for a password (no desktop, so no polkit agent; or `pkexec` not installed),
   the toolbar's button reads *Update downloaded* and it and *Settings › About*
   give the command to run instead, for example
-  `sudo apt install ~/.cache/loui-updater/pending/loui_0.7.0_amd64.deb`.
+  `sudo apt install ~/.cache/loui-updater/pending/loui_0.7.0_amd64.deb`
+  (*Copy the command* in Settings copies it). The same is shown when the
+  password prompt is dismissed, with *Try again* to ask for it once more.
   However the new version got installed, a running Loui notices and offers
   *Restart to finish updating*.
 

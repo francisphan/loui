@@ -18,7 +18,7 @@ body.account-card :is(#composer, #starters) { display: none; }
 #account-note { font-size: 13.5px; }
 #account-card #account-note { color: var(--danger); }
 
-#account-code-form { display: flex; gap: 8px; }
+#account-code-form { display: flex; align-items: center; gap: 8px; }
 #account-code {
   flex: 1;
   min-width: 0;

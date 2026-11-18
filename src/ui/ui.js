@@ -970,7 +970,7 @@ function drawUpdate() {
   }
   if (u.manual) {
     $('update').textContent = 'Update downloaded';
-    $('update').title = `Version ${u.version} is downloaded, but Loui can't install it itself: ${u.why}. In a terminal, run:  ${u.manual}  and then restart Loui. (Click for Settings, where the command can be copied.)`;
+    $('update').title = `Version ${u.version} is downloaded, but Loui can't install it itself: ${u.why}. In a terminal, run:  ${u.manual}  and then restart Loui. (Click for Settings, where the command can be copied${u.again ? ' and Loui can try again' : ''}.)`;
     return;
   }
   $('update').textContent = 'Restart to update';

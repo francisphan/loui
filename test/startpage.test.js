@@ -5,6 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const dns = require('dns');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -519,6 +520,45 @@ test('a feed is fetched from the web only: not from this machine, directly or by
   assert.match(await words(tab.id), /Harvest starts early & well/);
   await act('start:feed-remove', `${at}/moved`);
   await act('start:feed-add', `${at}/feed`);
+});
+
+test('a name that says a public address when checked and this machine when asked again is not followed here', async () => {
+  // startfeeds.js on its own, in this process: the name is looked up once for
+  // the check (dns.promises.lookup) and would be again for the connection
+  // (dns.lookup), and the second answer is the server on this machine.
+  const feeds = require('../src/main/startfeeds');
+  const first = dns.promises.lookup, second = dns.lookup;
+  let again = 0;
+  dns.promises.lookup = async () => [{ address: '192.0.2.1', family: 4 }]; // a documentation address: on the web as far as the check goes, and nothing answers there
+  dns.lookup = (host, options, done) => {
+    again++;
+    const cb = typeof options === 'function' ? options : done;
+    if (options?.all) cb(null, [{ address: '127.0.0.1', family: 4 }]); else cb(null, '127.0.0.1', 4);
+  };
+  const before = hits.inner;
+  try {
+    await assert.rejects(feeds.get(`http://rebound.example:${new URL(within).port}/secret`));
+  } finally {
+    dns.promises.lookup = first;
+    dns.lookup = second;
+  }
+  assert.equal(hits.inner, before, 'the server on this machine was not asked');
+  assert.equal(again, 0, 'and the name was not looked up a second time');
+});
+
+test('an address that stands for a private one through a gateway is refused: NAT64 and 6to4', async () => {
+  const { local, get } = require('../src/main/startfeeds');
+  for (const ip of ['64:ff9b::7f00:1', '64:ff9b::10.0.0.1', '64:ff9b::c0a8:101', '2002:7f00:1::1', '2002:a00:1::', '2002:c0a8:101:0:0:0:0:1', '2002:a9fe:a9fe::1']) {
+    assert.equal(local(ip), true, ip);
+  }
+  // The same forms of an address on the web are let through, as are plain ones.
+  for (const ip of ['64:ff9b::808:808', '2002:808:808::1', '2606:4700:4700::1111', '8.8.8.8']) assert.equal(local(ip), false, ip);
+  for (const ip of ['::1', '::ffff:127.0.0.1', 'fd00::1', '192.168.1.1']) assert.equal(local(ip), true, ip);
+  const before = hits.inner;
+  const port = new URL(within).port;
+  await assert.rejects(get(`http://[64:ff9b::7f00:1]:${port}/secret`), /on this machine or its network/);
+  await assert.rejects(get(`http://[2002:7f00:1::1]:${port}/secret`), /on this machine or its network/);
+  assert.equal(hits.inner, before);
 });
 
 test("a session's new tab is blank, and the footer counts the sessions open", async () => {

@@ -12,9 +12,10 @@
 // shows the desktop's password prompt, and installs with apt-get. Where
 // nothing can show that prompt (a server with no desktop, or no pkexec), Loui
 // says so and gives the command to run instead, and nothing is installed when
-// Loui quits. However the new version got there (that command, or apt from
-// elsewhere), Loui notices that what is installed is no longer what is
-// running, and offers to restart.
+// Loui quits. A prompt that was dismissed can be asked for again ("Try
+// again" in Settings, beside the command). However the new version got
+// there (that command, or apt from elsewhere), Loui notices that what is
+// installed is no longer what is running, and offers to restart.
 //
 // LOUI_UPDATE_URL points the updater at another server (a folder with
 // latest.yml or latest-linux.yml and the installer), for testing an update
@@ -92,8 +93,9 @@ function createUpdater({ changed }) {
   // on disk; this one is still running).
   // checked: when the last check ended (the Settings window says how it went).
   // manual: on Linux, the command that installs the update, once Loui knows it
-  // cannot (why: the reason, or how its own try ended).
-  let state = { status: 'idle', version: null, percent: 0, error: '', checked: 0, manual: '', why: '' };
+  // cannot (why: the reason, or how its own try ended; again: the password
+  // prompt was dismissed, so asking once more can work).
+  let state = { status: 'idle', version: null, percent: 0, error: '', checked: 0, manual: '', why: '', again: false };
   let deb = null; // the downloaded package
   let debSum = ''; // its sha512 as the release states it, in hex
   const set = (next) => {
@@ -117,7 +119,7 @@ function createUpdater({ changed }) {
     debSum = entry.sha512 ? Buffer.from(entry.sha512, 'base64').toString('hex') : '';
     const can = await elevation();
     if (held()) return;
-    set({ status: 'ready', version: info.version, ...(can.ok ? { manual: '', why: '' } : { manual: command(), why: can.why }) });
+    set({ status: 'ready', version: info.version, again: false, ...(can.ok ? { manual: '', why: '' } : { manual: command(), why: can.why }) });
   });
   autoUpdater.on('error', (e) => {
     if (state.status !== 'ready' && !held()) set({ status: 'failed', error: e?.message || String(e), checked: Date.now() });
@@ -135,7 +137,7 @@ function createUpdater({ changed }) {
       const version = stdout.trim();
       if (code === 0 && version && version !== app.getVersion()) {
         asking = 0;
-        return set({ status: 'installed', version, manual: '', why: '' });
+        return set({ status: 'installed', version, manual: '', why: '', again: false });
       }
       if (--asking > 0) setTimeout(ask, 5000).unref();
     };
@@ -151,8 +153,8 @@ function createUpdater({ changed }) {
   async function installDeb() {
     const can = await elevation();
     if (state.status !== 'ready') return;
-    if (!can.ok) return set({ manual: command(), why: can.why });
-    set({ status: 'installing', manual: '', why: '' });
+    if (!can.ok) return set({ manual: command(), why: can.why, again: false });
+    set({ status: 'installing', manual: '', why: '', again: false });
     // The package was checked when it was downloaded, into a folder any of
     // the user's programs can write to, and may sit there for hours before
     // this. So what is installed is a copy root has taken and checked again:
@@ -167,7 +169,7 @@ function createUpdater({ changed }) {
     const why = code === 126 ? 'the request for an administrator\'s password was dismissed'
       : code === 127 ? `the system did not allow it${/agent/i.test(stderr) ? ' (no polkit agent is running)' : ''}`
         : `apt-get did not finish (${(stderr.trim().split('\n').pop() || `exit code ${code}`).slice(0, 200)})`;
-    set({ status: 'ready', manual: command(), why });
+    set({ status: 'ready', manual: command(), why, again: code === 126 });
   }
 
   // Errors arrive through the 'error' event; the promise only repeats them.
