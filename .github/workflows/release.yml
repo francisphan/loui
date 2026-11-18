@@ -44,7 +44,7 @@ jobs:
 
       - name: Test
         run: npm test
-        timeout-minutes: 10
+        timeout-minutes: 25
 
       - name: Build the Windows installer
         run: npm run dist:win

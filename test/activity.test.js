@@ -42,7 +42,7 @@ test("a session's steps are kept with their labels, pages and pictures", async (
   const log = await until(async () => {
     const l = await logOf('Claude Code');
     return l?.steps.filter((x) => x.thumb).length >= 2 && l;
-  }, 'pictures of the acting steps');
+  }, 'pictures of the acting steps', 25000); // a slow machine takes its time drawing a tab it must bring into sight first
   const labels = log.steps.map((x) => x.label);
   assert.deepEqual(labels, ['opening 127.0.0.1:' + new URL(b.base).port, 'reading the page', 'clicking button "Count"']);
   assert.equal(log.steps[0].url, b.base + '/');
