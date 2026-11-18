@@ -201,12 +201,13 @@ each Loui install and in Claude.
 - **The menu button** at the end of the toolbar has a short menu: new tab and
   windows, History (the tab closed last and the last few pages; with neither,
   it opens the panel), Bookmarks, Downloads, Passwords, Zoom (one row that
-  says the level), Find, Print, Full screen, Claude, More tools (reader view,
-  site permissions, device size, developer tools), Task manager, Settings,
-  Quit. The full menus are in the command palette and behind their shortcuts.
+  says the level), Find, Print, Full screen, Claude (with the connection to
+  other Claude sessions), More tools (reader view, site permissions, device
+  size, developer tools), Task manager, Settings, checking for updates, About,
+  Quit. It holds everything there is to do. The full menus are in the command palette and behind their shortcuts.
 - **Louis**, at the top left of the window, is a button (`Alt+L`): Loui's own
-  menu. Appearance, vertical tabs, the bookmarks bar, the Claude panel, new
-  windows, Settings (and the start page's), checking for updates, About.
+  menu, about Loui and how it looks. Appearance, vertical tabs, the bookmarks
+  bar, Settings (and the start page's), checking for updates, About.
 - **Vertical tabs.** *View › Vertical tabs* (or *File › Settings*) moves the
   tabs to a sidebar on the left: pinned tabs as a grid of icons, your tabs,
   then each session's group with what it is doing. The button at the top
@@ -767,7 +768,12 @@ change applies at once; there is no Save button. `Esc` or `Ctrl+W` closes it.
 - **Search**: the search engine, or an address of your own.
 - **Privacy and security**: sites with Shields off and the filter lists
   (*Update now*), remembered site permissions, sites that open in your other
-  browser, and what pop-ups and private windows do.
+  browser, what pop-ups and private windows do, and *Clear browsing data*:
+  browsing history (from the last hour, the last day, or all of it), cookies
+  and site data (which signs you out of sites) and cached files (both always
+  cleared whole: they carry no dates to go by) of your own windows. Saved
+  passwords, bookmarks, settings, the session log and your Claude sign-in
+  are not touched, and open tabs stay open.
 - **Passwords**: whether saving is offered (`"offerPasswords"`; filling
   works either way), the sites never offered, the Passwords panel, import.
 - **Claude**: the relay (address, key, on or off, status), connectors let in

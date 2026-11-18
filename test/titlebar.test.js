@@ -273,7 +273,7 @@ test('the menu button has a short menu of its own, one level deep', async () => 
     'History ▸', 'Bookmarks ▸', 'Downloads', 'Passwords', '-',
     'Zoom: 100% ▸', 'Find in page…', 'Print…', 'Full screen', '-',
     'Claude ▸', 'More tools ▸', 'Task manager', '-',
-    'Settings', menu.at(-3), '-', 'Quit']);
+    'Settings', 'Check for updates', menu.at(-3), '-', 'Quit']);
   assert.match(menu.at(-3), /^About Loui \d+\.\d+\.\d+/);
   // The device sizes and the developer tools are here, not in the toolbar.
   assert.equal(await chrome("document.getElementById('devtools')"), null);
@@ -284,7 +284,7 @@ test('the menu button has a short menu of its own, one level deep', async () => 
   assert.equal(pages.find((i) => i !== '-'), 'Second', 'the page just visited comes first');
   assert.ok(pages.filter((i) => i !== '-').length <= 7, `a few pages, not a long list: ${pages}`);
   assert.deepEqual(sub('History').slice(-2), ['-', 'Show all history']);
-  assert.deepEqual(sub('Claude'), ['Sessions', 'Claude panel', 'Point at something', 'Take over', 'Watch in a small window']);
+  assert.deepEqual(sub('Claude'), ['Sessions', 'Claude panel', 'Point at something', 'Take over', 'Watch in a small window', '-', 'Connection to other Claude sessions…']);
   // Zoom is one row, which says the level; what is used now and then is under More tools.
   assert.deepEqual(sub('Zoom: 100%'), ['Zoom in', 'Zoom out', 'Reset zoom']);
   assert.deepEqual(sub('More tools'), ['Reader view', 'Site permissions…', '-', 'Device size', 'Developer tools']);
@@ -297,6 +297,15 @@ test('the menu button has a short menu of its own, one level deep', async () => 
   await b.ui('menu:button', { in: 'Claude', click: 'Point at something' });
   await until(() => b.state(), (s) => s.picking.active);
   await b.ui('pick:cancel');
+  // The connection to other Claude sessions is reached from here, as from the lamp.
+  await b.ui('menu:button', { in: 'Claude', click: 'Connection to other Claude sessions…' });
+  await until(() => chrome(`document.getElementById('relay').hidden`), (h) => h === false);
+  await chrome(`document.getElementById('relay-close').click()`);
+  await b.ui('menu:button', { click: 'Check for updates' });
+  await until(() => b.ui('settings:state'), (s) => s.open);
+  await until(() => b.ui('settings:js', `document.querySelector('.st-section-tab[aria-selected="true"]')?.id`).catch(() => null), (s) => s === 'tab-about');
+  await b.ui('settings:close');
+  await until(() => b.ui('settings:state'), (s) => !s.open);
   await b.ui('menu:button', { click: 'Task manager' });
   await until(() => b.ui('taskmanager:state'), (t) => t.open);
   await b.ui('taskmanager:close');
@@ -399,13 +408,13 @@ test('with vertical tabs Louis is the top of the left column: the toolbar starts
   whole(l, [64, 64], 52);
   assert.deepEqual([l.tabrow, l.navrow, l.stage], [null, 64, [244, 44]], 'the toolbar from his right edge; the page beside the sidebar, under the toolbar');
   // A strip under the toolbar starts clear of him too, and the tabs still start under him, no lower than they need.
-  await b.ui('menu:louis', { click: 'Show the bookmarks bar' });
+  await b.ui('menu:louis', { click: 'Show bookmarks bar' });
   const strip = await until(() => chrome(`(() => { const r = document.getElementById('bookmarks-bar').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.bottom)]; })()`), ([, , bottom]) => bottom > 44);
   assert.deepEqual(strip.slice(0, 2), [64, 44]);
   l = await until(louis, (x) => !x.over.length && x.tab < 64 + 20 && x.stage[1] === strip[2]);
   whole(l, [64, 64], 52);
   assert.ok(l.tab >= Math.max(64, strip[2]), `the first tab (${l.tab}) is under Louis and the strip (${strip[2]})`);
-  await b.ui('menu:louis', { click: 'Show the bookmarks bar' });
+  await b.ui('menu:louis', { click: 'Show bookmarks bar' });
   await until(() => chrome(`document.getElementById('bookmarks-bar').hidden`), (h) => h === true);
   // A collapsed sidebar sizes him to it.
   await b.ui('tabs:layout', { collapsed: true });
@@ -441,8 +450,7 @@ test('a private window has the same Louis, on its tint, and no Claude panel in h
   assert.deepEqual([l.tabrow, l.navrow], [64, 64]);
   assert.equal(l.back, 'rgb(23, 21, 42)', "the private window's colour");
   const menu = await b.ui('in-window', { window: id, ui: 'menu:louis' });
-  assert.ok(!menu.some((i) => /Claude panel/.test(i)), `no Claude panel: ${menu}`);
-  assert.ok(menu.includes('Vertical tabs') && menu.includes('New private window'));
+  assert.ok(menu.includes('Vertical tabs') && menu.includes('Settings'));
   await b.ui('tabs:layout', { vertical: true });
   l = await until(() => louis(inw), (x) => x.box[3] === 64 && x.tab >= 64);
   whole(l, [64, 64], 52);
@@ -477,41 +485,29 @@ test('pressing Louis (a click, Enter, Space, Alt+L) drops his menu under him', a
   assert.equal(await b.ui('menu:shown'), null, "none of which opened the menu button's");
 });
 
-test("Louis's menu: how Loui looks and is set up, each item ticked as things stand, and each acts", async () => {
+test("Louis's menu: about Loui and how it looks, each item ticked as things stand, and each acts", async () => {
   const read = () => b.ui('menu:louis');
   const menu = await read();
   assert.deepEqual(menu, [
     ['Appearance', ['✓ Dark', 'Light', 'Follow the system']], '-',
-    'Vertical tabs', 'Show the bookmarks bar', '✓ Claude panel', '-',
-    'New window', 'New private window', '-',
-    'Settings', 'Start page settings', 'Check for updates', '-',
+    'Vertical tabs', 'Show bookmarks bar', '-',
+    'Start page settings', 'Settings', 'Check for updates', '-',
     menu.at(-1)]);
+  // What there is to do (windows, the Claude panel) is the menu button's, not his.
+  assert.ok(!menu.flat(2).some((i) => /window|Claude/.test(i)), `nothing to do with windows or Claude: ${menu}`);
   assert.match(menu.at(-1), /^About Loui \d+\.\d+\.\d+/);
-  // The layout, the bookmarks bar and the panel: each is ticked once it is on.
+  // The layout and the bookmarks bar: each is ticked once it is on.
   await b.ui('menu:louis', { click: 'Vertical tabs' });
   await until(() => b.state(), (s) => s.tabStrip.vertical === true);
   assert.ok((await read()).includes('✓ Vertical tabs'));
   assert.equal((await b.ui('menu:item', 'bookmarks-bar')).checked, false);
   await b.ui('menu:louis', { click: 'Vertical tabs' });
   await until(() => b.state(), (s) => s.tabStrip.vertical === false);
-  await b.ui('menu:louis', { click: 'Show the bookmarks bar' });
+  await b.ui('menu:louis', { click: 'Show bookmarks bar' });
   await until(() => chrome(`document.getElementById('bookmarks-bar').hidden`), (h) => h === false);
-  assert.ok((await read()).includes('✓ Show the bookmarks bar'));
-  await b.ui('menu:louis', { click: 'Show the bookmarks bar' });
+  assert.ok((await read()).includes('✓ Show bookmarks bar'));
+  await b.ui('menu:louis', { click: 'Show bookmarks bar' });
   await until(() => chrome(`document.getElementById('bookmarks-bar').hidden`), (h) => h === true);
-  await b.ui('menu:louis', { click: 'Claude panel' });
-  await until(() => chrome(`document.body.classList.contains('panel-closed')`), (c) => c === true);
-  await until(read, (m) => m.includes('Claude panel'));
-  await b.ui('menu:louis', { click: 'Claude panel' });
-  await until(read, (m) => m.includes('✓ Claude panel'));
-  // Windows.
-  const from = (await b.state()).window.id;
-  await b.ui('menu:louis', { click: 'New private window' });
-  const two = await until(() => b.ui('windows'), (list) => list.length === 2);
-  assert.equal(two.find((w) => w.id !== from).private, true);
-  await b.ui('window:close', two.find((w) => w.id !== from).id);
-  await until(() => b.ui('windows'), (list) => list.length === 1);
-  await b.ui('window:focus', from);
   // Settings, on the section asked for.
   const section = () => b.ui('settings:js', `document.querySelector('.st-section-tab[aria-selected="true"]')?.id`);
   await b.ui('menu:louis', { click: 'Start page settings' });

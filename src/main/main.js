@@ -575,7 +575,7 @@ function start() {
     settings, save: saveSettings, tabs, home: paths.home, lockToApp, setTheme, setTabStrip, tabStrip,
     refreshMenu: () => Menu.setApplicationMenu(appMenu()),
     search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-    guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice,
+    guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice, history, ses: userSes,
   });
 
   tabs.on('change', pushState);
@@ -934,8 +934,8 @@ function showMenu({ x, y } = {}) {
 }
 
 // Louis, at the top left of the window (Alt+L presses him), has Loui's own
-// menu: how it looks and is set up, as against what the page and the tabs can
-// do, which is the menu button's. Each item does what the application menu's
+// menu: about Loui and how it looks, as against everything there is to do
+// (windows, the page, the tabs, Claude), which is the menu button's. Each item does what the application menu's
 // or the Settings window's does.
 let louisShown = null; // for the tests: where it was last opened
 function showLouisMenu({ x, y } = {}) {
@@ -947,7 +947,6 @@ function showLouisMenu({ x, y } = {}) {
   Menu.buildFromTemplate(louisMenu()).popup({ window: w.win, x: louisShown.x, y: louisShown.y, callback: closed });
 }
 function louisMenu() {
-  const w = tabs.window();
   const keys = (accelerator) => ({ accelerator, registerAccelerator: false });
   return inWindow([
     {
@@ -959,24 +958,22 @@ function louisMenu() {
     { type: 'separator' },
     { label: 'Vertical tabs', type: 'checkbox', checked: tabStrip().vertical, click: () => setTabStrip({ vertical: !tabStrip().vertical }) },
     {
-      label: 'Show the bookmarks bar', type: 'checkbox', checked: bookmarks.barShown(), ...keys('CmdOrCtrl+Shift+B'),
+      label: 'Show bookmarks bar', type: 'checkbox', checked: bookmarks.barShown(), ...keys('CmdOrCtrl+Shift+B'),
       click: () => bookmarks.setBar(!bookmarks.barShown()),
     },
-    // The panel stays out of private windows.
-    ...(w?.private ? [] : [{
-      label: 'Claude panel', type: 'checkbox', checked: w?.panelShown !== false, ...keys('CmdOrCtrl+Shift+L'), click: () => send('toggle-panel'),
-    }]),
     { type: 'separator' },
-    { label: 'New window', ...keys('CmdOrCtrl+N'), click: () => openWindow() },
-    { label: 'New private window', ...keys('CmdOrCtrl+Shift+N'), click: () => openWindow({ private: true }) },
-    { type: 'separator' },
-    { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
     { label: 'Start page settings', click: () => settingsWindow.open('start') },
-    // How the check went is said in Settings, under About.
-    { label: 'Check for updates', click: () => { updater.check(); settingsWindow.open('about'); } },
+    { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
+    { label: 'Check for updates', click: checkForUpdates },
     { type: 'separator' },
     { label: `About Loui ${app.getVersion()}`, click: () => app.showAboutPanel() },
   ]);
+}
+
+// How the check went is said in Settings, under About.
+function checkForUpdates() {
+  updater.check();
+  settingsWindow.open('about');
 }
 
 const RECENT_PAGES = 6;
@@ -1039,6 +1036,8 @@ function buttonMenu() {
           ...keys('CmdOrCtrl+Shift+.'), click: () => g && handlers.pause({ group: g.id, on: !g.paused }),
         },
         { label: 'Watch in a small window', enabled: !!g && g.id !== YOU, click: () => g && pip.open(g.id) },
+        { type: 'separator' },
+        { label: 'Connection to other Claude sessions…', click: show('show-relay') },
       ],
     },
     {
@@ -1055,6 +1054,7 @@ function buttonMenu() {
     { label: 'Task manager', ...keys('Shift+Esc'), click: () => taskManager.open() },
     { type: 'separator' },
     { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
+    { label: 'Check for updates', click: checkForUpdates },
     { label: `About Loui ${app.getVersion()}`, click: () => app.showAboutPanel() },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },

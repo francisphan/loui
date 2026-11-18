@@ -13,7 +13,8 @@ const TOOLS = require('../src/shared/tools');
 
 const files = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-downloads-'));
 let b;
-test.before(async () => { b = await launch({ LOUI_DOWNLOADS: files }); });
+// With something to encrypt passwords with, so that one can be saved (and seen to outlive a clearing).
+test.before(async () => { b = await launch({ LOUI_DOWNLOADS: files, LOUI_TEST_SAFESTORAGE: 'fake' }); });
 test.after(async () => {
   await b?.close();
   fs.rmSync(files, { recursive: true, force: true });
@@ -114,9 +115,9 @@ test('each section lists its settings', async () => {
     'New tabs open with', 'New tab address', 'Show the sites you visit most', 'Sites taken off the start page',
     'Show the weather', 'Your place', 'Temperature in', 'Show news headlines', 'News feeds', 'Well-known feeds',
   ]);
-  assert.deepEqual(of('Tabs'), ['Vertical tabs', 'Show the bookmarks bar', 'Put tabs to sleep after', 'Sites that are never put to sleep']);
+  assert.deepEqual(of('Tabs'), ['Vertical tabs', 'Show bookmarks bar', 'Put tabs to sleep after', 'Sites that are never put to sleep']);
   assert.deepEqual(of('Search'), ['Search engine', 'Search address']);
-  assert.deepEqual(of('Privacy and security'), ['Sites with Shields off', 'Filter lists', 'Pop-ups', 'Site permissions', 'Sites that open in your other browser', 'Private windows']);
+  assert.deepEqual(of('Privacy and security'), ['Sites with Shields off', 'Filter lists', 'Pop-ups', 'Site permissions', 'Sites that open in your other browser', 'Clear browsing data', 'Private windows']);
   assert.deepEqual(of('Passwords'), ['Offer to save passwords', 'Encryption', 'Sites whose passwords are never saved', 'Saved passwords', 'Import passwords']);
   assert.deepEqual(of('Claude'), [
     'Claude account',
@@ -256,6 +257,92 @@ test('Privacy and security: sites that open elsewhere, Shields, site permissions
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(b.home, 'shields.json'), 'utf8')).off, []);
   assert.equal(await js("document.getElementById('set-shields-update').disabled"), true, 'no lists to download in a test run');
   assert.match(await js("document.querySelector('[data-setting=\"popups\"] .st-help').textContent"), /right after you click or type/);
+});
+
+test('Privacy and security: Clear browsing data clears history, cookies and the cache, and leaves bookmarks and passwords', async () => {
+  // A page visited, which keeps a cookie and something in its storage; a bookmark and a password, which must stay.
+  const url = b.base + '/second.html?clear';
+  await b.ui('go', url);
+  const tab = await until(async () => { const t = (await b.state()).tabs.find((x) => x.active); return t.url === url && !t.loading && t; }, 'the page');
+  const page = (code) => b.ui('tab:js', { id: tab.id, code });
+  await page("document.cookie = 'kept=yes; max-age=3600'; localStorage.setItem('kept', 'yes'); 1");
+  assert.equal(await page('document.cookie'), 'kept=yes');
+  const visited = () => { try { return JSON.parse(fs.readFileSync(path.join(b.home, 'history.json'), 'utf8')).entries.map((e) => e.url); } catch { return []; } };
+  await until(() => visited().includes(url), 'the visit to be in the history');
+  await b.ui('bookmarks', { do: 'star' });
+  const bookmarked = async () => JSON.stringify(await b.ui('bookmarks:saved')).includes(url);
+  await until(bookmarked, 'the bookmark');
+  const csv = path.join(files, 'passwords.csv');
+  fs.writeFileSync(csv, ['name,url,username,password,note', 'example,https://accounts.example.com/signin,eve,made-up-for-the-test,'].join('\r\n'));
+  assert.deepEqual(await b.ui('passwords:import-file', csv), { added: 1, skipped: 0 });
+  fs.rmSync(csv);
+  const kept = { settings: JSON.stringify(saved()), passwords: (await b.ui('passwords:list')).items.length };
+
+  await js("window.showSectionForTest('privacy')");
+  const ticked = () => js("['history', 'cookies', 'cache'].map((k) => document.getElementById('set-clear-' + k).checked)");
+  assert.deepEqual(await ticked(), [true, false, true], 'signing out of every site is not ticked until asked for');
+  assert.equal(await js("document.getElementById('set-clear-range').value"), 'hour');
+  // What has no dates to go by says so, rather than pretending to follow the time range.
+  assert.deepEqual(await js("[...document.querySelectorAll('[data-setting=clear-data] .st-tick')].map((l) => l.textContent)"), [
+    'Browsing history', 'Cookies and site data (signs you out of sites; all time only)', 'Cached files (all time only)',
+  ]);
+  // With nothing ticked there is nothing to clear.
+  await use('clear-history');
+  await use('clear-cache');
+  assert.equal(await js("document.getElementById('set-clear-data').disabled"), true);
+  await use('clear-history');
+  await use('clear-cache');
+  await use('clear-cookies');
+  assert.deepEqual(await ticked(), [true, true, true]);
+  // The button asks first; pressed again, it clears, and says what it cleared.
+  await use('clear-data');
+  assert.equal(await js("document.getElementById('set-clear-data').textContent"), 'Clear it?');
+  assert.equal(await page('document.cookie'), 'kept=yes', 'nothing is cleared until it is pressed again');
+  await use('clear-data');
+  await until(async () => (await row('clear-data')).note, 'it to say what was cleared');
+  assert.match((await row('clear-data')).note, /^Cleared \d+ pages? of history from the last hour, cookies and site data, cached files\.$/);
+  assert.equal(await js("document.getElementById('set-clear-data').textContent"), 'Clear');
+
+  // Gone: the history, the cookie and the page's storage. The tab is still open and still works.
+  const { cleared } = (await b.ui('settings:state')).state.privacy;
+  assert.deepEqual([cleared.cookies, cleared.cache], [true, true]);
+  await until(() => !visited().length, 'the history to be emptied');
+  assert.equal(await page('document.cookie'), '');
+  assert.equal(await page("localStorage.getItem('kept')"), null);
+  assert.equal((await b.state()).tabs.find((t) => t.id === tab.id).url, url);
+  await page("document.cookie = 'again=yes'; 1");
+  assert.equal(await page('document.cookie'), 'again=yes', 'the open tab goes on working');
+  // Still there: the bookmark, the password, and Loui's settings.
+  assert.equal(await bookmarked(), true);
+  assert.equal((await b.ui('passwords:list')).items.length, kept.passwords);
+  assert.ok((await b.ui('passwords:list')).items.some((i) => i.username === 'eve'));
+  assert.equal(JSON.stringify(saved()), kept.settings);
+  await js("window.showSectionForTest('general')");
+});
+
+test('Clear browsing data: history follows the time range', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-test-'));
+  const ago = (hours) => Date.now() - hours * 60 * 60 * 1000;
+  const entry = (name, hours) => ({ url: `https://example.com/${name}`, title: name, visits: 1, first: ago(hours), last: ago(hours) });
+  fs.writeFileSync(path.join(home, 'history.json'), JSON.stringify({ version: 1, entries: [entry('last-week', 170), entry('this-morning', 3), entry('just-now', 0.1)] }));
+  const c = await launch({}, { home });
+  try {
+    const left = async () => (await c.ui('menu:button')).find((i) => Array.isArray(i) && i[0] === 'History')?.[1].filter((i) => /^[a-z]+-[a-z]+$/.test(i)) || [];
+    const clear = async (range) => {
+      await c.ui('settings:act', { what: 'data:clear', arg: { history: true, range } });
+      return (await c.ui('settings:state')).state.privacy.cleared;
+    };
+    assert.deepEqual(await left(), ['just-now', 'this-morning', 'last-week']);
+    assert.deepEqual(await clear('hour'), { history: 1 }, 'only what was asked for is cleared');
+    assert.deepEqual(await left(), ['this-morning', 'last-week']);
+    assert.deepEqual(await clear('day'), { history: 1 });
+    assert.deepEqual(await left(), ['last-week']);
+    assert.deepEqual(await clear('all'), { history: 1 });
+    assert.deepEqual(await left(), []);
+  } finally {
+    await c.close();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
 });
 
 test('Passwords: offering to save, and the Passwords panel', async () => {

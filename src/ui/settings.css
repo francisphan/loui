@@ -157,6 +157,9 @@
 }
 .st-tick { display: flex; align-items: center; gap: 7px; min-height: 24px; font-size: 13.5px; }
 .st-tick input { margin: 0; accent-color: var(--focus); }
+.st-clear { display: grid; gap: 2px; margin: 8px 0; }
+.st-clear-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.st-clear-line .st-note { white-space: normal; }
 
 @media (max-width: 760px) {
   .settings-page body { grid-template-columns: 172px minmax(0, 1fr); }
