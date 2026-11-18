@@ -36,13 +36,15 @@ function hostOf(input) {
 
 // settings, save: settings.json (main.js). tabs: the browser's. home: the
 // profile folder. setTheme, setTabStrip, tabStrip, refreshMenu: main.js's own.
+// ses: the session of the user's normal windows, whose browsing data can be cleared.
 // The rest are the modules whose settings are shown.
 function createSettingsWindow({
   settings, save, tabs, home, lockToApp, setTheme, setTabStrip, tabStrip, refreshMenu,
   search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-  guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice,
+  guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice, history, ses,
 }) {
   let win = null;
+  let cleared = null; // what "Clear browsing data" last did, for the page to say
   let sent = ''; // what the page was last sent, as text
   let placeTimer = null;
   // What only the system knows, asked when the window opens or comes back to
@@ -80,6 +82,7 @@ function createSettingsWindow({
         shields: shields.prefs(),
         permissions: permissions.state().sitePermissions,
         elsewhere: brave.state().elsewhere,
+        cleared,
       },
       passwords: passwords.prefs(),
       claude: {
@@ -147,6 +150,22 @@ function createSettingsWindow({
     'permission:forget': (which) => permissions.forget(which),
     'elsewhere:add': (site) => brave.add(site),
     'elsewhere:remove': (site) => brave.remove(site),
+    // Clear browsing data: what the user's normal windows kept, and nothing
+    // else. A private window's session goes when it closes. Passwords,
+    // bookmarks, settings, the session log, the relay key and Claude's sign-in
+    // are files of their own, not in this session. Open tabs stay as they are.
+    // Only history has dates to go by: cookies, site data and the cache are
+    // cleared whole, and the page says so.
+    'data:clear': async ({ history: pages, cookies, cache, range } = {}) => {
+      const since = range === 'hour' ? Date.now() - 60 * 60 * 1000 : range === 'day' ? Date.now() - 24 * 60 * 60 * 1000 : 0;
+      const did = {}; // per kind: pages forgotten, or whether it worked
+      if (pages) did.history = history.clearSince(since);
+      if (cookies) {
+        did.cookies = await ses.clearStorageData().then(() => ses.clearAuthCache()).then(() => true, () => false);
+      }
+      if (cache) did.cache = await ses.clearCache().then(() => true, () => false);
+      cleared = did;
+    },
     'passwords:offer': (on) => passwords.setOffer(on),
     'passwords:unnever': (origin) => passwords.unnever(origin),
     // The Passwords panel is the main window's: seeing a password asks there.
