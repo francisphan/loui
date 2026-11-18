@@ -1,0 +1,8 @@
+#!/bin/sh
+# Before the loui-relay package's files go: stop the service. (Not on an
+# upgrade: the new version's postinst restarts it.)
+set -e
+
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+  deb-systemd-invoke stop loui-relay.service >/dev/null || true
+fi

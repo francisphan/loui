@@ -485,6 +485,8 @@ function createPasswords({ tabs, home, send, changed, settings = {}, saveSetting
   }
   const prefs = () => ({
     offer: settings.offerPasswords !== false, available: cipher.available, why: WHY[cipher.why] || '',
+    // What else has no encryption then (link.js, activity.js): said once, here.
+    plain: cipher.available ? '' : 'For the same reason the relay key and the record of what sessions did are kept as plain files that only your user account can read.',
     saved: logins.length, never: never.map((origin) => ({ origin, site: siteOf(origin) })),
   });
 

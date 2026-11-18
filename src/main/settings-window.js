@@ -18,6 +18,7 @@
 const path = require('path');
 const { BrowserWindow, ipcMain, app, nativeTheme, screen, shell } = require('electron');
 const { YOU } = require('./tabs');
+const loginItem = require('./login-item');
 
 const RELEASES = 'https://github.com/francisphan/loui/releases';
 const SECTIONS = ['general', 'start', 'tabs', 'search', 'privacy', 'passwords', 'claude', 'reading', 'about'];
@@ -46,12 +47,13 @@ function createSettingsWindow({
   let placeTimer = null;
   // What only the system knows, asked when the window opens or comes back to
   // the front (the default browser is chosen in Windows' own settings).
-  const canLogin = process.platform !== 'linux';
+  const canLogin = loginItem.can();
   let login = false; // "Open Loui when I sign in"
   let browser = { can: false, isDefault: false };
   function askSystem() {
-    if (canLogin) login = app.getLoginItemSettings().openAtLogin;
+    if (canLogin) login = loginItem.get();
     browser = defaultBrowser.state();
+    defaultBrowser.look(); // Linux: asked of the system; it says through system() below if it changed
     chat.claude('look'); // whether Claude Code is signed in, if that was not asked lately
     voice.askVoices(); // the system's voices, from the main window (they come with a later state)
   }
@@ -127,8 +129,8 @@ function createSettingsWindow({
     ...voice.acts, // voice:…
     login: (on) => {
       if (!canLogin) return;
-      app.setLoginItemSettings({ openAtLogin: !!on });
-      login = !!on;
+      loginItem.set(!!on);
+      login = loginItem.get();
       refreshMenu(); // the File menu has it too
     },
     'default-browser': async () => { await defaultBrowser.makeDefault(win); askSystem(); },
@@ -306,7 +308,9 @@ function createSettingsWindow({
     'settings:stranger': ({ what, arg } = {}) => serve({ sender: tabs.win.webContents }, what, arg),
   };
 
-  return { open, changed: () => push(), probes, isOpen: () => !!win, webContents: () => (live() ? win.webContents : null) };
+  // The default browser turned out to be another than was shown.
+  const system = () => { browser = defaultBrowser.state(); push(); };
+  return { open, changed: () => push(), system, probes, isOpen: () => !!win, webContents: () => (live() ? win.webContents : null) };
 }
 
 module.exports = { createSettingsWindow, hostOf };

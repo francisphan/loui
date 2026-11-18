@@ -12,6 +12,7 @@ npm run relay      # run the relay in the foreground (normally a service, see be
 npm test           # end-to-end tests: real app, real relay, virtual display
 npm run test:integration   # a whole session through a relay of its own (see Testing)
 npm run dist:win   # build the Windows installer into dist/
+npm run dist:linux # build the Debian package into dist/ (and dist:relay, the relay's)
 ```
 
 ## How Claude sessions reach it
@@ -93,6 +94,10 @@ gave it. `launch.json` in the relay's home maps device names to shell commands:
 }
 ```
 
+On Debian, with Loui installed from its package, the command is the installed
+program: `"mydesktop": "DISPLAY=:0 /opt/Loui/loui"` for a relay that runs as
+you on a desktop, or the headless service on a server (see *Debian*).
+
 `"*"` is the command for a session that names no device while no browser is
 online (the same as `LOUI_LAUNCH`). The file is read each time, so editing it
 needs no restart. `LOUI_LAUNCH_<NAME>` in the environment does the same for a
@@ -116,11 +121,15 @@ itself is run.
 | `LOUI_PRIMARY` | Name of the browser new sessions use when several are online (default: the one connected longest) |
 | `LOUI_IDLE_MINUTES` | See "When a session ends", default 15 |
 
-Run it as a service so it is always there, for example a systemd user unit
-whose `ExecStart` is `node /path/to/loui/relay/server.js`, with the variables
-above as `Environment=` lines. To move the relay to another machine,
-copy this repository there, run `npm install --omit=dev`, start
-`relay/server.js`, and change the address in each Loui install and in Claude.
+Run it as a service so it is always there. On a Debian server, install the
+`loui-relay` package, which brings its own service (see *Debian*). From a
+checkout, a systemd user unit whose `ExecStart` is
+`node /path/to/loui/relay/server.js`, with the variables above as
+`Environment=` lines, does the same. To move the relay to another machine,
+install the package there (or copy this repository, run
+`npm install --omit=dev` and start `relay/server.js`), copy the relay's home
+across if the key and sign-ins should stay the same, and change the address in
+each Loui install and in Claude.
 
 ## Tab groups
 
@@ -421,7 +430,8 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
   opens in a new tab of yours, in the running Loui if there is one. Only
   http(s) addresses and existing .htm/.html files are taken from the command
   line, and Windows passes them after `--`, so a link is never read as a
-  Chromium switch. (On Linux, links given on the command line open too.)
+  Chromium switch. (On Debian the package does the same with a desktop
+  entry: see *Debian*.)
 - The Claude panel runs Claude Code: an installed `claude.exe` if there is
   one, otherwise Claude Code inside WSL (`wsl.exe`), with your WSL login.
 - **Updates.** An installed copy checks GitHub Releases shortly after launch and
@@ -430,6 +440,186 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
   installs it at once. Each download is checked against the SHA-512 published
   with the release; the builds are unsigned, so there is no publisher check.
 
+## Debian
+
+Loui runs on Debian 12 (bookworm) and 13 (trixie), amd64, from a package:
+`loui_<version>_amd64.deb` on the
+[releases page](https://github.com/francisphan/loui/releases), about 110 MB.
+A second, small package, `loui-relay_<version>_all.deb`, is the relay for a
+server. `npm run dist:linux` and `npm run dist:relay` build them into `dist/`.
+
+```bash
+v=$(curl -fsSL https://api.github.com/repos/francisphan/loui/releases/latest | sed -n 's/.*"tag_name": "v\(.*\)".*/\1/p')
+curl -fLO "https://github.com/francisphan/loui/releases/download/v$v/loui_${v}_amd64.deb"
+sudo apt install "./loui_${v}_amd64.deb"
+```
+
+apt brings what it depends on (GTK 3, NSS, ALSA's library, the Liberation
+fonts, `xdg-utils` and the like; all in Debian's main archive). The program is
+`/opt/Loui/loui`, with `loui` on the PATH, a desktop entry (*Loui*, under
+Internet) and the Louis icon. `sudo apt remove loui` takes it away and leaves
+your profile.
+
+- **Profile**: `~/.config/loui` (`LOUI_HOME` moves it).
+- **Sandbox.** Chromium's sandbox is on, as installed: Debian lets an ordinary
+  user make user namespaces, which is what Chromium uses; where a system
+  refuses them (a hardened `kernel.unprivileged_userns_clone=0`), Chromium
+  falls back to its `chrome-sandbox` helper, which the package installs
+  setuid root for that. Loui is never started with `--no-sandbox`.
+- **Default browser.** *Settings › General › Default browser* (or *File ›
+  Make Loui your default browser*) runs `xdg-settings set default-web-browser
+  loui.desktop` and shows what the system then says. Links from other apps
+  arrive as `loui -- <link>` and open in a new tab of the running Loui.
+- **Open Loui when I sign in** writes `~/.config/autostart/loui.desktop`,
+  which GNOME, KDE, Xfce and the others start; switching it off removes it.
+- **The window** has no title bar of the system's: the tab strip is the top of
+  the window and Loui draws the window buttons at its right end. Drag the
+  empty part of the strip to move it and double-click there to maximize. A
+  dock groups its windows with the launcher by the class `loui`
+  (`StartupWMClass`).
+- **Passwords** are saved only where there is a keyring to encrypt them with
+  (GNOME Keyring or KWallet: any GNOME or KDE desktop). Without one Loui does
+  not save passwords, and keeps the relay key and the record of what sessions
+  did as plain files only you can read; *Settings › Passwords › Encryption*
+  says so.
+- **The Claude panel** runs an installed Claude Code (the package leaves out
+  the Agent SDK's own 380 MB copy, as the Windows installer does). Loui looks
+  on the PATH, in `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`,
+  `/usr/local/bin` and `/usr/bin`, and then asks your login shell for its
+  PATH, so one installed through nvm is found too.
+- **Voice.** Dictation needs a microphone and read-back needs voices from the
+  system (`speech-dispatcher` with `espeak-ng`); without them the microphone
+  button says there is none and nothing is read. Windows' `Win+H` has no
+  counterpart here.
+- **Updates.** An installed copy checks GitHub Releases as on Windows and
+  downloads the new package in the background (to `~/.cache/loui-updater`).
+  Installing a package takes an administrator: *Restart to update* asks for
+  your password through the desktop's own prompt (polkit) and runs
+  `apt-get install` on the downloaded file, then opens Loui again. Unlike on
+  Windows, nothing is installed when Loui merely quits. Where nothing can ask
+  for a password (no desktop, so no polkit agent; or `pkexec` not installed),
+  the toolbar's button reads *Update downloaded* and it and *Settings › About*
+  give the command to run instead, for example
+  `sudo apt install ~/.cache/loui-updater/pending/loui_0.7.0_amd64.deb`.
+  However the new version got installed, a running Loui notices and offers
+  *Restart to finish updating*.
+
+What differs from Windows: no installer registry entries (a desktop entry
+instead), updates ask for a password and never install on quit, downloads get
+no Mark of the Web (Linux has none), passwords need a keyring, and the panel
+never falls back to WSL. There is no package for arm64: `electron-builder
+--linux deb --arm64` would build one on the same runner, but it has never been
+started on such a machine.
+
+### The relay as a service
+
+On the server that is to be the relay:
+
+```bash
+curl -fLO "https://github.com/francisphan/loui/releases/download/v$v/loui-relay_${v}_all.deb"
+sudo apt install "./loui-relay_${v}_all.deb"     # needs Debian's nodejs, which apt brings
+sudo cat /var/lib/loui-relay/key                 # the relay key: read it once, give it to each Loui and to Claude Code
+```
+
+The package holds the relay with exactly the modules it needs and installs
+`loui-relay.service`, enabled and started. It is a service of the system, not
+of a user: it starts with the machine, with nobody signed in, as a user of
+its own (`loui-relay`) that owns nothing else, shut away from the rest of the
+machine (`systemctl cat loui-relay` shows how: no access to `/home`, a
+read-only system, no new privileges). That user cannot open a browser on
+someone's desktop, which a server has no use for; on a desktop PC a user unit
+from a checkout, as above, still can.
+
+- **Home**: `/var/lib/loui-relay` (the key, connector sign-ins,
+  `devices.json`, `launch.json`), readable by that user only.
+- **Settings**: `/etc/default/loui-relay`, one `NAME=value` a line (the
+  variables under *Relay settings*); then `sudo systemctl restart loui-relay`.
+- **Log**: `journalctl -u loui-relay`.
+- **Reaching it.** It listens on `127.0.0.1:7332` only. To give it a public
+  address with Tailscale Funnel on port 8443 (Tailscale installed and signed
+  in, Funnel allowed for the machine in the tailnet's policy):
+
+  ```bash
+  sudo tailscale funnel --bg --https=8443 http://127.0.0.1:7332
+  tailscale funnel status          # shows https://<machine>.<tailnet>.ts.net:8443
+  echo 'LOUI_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:8443' | sudo tee -a /etc/default/loui-relay
+  sudo systemctl restart loui-relay
+  ```
+
+  That address goes in each Loui (*Settings › Claude*), in Claude Code's MCP
+  entry and in Claude's connector. `sudo tailscale funnel --https=8443 off`
+  takes it down.
+- **Upgrading**: download the newer package and `sudo apt install` it. The
+  service restarts (sessions connect again) and the key and sign-ins stay.
+  `sudo apt remove loui-relay` leaves the home and the settings for a later
+  install; `sudo apt purge loui-relay` removes them, key included.
+
+### On a server with no screen
+
+A Claude session can use a browser on the server itself: the installed Loui
+on a virtual display (Xvfb), as a service for a user of your choosing. It
+uses that user's profile (`~/.config/loui`), Downloads folder and Claude Code
+login.
+
+```bash
+sudo apt install ./loui_${v}_amd64.deb xvfb
+sudo sh -c 'umask 077; printf "LOUI_RELAY_URL=http://127.0.0.1:7332\nLOUI_RELAY_KEY=%s\n" "$(cat /var/lib/loui-relay/key)" > /etc/default/loui-headless'
+sudo systemctl enable --now loui-headless@francis     # the user it runs as
+```
+
+`/etc/default/loui-headless` tells it which relay to sign in to (here the one
+on the same machine); it then appears to sessions under the machine's name
+(`devices`). It runs all the time and, idle with one blank tab, takes about
+250 MB by systemd's count for the service (some 430 MB counting the program's
+own files as it maps them), Xvfb included.
+
+**Letting sessions in.** A new session is asked about in the window, here as
+on a desktop: "Let … use Loui?". Nobody sees this window, so until it is
+answered once with *Always allow* for the connector (the relay key, and each
+of Claude's connectors), sessions are told that you did not answer. To answer
+it, look at the virtual display while a session waits, over SSH:
+
+```bash
+sudo apt install x11vnc
+# on the server; the display (:99 unless that was taken) and its key are on Xvfb's command line
+sudo -u francis sh -c 'x11vnc -localhost -once -display :99 -auth "$(pgrep -a Xvfb | sed -n "s/.* -auth \([^ ]*\).*/\1/p")"'
+# from your computer, then open vnc://localhost
+ssh -L 5900:localhost:5900 server
+```
+
+The choice is kept in `consent.json` in the profile, per connector, and
+*Settings › Claude* lists and revokes it. Loui has no setting that lets
+sessions in unasked. To start it only when a session asks instead, leave it disabled, allow
+the relay's user to start that one unit, and name it in the relay's
+`launch.json`:
+
+```bash
+sudo tee /etc/polkit-1/rules.d/50-loui-headless.rules <<'EOF'
+polkit.addRule(function (action, subject) {
+  if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "loui-relay" &&
+      action.lookup("unit") == "loui-headless@francis.service" && action.lookup("verb") == "start") return polkit.Result.YES;
+});
+EOF
+echo '{ "*": "systemctl start loui-headless@francis" }' | sudo -u loui-relay tee /var/lib/loui-relay/launch.json
+```
+
+What is different with no screen, and how Loui says so:
+
+- **No keyring**, so no passwords are saved; the relay key comes from
+  `/etc/default/loui-headless` (root's to read) and the record of what
+  sessions did is plain files in the profile, which is closed to other users.
+- **No sound**: nothing to dictate into or read back with. Nothing fails.
+- **Updates**: nobody is there to ask for a password. The service keeps
+  running the version it started with; upgrade it as any package and restart:
+  `sudo apt install ./loui_<new>_amd64.deb && sudo systemctl restart 'loui-headless@*'`.
+- **No GPU**: pages are drawn in software. Screenshots and the pictures in
+  the record of what sessions did work.
+- **Questions** a session's work raises in the window (a guardrail's "may
+  it buy this?", a tab to hand over, something to point at) go unanswered
+  unless you are looking at the display; no answer in two minutes counts as no.
+- `journalctl -u loui-headless@francis` is its log. Loui quitting (its last
+  window closed) only makes the service start it again.
+
 ## Releasing
 
 1. Set `version` in `package.json` and commit.
@@ -437,7 +627,9 @@ time. The icon's source files are in `build/` (`icon.svg`, `icon.ico`,
 
 `.github/workflows/release.yml` runs the tests, builds the Windows installer
 and publishes it with `latest.yml` as a GitHub release, which installed copies
-then update to.
+then update to. A second job then builds the Debian packages and adds them to
+the release with `latest-linux.yml`, which copies installed on Debian read;
+if it fails, the Windows release stands.
 
 ## Testing
 
@@ -469,6 +661,26 @@ reach is Loui as it is shipped and used (`test/integration/`,
   with the new version running on the same profile; last, the uninstaller
   runs and must leave the profile. Logs, and a screenshot of each failure, are
   kept as the run's artifacts.
+- *Debian, packaged* (`debian.test.js`). The workflow builds the two packages
+  the way a release does, and again as the next version. For Debian 12 and for
+  13, a container of that release with systemd as its first process
+  (`test/integration/debian/Dockerfile`) gets the browser's package through
+  apt, and the test checks what was installed (every library found, the
+  sandbox helper's owner and mode, the desktop entry with
+  `desktop-file-validate`, the icons, the headless unit), drives the installed
+  `/opt/Loui/loui` on Xvfb under Xfce's window manager with the same checks
+  as the Windows job (`checks.js` holds what the two share), plus the Linux
+  ones: no process without the sandbox, the window's class, moving and
+  maximizing the frameless window with the mouse, the default browser set
+  through Settings and a link from `xdg-open` arriving in a tab, the autostart
+  entry, and what is kept unencrypted where there is no keyring. Then the
+  relay's package: its service really started by systemd, as its own user,
+  answering on the loopback address only; a headless Loui as a service that an
+  MCP session drives through that relay (a form, a screenshot); the relay's
+  upgrade, removal and purge. Then updates from a local server: the command
+  Loui gives where nothing can ask for a password, *Restart to update* through
+  polkit (a rule stands in for the password prompt), and a package changed by
+  apt under a running Loui. Last, `apt remove` and what it leaves.
 - *Relay, end to end* (`relay-e2e.test.js`). The relay as a process of its
   own, a real Loui signed in to it with the key, and real MCP clients: Claude
   Code with the key, then Claude's connector through the whole OAuth flow
@@ -479,7 +691,7 @@ reach is Loui as it is shipped and used (`test/integration/`,
 
 ```bash
 npm run test:integration                 # the relay story, here (Linux)
-gh workflow run integration.yml          # both, on GitHub; -f job=windows or -f job=relay for one
+gh workflow run integration.yml          # all three, on GitHub; -f job=windows, -f job=debian or -f job=relay for one
 ```
 
 The Windows file installs, updates and uninstalls the real per-user copy of
@@ -496,7 +708,12 @@ npm run test:integration:windows
 
 Without `LOUI_INTEGRATION_ALLOW=1` (or CI) it refuses to run at all, and it
 refuses `LOUI_INTEGRATION_INSTALLER` and `LOUI_INTEGRATION_UPDATE` anywhere
-but on a hosted runner. A release does not wait for this workflow: it runs
+but on a hosted runner. The Debian file has the same guard: packages are
+installed and removed, services started and the default browser changed only
+on a hosted runner; elsewhere `LOUI_INTEGRATION_ALLOW=1
+LOUI_INTEGRATION_EXE=/opt/Loui/loui npm run test:integration:debian` drives
+an installed copy on a temporary profile (it needs `Xvfb`, `xfwm4`, `xdotool`
+and ImageMagick's `import`). A release does not wait for this workflow: it runs
 beside `release.yml` on the same tag.
 
 **Live checks, nightly.** `live.test.js` is the only test that uses other
@@ -542,7 +759,7 @@ change applies at once; there is no Save button. `Esc` or `Ctrl+W` closes it.
 
 - **General**: appearance; whether Loui starts with the tabs from last time
   or a new tab (`"startup"`); open at sign-in and the default browser
-  (Windows); the downloads folder and *Ask where to save each file*;
+  (installed copies); the downloads folder and *Ask where to save each file*;
   and the start page: what new tabs open with, and its parts (see *Start
   page*).
 - **Tabs**: vertical tabs, the bookmarks bar, how long before a background
@@ -857,7 +1074,8 @@ private window has neither.
   you speak the next time). `"dictation": false` in `settings.json` removes
   the microphone button altogether.
 - **Windows' own dictation** (`Win+H`) types into the message box too, and
-  needs none of this.
+  needs none of this. (Debian has no counterpart; see *Debian* for what voice
+  needs there.)
 - **For whoever builds it.** transformers.js also depends on
   `onnxruntime-node` and `sharp`, native packages for Node that Loui never
   loads (only the browser bundle and one WebAssembly file are used, and only

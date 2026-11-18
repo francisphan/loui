@@ -940,23 +940,44 @@ relay.onsubmit = (e) => {
 // here the button restarts Loui. Until there is one, updates stay out of the way.
 function drawUpdate() {
   const u = state.update;
-  const ready = u?.status === 'ready';
-  const coming = u?.status === 'downloading';
+  // On Linux: installing (apt is at work), installed (a restart is all that
+  // is left), and manual (Loui cannot install it here; Settings has the command).
+  const ready = u?.status === 'ready' || u?.status === 'installed';
+  const coming = u?.status === 'downloading' || u?.status === 'installing';
   $('update').hidden = !ready && !coming;
   $('update').disabled = !ready;
   // A download is only said, quietly: nothing of Loui changes until it restarts, and there is nothing to press.
   $('update').classList.toggle('coming', coming);
+  if (u?.status === 'installing') {
+    $('update').textContent = 'Installing update…';
+    $('update').title = `Version ${u.version} is being installed. Loui restarts when it is done.`;
+    return;
+  }
   if (coming) {
     $('update').textContent = `Downloading update ${u.percent || 0}%`;
     $('update').title = `Version ${u.version} is downloading in the background. Loui will offer to restart when it is here.`;
     return;
   }
   if (!ready || $('update').classList.contains('sure')) return; // not while it asks
+  if (u.status === 'installed') {
+    $('update').textContent = 'Restart to finish updating';
+    $('update').title = `Version ${u.version} is installed. Loui closes and reopens as the new version; Claude sessions' tab groups close.`;
+    return;
+  }
+  if (u.manual) {
+    $('update').textContent = 'Update downloaded';
+    $('update').title = `Version ${u.version} is downloaded, but Loui can't install it itself: ${u.why}. In a terminal, run:  ${u.manual}  and then restart Loui. (Click for Settings, where the command can be copied.)`;
+    return;
+  }
   $('update').textContent = 'Restart to update';
+  if (navigator.platform.startsWith('Linux')) {
+    $('update').title = `Version ${u.version} is ready. Loui asks for an administrator's password to install the package, then closes and reopens; Claude sessions' tab groups close.`;
+    return;
+  }
   $('update').title = `Version ${u.version} is ready. Loui closes, the installer shows its progress for a few seconds, and Loui reopens; Claude sessions' tab groups close.`;
 }
 // Restarting closes sessions' tab groups, so while one is working (in any window) it asks first.
-askFirst($('update'), 'A session is working. Restart anyway?', () => state.working > 0, () => loui.send('update:install'));
+askFirst($('update'), 'A session is working. Restart anyway?', () => state.working > 0 && !state.update?.manual, () => loui.send('update:install'));
 loui.on('update:ask', () => $('update').click()); // "Restart to update" in the Help menu
 
 loui.on('state', (next) => {

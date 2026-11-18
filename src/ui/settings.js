@@ -402,7 +402,7 @@ function accountWords(a) {
     return `Signed in with your Claude subscription${a.detail ? ` (${a.detail})` : ''}.`;
   }
   if (a.state === 'signed-out') return `Not signed in.${a.detail ? ` ${a.detail}` : ''}${failed}`;
-  if (a.state === 'not-installed') return 'Claude Code is not installed on this computer (on Windows, or in WSL).';
+  if (a.state === 'not-installed') return 'Claude Code is not installed on this computer (or, on Windows, in WSL).';
   return `Loui could not tell. The panel says so if a message cannot be sent.${failed}`;
 }
 
@@ -493,7 +493,10 @@ function updateWords(u) {
     checking: 'Checking…',
     latest: `Up to date: ${u.current} is the latest version.`,
     downloading: `Downloading ${u.version}: ${u.percent}%`,
-    ready: `${u.version} is ready. Restart Loui to update.`,
+    ready: u.manual ? `${u.version} is downloaded. Loui can't install it itself: ${u.why}. In a terminal, run:  ${u.manual}  and then restart Loui.`
+      : `${u.version} is ready. Restart Loui to update.`,
+    installing: `Installing ${u.version}…`,
+    installed: `${u.version} is installed. Restart Loui to use it.`,
     failed: `Couldn't check: ${u.error || 'no reason given'}`,
   }[u.status] || '';
 }
@@ -528,7 +531,7 @@ const SECTIONS = [
           info({
             id: 'default-browser', label: 'Default browser',
             help: 'The default browser opens links from other apps.',
-            value: (s) => (!s.general.defaultBrowser.can ? 'Only a copy of Loui installed on Windows can be made the default browser.'
+            value: (s) => (!s.general.defaultBrowser.can ? 'Only an installed copy of Loui (the Windows installer or the Debian package) can be made the default browser.'
               : s.general.defaultBrowser.isDefault ? 'Loui is your default browser.' : 'Loui is not your default browser.'),
             buttons: [{
               id: 'default-browser', label: 'Make Loui the default browser', act: ['default-browser'],
@@ -798,7 +801,7 @@ const SECTIONS = [
           info({
             id: 'passwords-encryption', label: 'Encryption',
             help: 'Passwords are only ever saved encrypted, with a key this system keeps for you.',
-            value: (s) => (s.passwords.available ? 'Available.' : `Not available, so no passwords are saved. ${s.passwords.why}`),
+            value: (s) => (s.passwords.available ? 'Available.' : `Not available, so no passwords are saved. ${s.passwords.why}${s.passwords.plain ? ' ' + s.passwords.plain : ''}`),
           }),
           list({
             id: 'passwords-never', label: 'Sites whose passwords are never saved',
@@ -1060,13 +1063,13 @@ const SECTIONS = [
             buttons: [
               {
                 id: 'update-check', label: 'Check for updates now', act: ['update:check'],
-                shown: (s) => s.about.update?.status !== 'ready',
+                shown: (s) => !['ready', 'installing', 'installed'].includes(s.about.update?.status),
                 disabled: (s) => !s.about.update || ['checking', 'downloading'].includes(s.about.update.status),
               },
               {
                 // Restarting closes sessions' tab groups, so it asks first while one is working, as the toolbar's button does.
                 id: 'update-install', label: 'Restart to update', act: ['update:install'],
-                shown: (s) => s.about.update?.status === 'ready',
+                shown: (s) => (s.about.update?.status === 'ready' && !s.about.update.manual) || s.about.update?.status === 'installed',
                 ask: ['A session is working. Restart anyway?', (s) => s.about.working > 0],
               },
             ],

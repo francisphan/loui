@@ -1,0 +1,20 @@
+#!/bin/sh
+# After the loui-relay package's files are gone. `apt remove` leaves
+# /var/lib/loui-relay (the relay key, the sign-ins) and /etc/default/loui-relay
+# for a later install; `apt purge` removes them. The user stays: files it
+# owned may be on backups.
+set -e
+
+if [ -d /run/systemd/system ]; then
+  systemctl --system daemon-reload >/dev/null || true
+fi
+if [ "$1" = remove ] && [ -x /usr/bin/deb-systemd-helper ]; then
+  deb-systemd-helper mask loui-relay.service >/dev/null || true
+fi
+if [ "$1" = purge ]; then
+  if [ -x /usr/bin/deb-systemd-helper ]; then
+    deb-systemd-helper purge loui-relay.service >/dev/null || true
+    deb-systemd-helper unmask loui-relay.service >/dev/null || true
+  fi
+  rm -rf /var/lib/loui-relay
+fi
