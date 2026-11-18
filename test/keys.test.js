@@ -86,6 +86,9 @@ test('Esc closes a side panel from anywhere in the window chrome, once nothing n
   await menuKey('CmdOrCtrl+H');
   await until(async () => !(await hidden('history')), 'history to open');
   await b.ui('address:type', 'zzqq');
+  // The text and what is offered for it settle a moment after typing; Esc then is the address bar's own.
+  await until(async () => (await chrome("document.activeElement === document.getElementById('address') && document.getElementById('address').value")) === 'zzqq', 'the typed text');
+  await sleep(300);
   await press('Escape');
   await until(async () => (await chrome("document.getElementById('address').value")) === b.base + '/', 'the address to be put back');
   assert.equal(await hidden('history'), false, 'the panel stays');
