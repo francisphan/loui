@@ -240,7 +240,8 @@ test('a bookmarks file exported from Brave or Chrome imports onto the bar and in
 
   // The file's icon is not read in the main process: the window chrome draws
   // it small, and only that copy is kept and shown in the native menus.
-  const raw = find(data.bar, 'Example & Co').icon;
+  // (The file's own icon is read from the file: by now the chrome's copy may already have taken its place.)
+  const raw = /ICON="([^"]+)"/.exec(fs.readFileSync(file, 'utf8'))[1];
   const kept = await until(async () => { const n = find((await saved()).bar, 'Example & Co'); return n.drawn && n; }, "the chrome's small copy of the icon to be kept");
   assert.match(kept.icon, /^data:image\/png;base64,/);
   assert.notEqual(kept.icon, raw);
