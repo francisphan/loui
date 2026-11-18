@@ -15,7 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, Menu, ipcMain, session, nativeTheme, screen } = require('electron');
 const paths = require('../shared/paths');
-const { Tabs, PRESETS, toUrl, YOU } = require('./tabs');
+const { Tabs, PRESETS, toUrl, YOU, onStart } = require('./tabs');
 const { createSessions } = require('./sessions');
 const { createPrompts } = require('./prompts');
 const { createConsent } = require('./consent');
@@ -300,6 +300,7 @@ function endPrivate(ses) {
 
 // ── windows ─────────────────────────────────────────────────────────────────
 let firstWindow = true;
+let went = false; // the user has opened an address since Loui started: the keyboard is the page's
 // Where a new window goes: a little down and right of the one the user is in,
 // since two windows without title bars, one exactly on the other, look like
 // one. It stays on that window's screen: at the edge it starts again from the
@@ -362,6 +363,24 @@ function openWindow({ private: priv = false, blank = true, at } = {}) {
     pushState();
     if (first) setTimeout(serve, 10000); // last resort: the window reports its layout as soon as its script runs
     else if (blank) win.webContents.send('focus-address'); // Ctrl+N: ready to type, as a new tab is
+    // Loui just started, on the start page or a blank tab: ready to type as well.
+    // The page's view can take the keyboard as the window comes up and its page
+    // loads, so for the first moments it is handed to the address bar again then.
+    if (first) {
+      const until = Date.now() + 3000;
+      const toBar = () => {
+        const shown = tabs.get(w.activeId);
+        if (win.isDestroyed() || Date.now() > until || went || !shown || shown.group !== YOU) return;
+        if (shown.url && shown.url !== 'about:blank' && !onStart(shown.url)) return;
+        win.webContents.focus();
+        win.webContents.send('focus-address');
+      };
+      toBar();
+      win.on('focus', toBar);
+      tabs.get(w.activeId)?.wc?.once('did-stop-loading', toBar);
+      setTimeout(toBar, 800);
+      setTimeout(() => { if (!win.isDestroyed()) win.off('focus', toBar); }, 3000);
+    }
   });
   if (process.env.LOUI_DEBUG) {
     win.webContents.on('console-message', (e) => console.error('[ui]', e.message, `(${e.sourceId}:${e.lineNumber})`));
@@ -436,7 +455,8 @@ function start() {
     tabs, ses: userSes, settings, save: saveSettings, changed: pushState, history, bookmarks,
     sessions: () => tabs.groups.filter((g) => g.id !== YOU).length,
     showSessions: (w) => tabs.as(w, () => { w.win.webContents.focus(); send('show-activity'); }),
-    openSettings: () => settingsWindow.open('general'),
+    openSettings: () => settingsWindow.open('start'),
+    focusAddress: (w, text) => { if (w && !w.win.isDestroyed()) { w.win.webContents.focus(); w.win.webContents.send('focus-address', text); } },
   });
   passwords = createPasswords({ tabs, home: paths.home, send, changed: pushState, settings, saveSettings });
   prompts = createPrompts({
@@ -549,7 +569,7 @@ function start() {
     settings, save: saveSettings, tabs, home: paths.home, lockToApp, setTheme, setTabStrip, tabStrip,
     refreshMenu: () => Menu.setApplicationMenu(appMenu()),
     search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-    guardrails, activity, reader, updater, defaultBrowser, startPage, chat,
+    guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice,
   });
 
   tabs.on('change', pushState);
@@ -643,7 +663,7 @@ const handlers = {
     if (yes) { w.sure = true; w.win.close(); } else pushState();
   },
   'tabs:layout': (choice) => setTabStrip(choice),
-  go: (input) => { tabs.byUser(active())?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
+  go: (input) => { went = true; tabs.byUser(active())?.wc.loadURL(toUrl(input)).catch(() => {}); active()?.wc.focus(); },
   back: () => active()?.wc.navigationHistory.goBack(),
   forward: () => active()?.wc.navigationHistory.goForward(),
   reload: () => { const wc = active()?.wc; if (wc?.isLoading()) wc.stop(); else wc?.reload(); },
@@ -792,7 +812,7 @@ async function testHook({ ui, arg }) {
   // With click set, chooses the item so named (in: the submenu it is in).
   if (ui === 'menu:button') {
     const items = buttonMenu();
-    const list = arg?.in ? items.find((i) => i.label === arg.in)?.submenu || [] : items;
+    const list = arg?.in ? items.find((i) => i.label === arg.in || i.label?.startsWith(`${arg.in}:`))?.submenu || [] : items; // "Zoom: 110%" is in: 'Zoom'
     if (arg?.click) list.find((i) => i.label === arg.click)?.click({ checked: true }, tabs.win);
     return items.map((i) => (i.type === 'separator' ? '-'
       : i.submenu ? [i.label, i.submenu.filter((x) => x.visible !== false).map((x) => (x.type === 'separator' ? '-' : x.label))] : i.label));
@@ -834,6 +854,13 @@ async function testHook({ ui, arg }) {
     const tab = tabs.get(arg.id);
     if (tab) tab.userAt = Date.now(); // what Loui sends a page is otherwise not the user's (tabs.js)
     for (const type of ['mouseDown', 'mouseUp']) tab?.wc?.sendInputEvent({ type, x: arg.x, y: arg.y, button: 'left', clickCount: 1 });
+    return 'ok';
+  }
+  // A key in a tab's page, as from the user's own keyboard (not marked as sent by Loui, as a
+  // tool's is: tabs.js): { id, type: 'keyDown' | 'keyUp', key, modifiers }.
+  if (ui === 'tab:key') {
+    const wc = tabs.get(arg.id)?.wc;
+    if (wc) Object.getPrototypeOf(wc).sendInputEvent.call(wc, { type: arg.type, keyCode: arg.key, modifiers: arg.modifiers || [] });
     return 'ok';
   }
   if (ui === 'tab:sleep') return sleep.sleepNow(arg); // as "Sleep this tab now" in the tab menu
@@ -930,7 +957,7 @@ function louisMenu() {
     { label: 'New private window', ...keys('CmdOrCtrl+Shift+N'), click: () => openWindow({ private: true }) },
     { type: 'separator' },
     { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
-    { label: 'Start page settings', click: () => settingsWindow.open('general', 'Start page') },
+    { label: 'Start page settings', click: () => settingsWindow.open('start') },
     // How the check went is said in Settings, under About.
     { label: 'Check for updates', click: () => { updater.check(); settingsWindow.open('about'); } },
     { type: 'separator' },
@@ -938,7 +965,7 @@ function louisMenu() {
   ]);
 }
 
-const RECENT_PAGES = 10;
+const RECENT_PAGES = 6;
 // The button's menu, for the window being served. Shortcuts are named, not
 // registered: the application menu has them.
 function buttonMenu() {
@@ -951,33 +978,36 @@ function buttonMenu() {
   const seen = new Set();
   const recent = history.list('', 60).filter((e) => !seen.has(e.url) && seen.add(e.url)).slice(0, RECENT_PAGES);
   const short = (text) => (text.length > 60 ? text.slice(0, 59) + '…' : text);
+  // What History holds besides the panel: the tab closed last, and the last few pages.
+  const past = [
+    ...(restore.canReopen() && !w?.private ? [{ label: 'Reopen closed tab', ...keys('CmdOrCtrl+Shift+T'), click: handlers['tab:reopen'] }, { type: 'separator' }] : []),
+    ...recent.map((e) => ({ label: short(e.title || e.url).replace(/&/g, '&&'), click: () => tabs.create(e.url, { show: true }) })),
+    ...(recent.length ? [{ type: 'separator' }] : []),
+  ];
+  const zoomed = Math.round((wc ? wc.getZoomFactor() : 1) * 100);
   return inWindow([
     { label: 'New tab', ...keys('CmdOrCtrl+T'), click: () => handlers['tab:new']() },
     { label: 'New window', ...keys('CmdOrCtrl+N'), click: () => openWindow() },
     { label: 'New private window', ...keys('CmdOrCtrl+Shift+N'), click: () => openWindow({ private: true }) },
     { type: 'separator' },
-    {
-      label: 'History',
-      submenu: [
-        ...recent.map((e) => ({ label: short(e.title || e.url).replace(/&/g, '&&'), click: () => tabs.create(e.url, { show: true }) })),
-        ...(recent.length ? [{ type: 'separator' }] : []),
-        { label: 'Show all history', ...keys('CmdOrCtrl+H'), click: show('show-history') },
-      ],
-    },
+    // With nothing to list, History is the panel itself, not a level holding one item.
+    past.length ? { label: 'History', submenu: [...past, { label: 'Show all history', ...keys('CmdOrCtrl+H'), click: show('show-history') }] }
+      : { label: 'History', ...keys('CmdOrCtrl+H'), click: show('show-history') },
     { label: 'Bookmarks', submenu: bookmarks.menuItems() },
     { label: 'Downloads', ...keys('CmdOrCtrl+J'), click: show('toggle-downloads') },
     ...passwords.fileMenu(),
     { type: 'separator' },
-    { label: `Zoom: ${Math.round((wc ? wc.getZoomFactor() : 1) * 100)}%`, enabled: false },
-    { label: 'Zoom in', ...keys('CmdOrCtrl+='), enabled: !!wc, click: () => zoom(0.1) },
-    { label: 'Zoom out', ...keys('CmdOrCtrl+-'), enabled: !!wc, click: () => zoom(-0.1) },
-    { label: 'Reset zoom', ...keys('CmdOrCtrl+0'), enabled: !!wc, click: () => zoom(0) },
+    {
+      label: `Zoom: ${zoomed}%`, enabled: !!wc, // the level shows without opening it
+      submenu: [
+        { label: 'Zoom in', ...keys('CmdOrCtrl+='), click: () => zoom(0.1) },
+        { label: 'Zoom out', ...keys('CmdOrCtrl+-'), click: () => zoom(-0.1) },
+        { label: 'Reset zoom', ...keys('CmdOrCtrl+0'), enabled: zoomed !== 100, click: () => zoom(0) },
+      ],
+    },
     { label: 'Find in page…', ...keys('CmdOrCtrl+F'), click: () => handlers['find:open']() },
     { label: 'Print…', ...keys('CmdOrCtrl+P'), click: handlers.print },
-    { type: 'separator' },
-    // For looking at a page as a developer; out of the toolbar's way.
-    { label: 'Device size', enabled: !!tab, submenu: tab ? deviceItems(tab) : [] },
-    { label: 'Developer tools', ...keys('F12'), enabled: !!tab, click: () => handlers.devtools() },
+    { label: 'Full screen', ...keys('F11'), click: () => tabs.fullScreen(tabs.window()) },
     { type: 'separator' },
     {
       label: 'Claude',
@@ -988,6 +1018,7 @@ function buttonMenu() {
           label: 'Claude panel', type: 'checkbox', checked: !w?.private && w?.panelShown !== false, enabled: !w?.private,
           ...keys('CmdOrCtrl+Shift+L'), click: () => send('toggle-panel'),
         },
+        { label: 'Point at something', ...keys('CmdOrCtrl+Shift+C'), enabled: !!tab && !(tab.private && tab.group === YOU), click: handlers['pick:start'] },
         // For the tab on screen: the session working in it, or the panel's Claude in the user's own.
         {
           label: g?.paused ? 'Let Claude continue' : 'Take over', enabled: !!g && !(g.id === YOU && w?.private),
@@ -996,9 +1027,23 @@ function buttonMenu() {
         { label: 'Watch in a small window', enabled: !!g && g.id !== YOU, click: () => g && pip.open(g.id) },
       ],
     },
+    {
+      // Used now and then, and for looking at a page as a developer; out of the toolbar's way.
+      label: 'More tools',
+      submenu: [
+        { label: 'Reader view', ...keys('F9'), enabled: !!tab, click: handlers['reader:toggle'] },
+        { label: 'Site permissions…', click: show('show-permissions') },
+        { type: 'separator' },
+        { label: 'Device size', enabled: !!tab, submenu: tab ? deviceItems(tab) : [] },
+        { label: 'Developer tools', ...keys('F12'), enabled: !!tab, click: () => handlers.devtools() },
+      ],
+    },
+    { label: 'Task manager', ...keys('Shift+Esc'), click: () => taskManager.open() },
     { type: 'separator' },
     { label: 'Settings', ...keys('CmdOrCtrl+,'), click: () => settingsWindow.open() },
     { label: `About Loui ${app.getVersion()}`, click: () => app.showAboutPanel() },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
   ]);
 }
 

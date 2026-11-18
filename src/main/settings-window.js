@@ -20,7 +20,7 @@ const { BrowserWindow, ipcMain, app, nativeTheme, screen, shell } = require('ele
 const { YOU } = require('./tabs');
 
 const RELEASES = 'https://github.com/francisphan/loui/releases';
-const SECTIONS = ['general', 'tabs', 'search', 'privacy', 'passwords', 'claude', 'reading', 'about'];
+const SECTIONS = ['general', 'start', 'tabs', 'search', 'privacy', 'passwords', 'claude', 'reading', 'about'];
 
 // A site as the user types it ("Example.com/page", "https://example.com:8080") -> its host.
 function hostOf(input) {
@@ -39,7 +39,7 @@ function hostOf(input) {
 function createSettingsWindow({
   settings, save, tabs, home, lockToApp, setTheme, setTabStrip, tabStrip, refreshMenu,
   search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
-  guardrails, activity, reader, updater, defaultBrowser, startPage, chat,
+  guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice,
 }) {
   let win = null;
   let sent = ''; // what the page was last sent, as text
@@ -53,6 +53,7 @@ function createSettingsWindow({
     if (canLogin) login = app.getLoginItemSettings().openAtLogin;
     browser = defaultBrowser.state();
     chat.claude('look'); // whether Claude Code is signed in, if that was not asked lately
+    voice.askVoices(); // the system's voices, from the main window (they come with a later state)
   }
 
   // Everything the page shows. No secrets: link.state() says only whether a key is saved.
@@ -86,6 +87,7 @@ function createSettingsWindow({
         guardrails: guardrails.state().guardrails,
         activity: activity.prefs(),
         socket: settings.localSocket === true,
+        voice: voice.prefs(),
       },
       reading: { size: p.size, width: p.width, face: p.face, ...reader.choices },
       about: {
@@ -122,6 +124,7 @@ function createSettingsWindow({
     theme: (theme) => { if (['dark', 'light', 'system'].includes(theme)) setTheme(theme); },
     startup: (choice) => { settings.startup = choice === 'new' ? 'new' : 'restore'; save(); },
     ...startPage.acts, // new-tab, start:…
+    ...voice.acts, // voice:…
     login: (on) => {
       if (!canLogin) return;
       app.setLoginItemSettings({ openAtLogin: !!on });

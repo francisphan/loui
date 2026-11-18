@@ -25,6 +25,12 @@ const voice = (() => {
   const waiting = new Map(); // id -> { ok, no } for sound being turned into text
   let preparing = null; // { progress, ok, no } while the model is fetched or loaded
   let asked = 0;
+  let voicesAsked = false; // Settings has asked which voices the system has
+  // The system's voices, for the Settings window (which has none of its own to ask).
+  const reportVoices = () => loui.send('voice', {
+    do: 'voices', list: speechSynthesis.getVoices().map((v) => ({ name: v.name, lang: v.lang })),
+  });
+  speechSynthesis.addEventListener?.('voiceschanged', () => { if (voicesAsked) reportVoices(); }); // they arrive a moment after the first ask
   const seams = {
     speech: {
       // Queues one utterance; done() once it has been said, or dropped.
@@ -74,6 +80,8 @@ const voice = (() => {
           loui.send('voice', { do: 'prepare' });
         });
       },
+      // Stops a download of the model that is under way.
+      cancel() { loui.send('voice', { do: 'cancel' }); },
       // Sound (16 kHz) to text.
       transcribe(audio) {
         return new Promise((ok, no) => {
@@ -90,7 +98,14 @@ const voice = (() => {
       const { ok, no } = preparing;
       preparing = null;
       if (e.status === 'ready') ok();
-      else no(new Error(e.text));
+      else no(Object.assign(new Error(e.text), { cancelled: e.status === 'cancelled' }));
+    } else if (e.type === 'voices?') {
+      voicesAsked = true;
+      reportVoices();
+    } else if (e.type === 'sample') {
+      // "Play sample" in Settings: a sentence in the chosen voice, at the chosen speed.
+      seams.speech.cancel();
+      seams.speech.speak('This is how Loui reads Claude\'s replies aloud.', { voice: mine().voice, rate: mine().rate }, () => {});
     } else if (e.type === 'text') {
       const w = waiting.get(e.id);
       waiting.delete(e.id);
@@ -132,6 +147,22 @@ const voice = (() => {
     });
   }
 
+  // Where the first sentence of a line ends (after its mark and any closing
+  // quote), or -1 if it has not ended yet. A full stop after a common
+  // abbreviation ("e.g.", "Dr.", "No. 5") ends nothing, and a colon does not
+  // either: "First step: run npm test" is said in one breath.
+  const ABBREVIATION = /(?:^|[^\p{L}])(?:e\.g|i\.e|etc|vs|cf|approx|Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St)\.$/iu;
+  const NUMBER = /(?:^|[^\p{L}])No\.$/u;
+  function sentenceEnd(line) {
+    for (const m of line.matchAll(/[.!?…;]["')\]*_`]*(?=\s)/g)) {
+      const upTo = line.slice(0, m.index + 1);
+      const after = line.slice(m.index + m[0].length);
+      if (m[0][0] === '.' && (ABBREVIATION.test(upTo) || (NUMBER.test(upTo) && /^\s+\d/.test(after)))) continue;
+      return m.index + m[0].length;
+    }
+    return -1;
+  }
+
   // Says what has arrived of the prose and is whole: sentences, and lines
   // that have ended. all: the prose is complete, so what is left is said too.
   function read(p, all) {
@@ -158,10 +189,10 @@ const voice = (() => {
         if (mark && (whole || mark[0].length < line.length)) { p.at += mark[0].length; continue; }
         if (mark) return;
       }
-      const end = line.match(/[.!?…:;]["')\]*_`]*(?=\s)/);
-      if (end) {
-        say(line.slice(0, end.index + end[0].length));
-        p.at += end.index + end[0].length;
+      const end = sentenceEnd(line);
+      if (end > 0) {
+        say(line.slice(0, end));
+        p.at += end;
       } else if (whole) {
         say(line);
         p.at += line.length + 1;
@@ -185,7 +216,8 @@ const voice = (() => {
     toggle.setAttribute('aria-pressed', on);
     toggle.classList.toggle('on', on);
     toggle.classList.toggle('speaking', speaking);
-    toggle.title = speaking ? 'Reading this reply aloud. Press to stop it (Esc).' : on ? 'Reading replies aloud is on' : 'Read replies aloud';
+    toggle.title = speaking ? 'Reading this reply aloud. Press to stop this reply (Esc).'
+      : on ? 'Reading replies aloud is on. Press to turn off.' : 'Read replies aloud';
     toggle.setAttribute('aria-label', speaking ? 'Stop reading this reply aloud' : 'Read replies aloud');
   }
   toggle.onclick = () => {
@@ -238,14 +270,16 @@ const voice = (() => {
     mic.className = phase;
     mic.setAttribute('aria-pressed', phase === 'listening');
     if (phase === 'getting') mic.textContent = `${percent}%`;
+    else if (phase === 'asking') mic.textContent = 'Download';
     else mic.innerHTML = MIC;
     mic.title = {
       idle: 'Dictate (or hold Ctrl+Shift+Space while you talk)',
-      getting: 'Getting the speech model. This happens once.',
+      asking: 'Download the speech model (77 MB). Esc cancels.',
+      getting: 'Getting the speech model. This happens once. Press to cancel.',
       listening: 'Listening. Press to stop (Esc).',
       writing: 'Writing down what you said. Press to drop it (Esc).',
     }[phase];
-    mic.setAttribute('aria-label', phase === 'listening' ? 'Stop dictating' : 'Dictate');
+    mic.setAttribute('aria-label', { asking: 'Download the speech model, 77 megabytes', getting: 'Cancel the download of the speech model', listening: 'Stop dictating' }[phase] || 'Dictate');
     if (phase === 'listening') tell(take?.partial || 'Listening…');
     else if (phase === 'writing') tell(take?.partial || 'Writing it down…');
   }
@@ -276,28 +310,57 @@ const voice = (() => {
     }
   }
 
-  async function begin(byKey) {
-    hush();
+  // The speech model is not on this machine yet: the first press asks, in
+  // place, before 77 MB are fetched. Pressing again fetches it; Esc, or
+  // waiting, leaves things be.
+  let askTimer = 0;
+  function ask() {
+    phase = 'asking';
+    drawMic();
+    tell('Download the speech model, 77 MB? It runs on this computer. Press Download to get it.');
+    clearTimeout(askTimer);
+    askTimer = setTimeout(unask, 10000);
+  }
+  function unask() {
+    clearTimeout(askTimer);
+    if (phase !== 'asking') return;
+    phase = 'idle';
+    drawMic();
     tell('');
-    const first = !seams.recogniser.have();
-    if (first) {
-      phase = 'getting';
-      percent = 0;
-      tell('Getting the speech model (77 MB, once). After this, dictation works offline.');
-      drawMic();
-    }
+  }
+  // Fetches it, with how far it has come on the button. A press meanwhile cancels.
+  async function fetchModel() {
+    clearTimeout(askTimer);
+    phase = 'getting';
+    percent = 0;
+    tell('Getting the speech model (77 MB, once). After this, dictation works offline.');
+    drawMic();
     try {
       await seams.recogniser.prepare((p) => { percent = p; drawMic(); });
     } catch (e) {
+      if (phase !== 'getting') return; // dictation was switched off meanwhile
       phase = 'idle';
       drawMic();
+      if (e.cancelled) return tell('The download was cancelled.');
       return tell(`The speech model could not be fetched: ${e.message}. Check the connection and press the microphone to try again. ${FALLBACK}`, true);
     }
-    if (first) {
-      // The download took a while: listening now would come as a surprise.
+    if (phase !== 'getting') return;
+    // The download took a while: listening now would come as a surprise.
+    phase = 'idle';
+    drawMic();
+    tell('Dictation is ready. Press the microphone and talk.');
+  }
+
+  async function begin(byKey) {
+    hush();
+    tell('');
+    if (!seams.recogniser.have()) return ask();
+    try {
+      await seams.recogniser.prepare(() => {});
+    } catch (e) {
       phase = 'idle';
       drawMic();
-      return tell('Dictation is ready. Press the microphone and talk.');
+      return tell(`The speech model could not be loaded: ${e.message}. Press the microphone to try again. ${FALLBACK}`, true);
     }
     const mineTake = take = { pieces: [], samples: 0, stop: null, timer: 0, partial: '', busy: false, open: true };
     phase = 'listening';
@@ -364,6 +427,8 @@ const voice = (() => {
   function drop() {
     const t = take;
     take = null;
+    clearTimeout(askTimer);
+    if (phase === 'getting') seams.recogniser.cancel?.();
     clearInterval(t?.timer);
     if (t) t.open = false;
     if (phase === 'listening') t?.stop?.();
@@ -385,6 +450,8 @@ const voice = (() => {
 
   mic.onclick = () => {
     if (phase === 'idle') start();
+    else if (phase === 'asking') fetchModel();
+    else if (phase === 'getting') seams.recogniser.cancel?.(); // the main process answers, and fetchModel() says so
     else if (phase === 'listening') stop();
     else if (phase === 'writing') drop();
   };
@@ -394,12 +461,14 @@ const voice = (() => {
     if (e.key === 'Escape') {
       if (phase === 'listening') { e.stopPropagation(); stop(); }
       else if (phase === 'writing') { e.stopPropagation(); drop(); }
+      else if (phase === 'asking') { e.stopPropagation(); unask(); }
       else if (queued > 0) hush(true);
     } else if (e.code === 'Space' && e.ctrlKey && e.shiftKey) {
       e.preventDefault();
       if (e.repeat || held) return;
       held = true;
-      start(true);
+      if (phase === 'asking') fetchModel(); // the keys again: yes, download it
+      else start(true);
     }
   });
   // Letting go of any of the three keys, wherever the keyboard is by then.

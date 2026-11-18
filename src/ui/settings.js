@@ -188,9 +188,10 @@ function list(def) {
       const want = input.value.trim();
       if (!want) return;
       const before = def.items(state).length;
+      if (def.add.busy) say(note, def.add.busy); // an add that takes a moment (it is checked first)
       const next = await send(...def.add.act(want));
       if (next && def.items(next).length > before) { input.value = ''; say(note, ''); }
-      else say(note, def.add.refused || 'That is already listed, or is not a site.', true);
+      else say(note, (typeof def.add.refused === 'function' ? def.add.refused(next) : def.add.refused) || 'That is already listed, or is not a site.', true);
     };
     input.oninput = () => say(note, '');
     f.node.append(form);
@@ -218,6 +219,138 @@ function list(def) {
       }));
       if (!items.length) ul.append(el('li', 'st-empty', def.empty));
       if (at >= 0) (ul.children[Math.min(at, items.length - 1)]?.querySelector('button') || input || search).focus();
+    },
+  };
+}
+
+// A place, by name: the field to type it in, and under it the place the name
+// was taken to mean ("Mendoza, Mendoza, Argentina"), with "Not this one?" for
+// the other places of that name. found(state) -> the place; others(state) ->
+// [{ full, … }] or null before they were asked for; ask, choose(other) -> [what, arg].
+function place(def) {
+  const row = entry(def);
+  const words = row.node.querySelector('.st-words');
+  const value = el('p', 'st-value');
+  value.id = `value-${def.id}`;
+  const name = el('span');
+  const not = el('button', 'quiet', 'Not this one?');
+  not.type = 'button';
+  not.id = `set-${def.id}-others`;
+  value.append(name, ' ', not);
+  const ul = el('ul', 'st-list');
+  ul.setAttribute('aria-label', 'Other places by that name');
+  words.append(value, ul);
+  let open = false, drawn = '';
+  not.onclick = async () => {
+    open = !open;
+    if (open) await send(...def.ask);
+    else draw(state);
+  };
+  return {
+    ...row,
+    update: (s) => {
+      row.update(s);
+      const found = def.found(s);
+      value.hidden = !found;
+      name.textContent = found;
+      if (!found) open = false;
+      const others = open ? def.others(s) : null;
+      not.setAttribute('aria-expanded', String(open));
+      ul.hidden = !others;
+      const key = JSON.stringify(others);
+      if (key === drawn) return;
+      drawn = key;
+      ul.replaceChildren(...(others || []).map((o) => {
+        const li = el('li');
+        const use = el('button', 'quiet', 'Use this');
+        use.type = 'button';
+        use.setAttribute('aria-label', `Use ${o.full}`);
+        use.onclick = async () => { open = false; await send(...def.choose(o)); not.focus(); };
+        li.append(el('span', 'st-item', o.full), use);
+        return li;
+      }));
+      if (others && !others.length) ul.append(el('li', 'st-empty', 'No other place by that name was found.'));
+    },
+  };
+}
+
+// Things to add with one press. items(state) -> [{ label, aria, act: [what, arg] }];
+// refused(state) -> why the last one was not added.
+function offers(def) {
+  const f = frame(def, { wide: true });
+  f.control.remove();
+  const box = el('div', 'st-offers');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-labelledby', `label-${def.id}`);
+  const note = el('span', 'st-note');
+  note.setAttribute('role', 'status');
+  f.node.append(box, note);
+  let drawn = '';
+  return {
+    ...def, node: f.node,
+    update: (s) => {
+      const items = def.items(s);
+      const key = JSON.stringify(items);
+      if (key === drawn) return;
+      drawn = key;
+      const at = [...box.children].indexOf(document.activeElement);
+      box.replaceChildren(...items.map((item) => {
+        const add = el('button', 'st-button', item.label);
+        add.type = 'button';
+        add.setAttribute('aria-label', item.aria);
+        add.onclick = async () => {
+          add.disabled = true;
+          say(note, def.busy || '');
+          const next = await send(...item.act);
+          add.disabled = false;
+          if (next && def.items(next).some((i) => i.label === item.label)) say(note, def.refused(next) || 'Not added.', true);
+          else say(note, 'Added');
+        };
+        return add;
+      }));
+      if (at >= 0) (box.children[Math.min(at, items.length - 1)] || search).focus();
+    },
+  };
+}
+
+// Several of many, each a box to tick. items(state) -> [{ value, label, on }];
+// set(value, on) -> [what, arg]; refused: what to say when a change did not take.
+function ticks(def) {
+  const f = frame(def, { wide: true });
+  f.control.remove();
+  const box = el('div', 'st-ticks');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-labelledby', `label-${def.id}`);
+  const note = el('span', 'st-note');
+  note.setAttribute('role', 'status');
+  f.node.append(box, note);
+  const inputs = new Map(); // value -> its checkbox
+  let listed = '';
+  return {
+    ...def, node: f.node,
+    update: (s) => {
+      const items = def.items(s);
+      const key = JSON.stringify(items.map((i) => [i.value, i.label]));
+      if (key !== listed) {
+        listed = key;
+        inputs.clear();
+        box.replaceChildren(...items.map((item) => {
+          const label = el('label', 'st-tick');
+          const input = el('input');
+          input.type = 'checkbox';
+          input.onchange = async () => {
+            const want = input.checked;
+            const next = await send(...def.set(item.value, want));
+            if (!next) return;
+            if (def.items(next).find((i) => i.value === item.value)?.on === want) say(note, 'Saved');
+            else say(note, def.refused || 'Not changed.', true);
+          };
+          inputs.set(item.value, input);
+          label.append(input, el('span', '', item.label));
+          return label;
+        }));
+      }
+      for (const item of items) inputs.get(item.value).checked = !!item.on;
     },
   };
 }
@@ -332,6 +465,7 @@ const days = (n) => (n === 1 ? '1 day' : `${n} days`);
 const minutes = (n) => (n === 60 ? '1 hour' : n === 120 ? '2 hours' : n === 1 ? '1 minute' : `${n} minutes`);
 // The usual choices, with the one in use if it is none of them (set by hand in settings.json).
 const withCurrent = (usual, now, label) => (usual.some(([v]) => v === now) ? usual : [[now, label(now)], ...usual]);
+const speed = (r) => (r === 1 ? 'Normal' : `${r}×`);
 const validSearch = (url) => /^https?:\/\/\S+$/i.test(url) && url.includes('%s');
 let customSearch = false; // "Custom address" chosen, its address not yet given
 
@@ -404,7 +538,26 @@ const SECTIONS = [
         ],
       },
       {
-        title: 'Start page', rows: [
+        title: 'Downloads', rows: [
+          info({
+            id: 'downloads-folder', label: 'Downloads folder',
+            help: 'Where the files you download are saved.',
+            value: (s) => s.general.downloads.folder,
+            buttons: [{ id: 'downloads-folder', label: 'Change…', act: ['downloads:folder'] }],
+          }),
+          toggle({
+            id: 'downloads-ask', label: 'Ask where to save each file',
+            help: 'Shows a Save As dialog for each download. Downloads Claude starts are saved without asking.',
+            get: (s) => s.general.downloads.ask, set: (on) => ['downloads:ask', on],
+          }),
+        ],
+      },
+    ],
+  },
+  {
+    id: 'start', title: 'Start page', groups: [
+      {
+        title: 'New tabs', rows: [
           choice({
             id: 'new-tab', label: 'New tabs open with',
             help: 'What a new tab or a new window shows: Loui\'s start page, a blank page, or an address of your choice.',
@@ -425,9 +578,13 @@ const SECTIONS = [
             get: (s) => s.general.start.address,
             set: (v) => ['new-tab', { address: v }],
           }),
+        ],
+      },
+      {
+        title: 'Most visited', rows: [
           toggle({
             id: 'start-tiles', label: 'Show the sites you visit most',
-            help: 'Up to eight sites from your history, on the start page. Never shown in a private window.',
+            help: 'Up to eight sites you have been to more than once, on the start page. Your search engine is left out. Never shown in a private window.',
             get: (s) => s.general.start.tiles, set: (on) => ['start:part', { part: 'startTiles', on }],
           }),
           info({
@@ -437,27 +594,40 @@ const SECTIONS = [
             value: (s) => (s.general.start.hidden === 1 ? '1 site' : `${s.general.start.hidden} sites`),
             buttons: [{ id: 'start-unhide', label: 'Show them again', act: ['start:unhide'] }],
           }),
+        ],
+      },
+      {
+        title: 'Weather', rows: [
           toggle({
             id: 'start-weather', label: 'Show the weather',
             help: 'The temperature and today\'s high and low for your place, from Open-Meteo. Loui fetches it, at most every half hour.',
             get: (s) => s.general.start.weather, set: (on) => ['start:part', { part: 'startWeather', on }],
           }),
-          entry({
+          place({
             id: 'weather-place', label: 'Your place',
             help: 'A town or city, for the weather. Loui looks it up once; it never asks where this computer is.',
-            placeholder: 'Mendoza',
+            placeholder: 'Type a town or city',
             shown: (s) => s.general.start.weather,
             refused: 'No place by that name was found.',
             get: (s) => s.general.start.place,
             set: (v) => ['start:place', v],
+            // Names such as Córdoba or San Juan are places in several countries.
+            found: (s) => s.general.start.resolved,
+            others: (s) => s.general.start.others,
+            ask: ['start:place-others'],
+            choose: (o) => ['start:place-choose', { lat: o.lat, lon: o.lon }],
           }),
           choice({
             id: 'weather-units', label: 'Temperature in',
-            help: 'Degrees Fahrenheit or Celsius.',
+            help: 'Degrees Celsius or Fahrenheit. Until you choose, Loui goes by this computer\'s region.',
             shown: (s) => s.general.start.weather,
-            options: () => [['f', 'Fahrenheit'], ['c', 'Celsius']],
+            options: () => [['c', 'Celsius'], ['f', 'Fahrenheit']],
             get: (s) => s.general.start.units, set: (v) => ['start:units', v],
           }),
+        ],
+      },
+      {
+        title: 'News', rows: [
           toggle({
             id: 'start-news', label: 'Show news headlines',
             help: 'A few headlines from the feeds below. Loui fetches them, at most every quarter of an hour.',
@@ -471,22 +641,18 @@ const SECTIONS = [
             items: (s) => s.general.start.feeds.map((url) => ({
               text: url, button: 'Remove', aria: `Remove the feed ${url}`, act: ['start:feed-remove', url],
             })),
-            add: { placeholder: 'https://example.com/feed.xml', aria: 'Feed address', act: (v) => ['start:feed-add', v], refused: 'That is already listed, or is not a web address.' },
+            // Loui reads the address once before listing it: one with no headlines is not kept.
+            add: {
+              placeholder: 'https://example.com/feed.xml', aria: 'Feed address', act: (v) => ['start:feed-add', v],
+              busy: 'Checking…', refused: (s) => s?.general.start.feedTrouble || 'No headlines found at that address.',
+            },
           }),
-        ],
-      },
-      {
-        title: 'Downloads', rows: [
-          info({
-            id: 'downloads-folder', label: 'Downloads folder',
-            help: 'Where the files you download are saved.',
-            value: (s) => s.general.downloads.folder,
-            buttons: [{ id: 'downloads-folder', label: 'Change…', act: ['downloads:folder'] }],
-          }),
-          toggle({
-            id: 'downloads-ask', label: 'Ask where to save each file',
-            help: 'Shows a Save As dialog for each download. Downloads Claude starts are saved without asking.',
-            get: (s) => s.general.downloads.ask, set: (on) => ['downloads:ask', on],
+          offers({
+            id: 'news-known', label: 'Well-known feeds',
+            help: 'General news in English and Spanish, to add with one press.',
+            shown: (s) => s.general.start.news && s.general.start.known.length > 0,
+            items: (s) => s.general.start.known.map((k) => ({ label: k.name, aria: `Add the feed of ${k.name}`, act: ['start:feed-add', k.url] })),
+            busy: 'Checking…', refused: (s) => s.general.start.feedTrouble,
           }),
         ],
       },
@@ -787,6 +953,65 @@ const SECTIONS = [
           }),
         ],
       },
+      {
+        title: 'Voice', rows: [
+          toggle({
+            id: 'voice-readback', label: 'Read replies aloud',
+            help: 'Claude\'s replies in the panel are spoken as they arrive, with one of this computer\'s voices. The speaker in the panel does the same.',
+            get: (s) => s.claude.voice.readBack, set: (on) => ['voice:read-back', on],
+          }),
+          choice({
+            id: 'voice-voice', label: 'Voice',
+            help: 'The voices this computer has. More can be added in the system\'s own speech settings.',
+            options: (s) => withCurrent([['', 'The system\'s choice'], ...(s.claude.voice.voices || []).map((v) => [v.name, v.lang ? `${v.name} (${v.lang})` : v.name])],
+              s.claude.voice.voice, (name) => name),
+            get: (s) => s.claude.voice.voice, set: (v) => ['voice:voice', v],
+          }),
+          choice({
+            id: 'voice-rate', label: 'Speed',
+            help: 'How fast replies are read.',
+            options: (s) => withCurrent(s.claude.voice.rates.map((r) => [r, speed(r)]), s.claude.voice.rate, speed),
+            get: (s) => s.claude.voice.rate, set: (v) => ['voice:rate', Number(v)],
+          }),
+          info({
+            id: 'voice-sample', label: 'Hear it',
+            help: 'Says a sentence in the chosen voice, at the chosen speed, through the main window.',
+            buttons: [{ id: 'voice-sample', label: 'Play sample', act: ['voice:sample'] }],
+          }),
+          toggle({
+            id: 'voice-dictation', label: 'Dictation',
+            help: 'A microphone beside Send in the Claude panel: what you say is written into the message box, never sent by itself. ' +
+              'The sound is turned into text on this computer and goes nowhere else.',
+            get: (s) => s.claude.voice.dictation, set: (on) => ['voice:dictation', on],
+          }),
+          ticks({
+            id: 'voice-languages', label: 'Languages you dictate in',
+            help: 'With more than one ticked, Loui works out which of them you are speaking each time.',
+            shown: (s) => s.claude.voice.dictation,
+            items: (s) => s.claude.voice.languages.map((l) => ({ value: l.code, label: l.name, on: l.on })),
+            set: (code, on) => ['voice:language', { code, on }],
+            refused: 'One language has to stay ticked.',
+          }),
+          info({
+            id: 'voice-model', label: 'Speech model',
+            help: 'What turns speech into text. It is fetched once and runs on this computer.',
+            shown: (s) => s.claude.voice.dictation,
+            value: (s) => ({
+              ready: `Downloaded, ${s.claude.voice.mb} MB.`,
+              downloading: `Downloading: ${s.claude.voice.percent}%`,
+            }[s.claude.voice.model] || `Not downloaded. It downloads (${s.claude.voice.mb} MB) the first time you press the microphone, after asking.`),
+            buttons: [{
+              id: 'voice-model-remove', label: 'Remove', act: ['voice:model-remove'],
+              shown: (s) => s.claude.voice.model === 'ready', ask: ['Remove the model?', () => true], done: 'Removed',
+            }],
+          }),
+          info({
+            id: 'voice-shortcut', label: 'Push to talk',
+            help: 'Hold these keys in the Claude panel while you talk; let go and what you said is written down.',
+            value: (s) => s.claude.voice.shortcut,
+          }),
+        ],
+      },
     ],
   },
   {
@@ -842,7 +1067,7 @@ const SECTIONS = [
                 // Restarting closes sessions' tab groups, so it asks first while one is working, as the toolbar's button does.
                 id: 'update-install', label: 'Restart to update', act: ['update:install'],
                 shown: (s) => s.about.update?.status === 'ready',
-                ask: ['Restart now?', (s) => s.about.working > 0],
+                ask: ['A session is working. Restart anyway?', (s) => s.about.working > 0],
               },
             ],
           }),

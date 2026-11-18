@@ -6,8 +6,9 @@
 #panel-tools { gap: 0; }
 #readback { align-self: center; padding: 3px 2px; }
 #readback.on { color: var(--claude); }
-/* While it talks: the waves breathe. Pressing it then stops this reply. */
-#readback.speaking { background: var(--claude-wash); }
+/* While it talks it is filled, which "on" is not, and the waves breathe.
+   Pressing it then stops this reply. */
+#readback.speaking { padding-inline: 5px; border-radius: 10px; background: var(--claude); color: var(--paper); }
 #readback.speaking svg path:last-child { animation: breathe 1.1s ease-in-out infinite; }
 
 #mic {
@@ -34,6 +35,8 @@
 #mic.writing svg { animation: breathe 1.1s ease-in-out infinite; }
 /* Fetching the model: the percentage, in a ring. */
 #mic.getting { width: 38px; box-shadow: inset 0 0 0 1.5px var(--rule); color: var(--ink); }
+/* Before it is fetched: the answer to the question above the box. */
+#mic.asking { width: auto; padding: 0 11px; box-shadow: inset 0 0 0 1.5px var(--claude); color: var(--claude); font-size: 12.5px; }
 @keyframes hear {
   from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent); }
   to { box-shadow: 0 0 0 7px transparent; }

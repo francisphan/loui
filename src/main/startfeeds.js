@@ -28,6 +28,22 @@ const TIMEOUT_MS = 6000;
 const MAX_BYTES = 2 * 1024 * 1024;
 const HEADLINES = 8;
 const DEFAULT_FEEDS = ['https://news.google.com/rss']; // redirects to the edition for the locale
+// Feeds offered in Settings to add with one press: general news, in English
+// and in Spanish. Each answered with headlines when this list was written.
+const KNOWN_FEEDS = [
+  { name: 'BBC News', url: 'https://feeds.bbci.co.uk/news/rss.xml' },
+  { name: 'NPR', url: 'https://feeds.npr.org/1001/rss.xml' },
+  { name: 'The Guardian', url: 'https://www.theguardian.com/world/rss' },
+  { name: 'The New York Times', url: 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml' },
+  { name: 'BBC Mundo', url: 'https://feeds.bbci.co.uk/mundo/rss.xml' },
+  { name: 'El País', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada' },
+  { name: 'La Nación', url: 'https://www.lanacion.com.ar/arc/outboundfeeds/rss/?outputType=xml' },
+  { name: 'Clarín', url: 'https://www.clarin.com/rss/lo-ultimo/' },
+  { name: 'Infobae', url: 'https://www.infobae.com/arc/outboundfeeds/rss/' },
+];
+// Where the weather is told in Fahrenheit.
+const FAHRENHEIT = ['US', 'BS', 'BZ', 'KY', 'LR', 'PW', 'FM', 'MH'];
+const PLACES = 5; // how many places of a name are offered to choose from
 
 // For the tests only: local stand-ins for the two Open-Meteo services.
 const testing = (name) => (process.env.LOUI_TEST && process.env[name]) || null;
@@ -184,7 +200,13 @@ function kept(ms, load) {
 }
 
 function createFeeds({ settings, save }) {
-  const units = () => (['c', 'f'].includes(settings.weatherUnits) ? settings.weatherUnits : /-US$/i.test(app.getLocale()) ? 'f' : 'c');
+  // Unless chosen: by the system's region (not the language Loui's menus are in).
+  const units = () => {
+    if (['c', 'f'].includes(settings.weatherUnits)) return settings.weatherUnits;
+    let country = '';
+    try { country = app.getLocaleCountryCode() || /[-_]([A-Za-z]{2})\b/.exec(app.getSystemLocale())?.[1] || ''; } catch {}
+    return FAHRENHEIT.includes(country.toUpperCase()) ? 'f' : 'c';
+  };
   const place = () => {
     const p = settings.weatherAt;
     return p && typeof p.name === 'string' && Number.isFinite(p.lat) && Number.isFinite(p.lon) ? p : null;
@@ -225,45 +247,107 @@ function createFeeds({ settings, save }) {
     return { items };
   });
 
+  // The last reading that was had, kept so that a fetch that fails (or other
+  // units asked for while the service is down) still has something to show.
+  let last = null; // { where, units, at, place, now, sky, high, low }
+  const inUnits = (v, from, to) => (from === to ? v : Math.round(to === 'f' ? v * 9 / 5 + 32 : (v - 32) * 5 / 9));
+  async function weatherNow() {
+    const p = place();
+    if (!p) return null;
+    const where = `${p.lat},${p.lon}`, u = units();
+    const w = await weather.get(`${where},${u}`);
+    if (w && !w.failed) {
+      if (last?.from !== w) last = { ...w, from: w, where, units: u, at: Date.now() }; // the same answer, still kept: read when it was
+      return w;
+    }
+    if (last?.where !== where) return w;
+    const { now, high, low } = last;
+    return { failed: true, place: last.place, sky: last.sky, at: last.at, now: inUnits(now, last.units, u), high: inUnits(high, last.units, u), low: inUnits(low, last.units, u) };
+  }
+
+  // The places a name could mean, best first: [{ name (as the start page says
+  // it), full ("Mendoza, Mendoza, Argentina"), lat, lon }]. null: the lookup failed.
+  let matches = null; // { text, list }: what the name last typed in Settings could mean
+  async function lookUp(text) {
+    if (matches?.text === text) return matches.list;
+    let results;
+    try {
+      const q = new URLSearchParams({ name: text, count: PLACES, language: 'en', format: 'json' });
+      results = JSON.parse(await get(`${GEOCODE()}?${q}`)).results;
+    } catch { return null; }
+    const list = (Array.isArray(results) ? results : []).filter((r) => r && Number.isFinite(r.latitude) && Number.isFinite(r.longitude)).slice(0, PLACES).map((r) => ({
+      name: [...new Set([r.name, r.country_code === 'US' ? r.admin1 : r.country].filter(Boolean))].join(', ').slice(0, 80),
+      full: [r.name, r.admin1, r.country].filter((x) => typeof x === 'string' && x).join(', ').slice(0, 120),
+      lat: r.latitude, lon: r.longitude,
+    }));
+    matches = { text, list };
+    return list;
+  }
+  const keep = (text, m) => {
+    settings.weatherPlace = text;
+    settings.weatherAt = { name: m.name, lat: m.lat, lon: m.lon, full: m.full };
+    save();
+  };
+  let trouble = ''; // why the feed last offered in Settings was not added
+
   return {
     units, feeds,
     place: () => place()?.name || '',
-    // For a start page being served: null when there is no place yet, { failed } when it could not be had.
+    // For Settings: the place as it was resolved, and what else its name could mean (once asked).
+    resolved: () => (place() ? (typeof place().full === 'string' && place().full) || place().name : ''),
+    others: () => (matches && place() && matches.text === settings.weatherPlace
+      ? matches.list.filter((m) => m.lat !== place().lat || m.lon !== place().lon).map((m) => ({ full: m.full, lat: m.lat, lon: m.lon })) : null),
+    known: () => KNOWN_FEEDS.filter((k) => !feeds().includes(k.url)),
+    trouble: () => trouble,
+    // For a start page being served: null when there is no place yet, { failed } when it could not be
+    // had ({ failed, now, …, at } with the last reading, if there was one).
     // kept: only what is already here, with no fetch (a private window's start page).
-    weather: (kept = false) => (!place() ? Promise.resolve(null)
-      : weather[kept ? 'peek' : 'get'](`${place().lat},${place().lon},${units()}`)),
+    weather: (kept = false) => (kept ? (place() ? weather.peek(`${place().lat},${place().lon},${units()}`) : null) : weatherNow()),
+    // "Try again": the next start page asks afresh.
+    retry() { weather.forget(); },
     news: (kept = false) => (!feeds().length ? Promise.resolve(null) : news[kept ? 'peek' : 'get'](feeds().join('\n'))),
-    // A place name as typed -> its coordinates, kept. False if no such place was found.
+    // A place name as typed -> its coordinates, kept: the best match of that
+    // name. False if no such place was found.
     async setPlace(name) {
       const text = String(name || '').trim().slice(0, 100);
       if (!text) {
         delete settings.weatherPlace;
         delete settings.weatherAt;
+        matches = null;
         save();
         return true;
       }
-      let found;
-      try {
-        const q = new URLSearchParams({ name: text, count: 1, language: 'en', format: 'json' });
-        found = JSON.parse(await get(`${GEOCODE()}?${q}`)).results?.[0];
-      } catch { return false; }
-      if (!found || !Number.isFinite(found.latitude) || !Number.isFinite(found.longitude)) return false;
-      const label = [found.name, found.country_code === 'US' ? found.admin1 : found.country].filter(Boolean);
-      settings.weatherPlace = text;
-      settings.weatherAt = { name: [...new Set(label)].join(', ').slice(0, 80), lat: found.latitude, lon: found.longitude };
-      save();
+      const list = await lookUp(text);
+      if (!list?.length) return false;
+      keep(text, list[0]);
       return true;
+    },
+    // "Not this one?": what else the place's name could mean, for others().
+    async otherPlaces() {
+      if (typeof settings.weatherPlace === 'string' && place()) await lookUp(settings.weatherPlace);
+    },
+    // One of others(), chosen.
+    choosePlace({ lat, lon } = {}) {
+      const m = matches?.text === settings.weatherPlace && matches.list.find((x) => x.lat === lat && x.lon === lon);
+      if (m) keep(matches.text, m);
     },
     setUnits(u) {
       if (!['c', 'f'].includes(u)) return;
       settings.weatherUnits = u;
       save();
     },
-    addFeed(url) {
+    // Fetched once before it is listed: an address with no headlines at it is
+    // not kept (trouble() says why).
+    async addFeed(url) {
       const text = String(url || '').trim();
       let u;
-      try { u = new URL(text); } catch { return; }
-      if (!/^https?:$/.test(u.protocol) || feeds().includes(u.href)) return;
+      try { u = new URL(text); } catch { u = null; }
+      if (!u || !/^https?:$/.test(u.protocol)) { trouble = 'That is not a web address.'; return; }
+      if (feeds().includes(u.href)) { trouble = 'That feed is already listed.'; return; }
+      let items = [];
+      try { items = parseFeed(await get(u.href), u.href); } catch {}
+      if (!items.length) { trouble = 'No headlines found at that address.'; return; }
+      trouble = '';
       settings.newsFeeds = [...feeds(), u.href];
       save();
     },
@@ -274,4 +358,4 @@ function createFeeds({ settings, save }) {
   };
 }
 
-module.exports = { createFeeds, parseFeed };
+module.exports = { createFeeds, parseFeed, KNOWN_FEEDS };

@@ -1,8 +1,15 @@
 // The start page: what a new tab of the user's opens with. Louis, a box that
-// does what the address bar does, the sites visited most, the bookmarks bar's
-// bookmarks while the bar is hidden, the weather and a few headlines, and a
-// line with the date. The page itself loads nothing from the web: the weather
+// points at the address bar, the sites visited most, the bookmarks bar's
+// bookmarks while the bar is hidden, the weather with the date, and a few
+// headlines. The page itself loads nothing from the web: the weather
 // and the headlines are fetched by Loui (startfeeds.js) and written into it.
+//
+// Its box is not a second address bar: a click on it, or a letter typed while
+// the page has the keyboard, moves the keyboard to the address bar above (with
+// the letter), where there are suggestions and completion. The page has no
+// script, so the click is a link (loui-start://focus) and the typing is seen
+// here, before the page gets the key. The box is still a form that works by
+// itself (Tab to it, paste, Enter), should the address bar not take over.
 //
 // It is a page of Loui's own under the `loui-start:` scheme, made as reader
 // view's is (reader.js): not registered as privileged or standard, so it has
@@ -38,6 +45,7 @@ const { nativeImage, nativeTheme } = require('electron');
 const { requestRules } = require('./requests');
 const { YOU, START, onStart, toUrl } = require('./tabs');
 const { createFeeds } = require('./startfeeds');
+const { searchFor } = require('./search');
 
 const SCHEME = 'loui-start';
 const TILES = 8;
@@ -77,6 +85,7 @@ function letterOf(host) {
   return (labels[Math.max(0, labels.length - (TWO_PART.test(name) ? 3 : 2))][0] || '').toUpperCase();
 }
 const hostOf = (url) => { try { return new URL(url).host; } catch { return ''; } };
+const ICON = /^data:image\/[\w.+-]+;base64,[A-Za-z0-9+/=]+$/; // a picture kept by Loui, safe to write into the page
 
 function render({ priv, body }) {
   const a = assets();
@@ -99,6 +108,7 @@ function render({ priv, body }) {
 </header>
 <form action="${SCHEME}://go" method="get" role="search">
   <input name="q" type="text" placeholder="Search or enter an address" aria-label="Search or enter an address" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <a class="to-bar" href="${SCHEME}://focus" tabindex="-1" aria-hidden="true"></a>
 </form>
 ${body}
 </body>
@@ -118,8 +128,9 @@ function age(at) {
 
 // history, bookmarks: as main.js has them. sessions(): how many Claude
 // sessions are open. showSessions(w): opens the Sessions panel in a window.
-// openSettings(): opens the Settings window at General.
-function createStartPage({ tabs, ses, settings, save, changed, history, bookmarks, sessions, showSessions, openSettings }) {
+// openSettings(): opens the Settings window at Start page. focusAddress(w, text):
+// gives the keyboard to a window's address bar, with text typed into it.
+function createStartPage({ tabs, ses, settings, save, changed, history, bookmarks, sessions, showSessions, openSettings, focusAddress }) {
   const feeds = createFeeds({ settings, save });
   const on = (key) => settings[key] !== false; // each part of the page shows unless switched off
   // The existing tests open blank tabs throughout: under LOUI_TEST a new tab
@@ -137,14 +148,25 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     return c === 'address' && validAddress(settings.newTabAddress) ? settings.newTabAddress.trim() : START;
   };
 
+  // The search engine's own site is where searches from the address bar land, not a site the user goes to.
+  const engineHost = () => hostOf(searchFor('x'));
+  let removed = null; // the site just taken off the page: the next page shown offers to put it back
+
   // The user's own: the sites visited most, and the bookmarks bar's bookmarks.
-  function ownParts() {
+  // undo: a site just taken off, to offer back.
+  function ownParts(undo) {
     let body = '';
-    const sites = on('startTiles') ? history.top(TILES, hidden()) : [];
-    if (sites.length) {
-      body += `<section aria-labelledby="most"><h2 id="most">Most visited</h2><ul class="tiles">${sites.map((s) => {
+    const sites = on('startTiles') ? history.top(TILES, [...hidden(), engineHost()]) : [];
+    const back = undo && on('startTiles') ? `<p class="removed" role="status">Removed ${escape(undo.replace(/^www\./, ''))} · ` +
+      `<a href="${SCHEME}://unhide?h=${encodeURIComponent(undo)}">Undo</a></p>` : '';
+    if (sites.length || back) {
+      // The grid is as wide as its tiles: see .tiles in startpage.css.
+      body += `<section aria-labelledby="most"><h2 id="most">Most visited</h2>${back}<ul class="tiles n${sites.length}">${sites.map((s) => {
         const name = escape(s.host.replace(/^www\./, ''));
-        return `<li><a class="tile" href="${escape(s.url)}"><span class="letter" aria-hidden="true">${escape(letterOf(s.host))}</span>` +
+        // The site's own icon, if a tab has shown it (history.js); else its letter.
+        const mark = ICON.test(s.icon || '') ? `<img class="icon" src="${s.icon}" alt="">`
+          : `<span class="letter" aria-hidden="true">${escape(letterOf(s.host))}</span>`;
+        return `<li><a class="tile" href="${escape(s.url)}">${mark}` +
           `<span class="name">${name}</span></a>` +
           `<a class="hide" href="${SCHEME}://hide?h=${encodeURIComponent(s.host)}" title="Don't show ${name} here" aria-label="Don't show ${name} here">×</a></li>`;
       }).join('')}</ul></section>\n`;
@@ -153,7 +175,7 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     if (marks.length) {
       body += `<section aria-labelledby="marks"><h2 id="marks">Bookmarks</h2><ul class="chips">${marks.map((b) => {
         const title = b.title || hostOf(b.url);
-        const icon = /^data:image\/[\w.+-]+;base64,[A-Za-z0-9+/=]+$/.test(b.icon || '')
+        const icon = ICON.test(b.icon || '')
           ? `<img src="${b.icon}" alt="">` : `<span class="letter" aria-hidden="true">${escape([...title.trim()][0]?.toUpperCase() || '')}</span>`;
         return `<li><a class="chip" href="${escape(b.url)}" title="${escape(b.url)}">${icon}<span>${escape(title)}</span></a></li>`;
       }).join('')}</ul></section>\n`;
@@ -162,16 +184,25 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
   }
 
   // The weather and the news, side by side. w, n: what startfeeds.js had for
-  // each (null: nothing to show; { failed }: it could not be had).
+  // each (null: nothing to show; { failed }: it could not be had; for the
+  // weather, { failed, now, …, at }: it could not be had, and this is the last
+  // reading that was). The date heads the weather's card.
   function widgets(w, n) {
     let weather = '';
     if (on('startWeather') && (w || !feeds.place())) { // a place whose weather is still on its way: the next start page has it
       const deg = feeds.units() === 'f' ? '°F' : '°C';
+      const date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+      const again = `<a href="${SCHEME}://weather">Try again</a>`;
+      const reading = () => `<p class="now">${w.now}<span>${deg}</span></p>` +
+        (w.sky ? `<p class="sky">${escape(w.sky)}</p>` : '') + `<p class="range">High ${w.high}° · Low ${w.low}°</p>`;
+      const time = (at) => new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
       weather = '<section class="weather" aria-labelledby="weather"><h2 id="weather">Weather</h2><div class="card">' +
+        `<p class="date">${escape(date)}</p>` +
         (!w ? `<a class="quiet" href="${SCHEME}://settings">Set your place in Settings</a>`
-          : w.failed ? `<p class="place">${escape(feeds.place())}</p><p class="quiet">Couldn't load the weather.</p>`
-            : `<p class="place">${escape(w.place)}</p><p class="now">${w.now}<span>${deg}</span></p>` +
-              (w.sky ? `<p class="sky">${escape(w.sky)}</p>` : '') + `<p class="range">High ${w.high}° · Low ${w.low}°</p>`) +
+          : w.failed && Number.isFinite(w.now) ? `<p class="place">${escape(w.place)}</p>${reading()}` +
+            `<p class="quiet stale">Couldn't update: this is from ${escape(time(w.at))}${Date.now() - w.at > 20 * 3600e3 ? `, ${escape(age(w.at))}` : ''}. ${again}</p>`
+            : w.failed ? `<p class="place">${escape(feeds.place())}</p><p class="quiet stale">Couldn't load the weather. ${again}</p>`
+              : `<p class="place">${escape(w.place)}</p>${reading()}`) +
         '</div></section>';
     }
     let news = '';
@@ -185,7 +216,7 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     return weather || news ? `<div class="widgets${weather && news ? '' : ' one'}">${weather}${news}</div>\n` : '';
   }
 
-  function page(priv, w, n) {
+  function page(priv, w, n, undo) {
     if (priv) {
       return render({
         priv: true,
@@ -194,13 +225,14 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
           `The Claude panel does not work here.</p>\n${widgets(w, n)}</main>`,
       });
     }
-    const date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
     const open = sessions();
-    return render({
-      priv: false,
-      body: `${ownParts()}${widgets(w, n)}</main>\n<footer>${escape(date)}` +
-        (open ? ` · <a href="${SCHEME}://sessions">Claude sessions: ${open} open</a>` : '') + '</footer>',
-    });
+    const parts = widgets(w, n);
+    // The date is in the weather's card; without that card, it is at the foot.
+    const foot = [
+      parts.includes('class="date"') ? '' : escape(new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })),
+      open ? `<a href="${SCHEME}://sessions">Claude sessions: ${open} open</a>` : '',
+    ].filter(Boolean);
+    return render({ priv: false, body: `${ownParts(undo)}${parts}</main>\n<footer>${foot.join(' · ')}</footer>` });
   }
 
   // What is at hand is used at once; what has to be fetched is waited for a
@@ -235,7 +267,10 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
         on('startNews') ? (priv ? feeds.news(true) : soon(feeds.news())) : null,
       ]);
       if (!priv) served++;
-      return new Response(page(priv, w, n), { headers });
+      // "Removed … · Undo" shows on the one page that follows the removal.
+      const undo = priv ? null : removed;
+      if (!priv) removed = null;
+      return new Response(page(priv, w, n, undo), { headers });
     });
   }
   attach(ses);
@@ -256,8 +291,22 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
       const host = u.searchParams.get('h') || '';
       if (!host || hidden().includes(host)) return;
       settings.startHidden = [...hidden(), host];
+      removed = host;
       save();
       changed();
+      tab.wc.reload();
+    } else if (u.host === 'unhide' && !tab.private) { // "Undo" beside a site just removed
+      const host = u.searchParams.get('h') || '';
+      if (!hidden().includes(host)) return;
+      settings.startHidden = hidden().filter((h) => h !== host);
+      if (!settings.startHidden.length) delete settings.startHidden;
+      save();
+      changed();
+      tab.wc.reload();
+    } else if (u.host === 'focus') { // a click on the box: the address bar takes the keyboard
+      focusAddress(tab.window, '');
+    } else if (u.host === 'weather') { // "Try again" in the weather's card
+      feeds.retry();
       tab.wc.reload();
     } else if (u.host === 'sessions' && !tab.private) {
       showSessions(tab.window);
@@ -278,6 +327,18 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
       if (e.isMainFrame !== false && tab.group === YOU && tab.wc === wc && onStart(wc.getURL())) command(tab, to);
     };
     wc.on('will-navigate', stop);
+    // A letter typed while the start page has the keyboard goes to the address
+    // bar, which takes the keyboard for the rest (see the top of this file).
+    // The user's own keys only: one a tool sent the page (the Claude panel's
+    // press_key) stays in the page, so no tool can write in the address bar.
+    wc.on('before-input-event', (e, input) => {
+      if (tab.sending) return;
+      if (input.type !== 'keyDown' || input.control || input.alt || input.meta || input.isComposing) return;
+      if ([...input.key].length !== 1 || input.key === ' ') return; // one printable character; Space scrolls the page
+      if (tab.group !== YOU || tab.wc !== wc || !onStart(wc.getURL()) || tab.window?.activeId !== tab.id) return;
+      e.preventDefault();
+      focusAddress(tab.window, input.key);
+    });
     wc.on('will-redirect', (e, legacyUrl) => { if (onStart(e.url || legacyUrl || '')) e.preventDefault(); });
     wc.on('did-start-navigation', (e) => {
       if (!e.isMainFrame || e.isSameDocument || tab.view?.webContents !== wc) return;
@@ -302,7 +363,8 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     choice: choice(), address: typeof settings.newTabAddress === 'string' ? settings.newTabAddress : '',
     tiles: on('startTiles'), hidden: hidden().length,
     weather: on('startWeather'), place: typeof settings.weatherPlace === 'string' ? settings.weatherPlace : '', found: feeds.place(), units: feeds.units(),
-    news: on('startNews'), feeds: feeds.feeds(),
+    resolved: feeds.resolved(), others: feeds.others(), // the place as it was looked up, and what else its name could mean
+    news: on('startNews'), feeds: feeds.feeds(), known: feeds.known(), feedTrouble: feeds.trouble(),
   });
   // What the Settings window can ask for, by name.
   const acts = {
@@ -321,6 +383,8 @@ function createStartPage({ tabs, ses, settings, save, changed, history, bookmark
     },
     'start:unhide': () => { delete settings.startHidden; save(); },
     'start:place': (name) => feeds.setPlace(name),
+    'start:place-others': () => feeds.otherPlaces(),
+    'start:place-choose': (which) => feeds.choosePlace(which),
     'start:units': (u) => feeds.setUnits(u),
     'start:feed-add': (url) => feeds.addFeed(url),
     'start:feed-remove': (url) => feeds.removeFeed(String(url)),

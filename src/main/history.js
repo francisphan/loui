@@ -8,24 +8,41 @@
 // off the main thread's critical path, written to a temporary file and renamed
 // over the old one so a crash never leaves half a file.
 const fs = require('fs');
-const { app } = require('electron');
+const { app, nativeImage } = require('electron');
 const { YOU } = require('./tabs');
 
 const KEEP = 5000; // entries; the least recently visited go first
+const ICON_MAX = 8000; // characters of a site's icon as kept (a data: address, drawn at 32px)
+const ICON = /^data:image\/[\w.+-]+;base64,[A-Za-z0-9+/=]+$/;
 const DAY = 24 * 60 * 60 * 1000;
 
 function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
   const entries = new Map(); // url -> { url, title, visits, first, last }
+  // Each visited site's icon, as a tab of the user's last showed it: host -> data: address.
+  // Kept with the history, and gone with it (see contents()).
+  const icons = new Map();
   try {
-    for (const e of JSON.parse(fs.readFileSync(file, 'utf8')).entries || []) {
+    const had = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const e of had.entries || []) {
       if (e && typeof e.url === 'string') entries.set(e.url, e);
     }
+    for (const [host, icon] of Object.entries(had.icons || {})) {
+      if (typeof icon === 'string' && icon.length <= ICON_MAX && ICON.test(icon)) icons.set(host, icon);
+    }
   } catch {}
+  const hostOf = (url) => { try { return new URL(url).host; } catch { return ''; } };
 
   // ── saving ──────────────────────────────────────────────────────────────
   let timer = null;
   let writing = Promise.resolve();
-  const contents = () => JSON.stringify({ version: 1, entries: [...entries.values()] });
+  const contents = () => {
+    // An icon stays only as long as a page of its site is in the history.
+    if (icons.size) {
+      const hosts = new Set([...entries.keys()].map(hostOf));
+      for (const host of icons.keys()) if (!hosts.has(host)) icons.delete(host);
+    }
+    return JSON.stringify({ version: 1, entries: [...entries.values()], ...(icons.size ? { icons: Object.fromEntries(icons) } : {}) });
+  };
   function save() {
     changed();
     clearTimeout(timer);
@@ -89,6 +106,27 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
     wc.on('page-title-updated', (_ev, title) => { if (usersTab(wc)) retitle(wc.getURL(), title); });
   });
 
+  // A site's icon, once a tab of the user's own (never a private one, nor a
+  // session's) has it: shrunk to 32px, and left out if it is still too big.
+  const iconFrom = new Map(); // host -> the icon address it was last taken from
+  tabs.on('change', () => {
+    for (const tab of tabs.list) {
+      if (tab.group !== YOU || tab.private || !tab.icon || tab.loading || !tab.iconUrl || !worthKeeping(tab.url)) continue;
+      const host = hostOf(tab.url);
+      if (!host || iconFrom.get(host) === tab.iconUrl || !entries.has(tab.url)) continue;
+      iconFrom.set(host, tab.iconUrl);
+      let icon = '';
+      try {
+        const img = nativeImage.createFromBuffer(tab.icon.bytes);
+        // What cannot be read here (SVG, and ICO outside Windows) is kept as it came, if small.
+        icon = img.isEmpty() ? tabs.iconData(tab) || '' : img.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
+      } catch {}
+      if (!icon || icon.length > ICON_MAX || !ICON.test(icon) || icons.get(host) === icon) continue;
+      icons.set(host, icon);
+      save();
+    }
+  });
+
   // ── reading ─────────────────────────────────────────────────────────────
   // Lower case, without the scheme and "www.", which nobody types.
   const bare = (url) => url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '');
@@ -136,7 +174,8 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
   }
 
   // For the start page: the sites visited most, most visited first, as
-  // { host, url (the site's front page), visits }. hidden: hosts to leave out.
+  // { host, url (the site's front page), visits, icon }. hidden: hosts to
+  // leave out. A site visited only once is not one the user keeps going to.
   function top(limit = 8, hidden = []) {
     const sites = new Map();
     for (const e of entries.values()) {
@@ -147,8 +186,9 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
       s.last = Math.max(s.last, e.last);
       sites.set(u.host, s);
     }
-    return [...sites.values()].filter((s) => !hidden.includes(s.host))
-      .sort((a, b) => b.visits - a.visits || b.last - a.last).slice(0, limit);
+    return [...sites.values()].filter((s) => s.visits > 1 && !hidden.includes(s.host))
+      .sort((a, b) => b.visits - a.visits || b.last - a.last).slice(0, limit)
+      .map((s) => ({ ...s, icon: icons.get(s.host) || '' }));
   }
 
   function remove(url) {
@@ -157,6 +197,8 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
 
   function clear() {
     entries.clear();
+    icons.clear();
+    iconFrom.clear();
     save();
   }
 

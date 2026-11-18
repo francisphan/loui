@@ -119,7 +119,7 @@
 }
 .st-row input[type='text'], .st-row input[type='password'] { width: 250px; user-select: text; }
 .st-row input[type='number'] { width: 84px; user-select: text; }
-.st-row input::placeholder { color: var(--ink-2); }
+.st-row input::placeholder { color: var(--ink-2); opacity: .7; font-style: italic; } /* a hint, not something filled in */
 .st-row select:focus-visible, .st-row input:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
 .st-unit { color: var(--ink-2); font-size: 13px; }
 
@@ -146,6 +146,17 @@
 .st-list .st-empty { padding-left: 0; color: var(--ink-2); font-size: 13.5px; }
 .st-list .quiet { flex: none; }
 .st-add { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; }
+.st-words > .st-list { max-width: 420px; }
+.st-value .quiet { display: inline-flex; margin-left: 4px; text-decoration: underline; text-underline-offset: 2px; }
+/* Things to add with one press, and boxes to tick. */
+.st-offers { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.st-offers:not(:empty) + .st-note, .st-ticks + .st-note { display: block; min-height: 1.4em; margin-top: 4px; }
+.st-ticks {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 12px;
+  max-height: 168px; overflow-y: auto; margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 7px;
+}
+.st-tick { display: flex; align-items: center; gap: 7px; min-height: 24px; font-size: 13.5px; }
+.st-tick input { margin: 0; accent-color: var(--focus); }
 
 @media (max-width: 760px) {
   .settings-page body { grid-template-columns: 172px minmax(0, 1fr); }

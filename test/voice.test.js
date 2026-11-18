@@ -14,6 +14,7 @@ const { launch } = require('./drive');
 let b, home, host;
 let serving = 'ok'; // how the stand-in model host answers: 'ok', 'fail', or 'hold'
 const held = [];
+let hostHits = 0; // requests the stand-in model host has had
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const wait = async (what, check, ms = 10000) => {
@@ -90,6 +91,7 @@ const FAKES = `(() => {
 test.before(async () => {
   // The model host's stand-in: small files, slow or failing on request.
   host = http.createServer((req, res) => {
+    hostHits++;
     if (serving === 'fail') return res.writeHead(503).end();
     res.writeHead(200, { 'content-type': 'application/octet-stream' });
     res.write('part');
@@ -120,10 +122,12 @@ test('reading aloud is off until the speaker in the panel head is pressed, and t
   await done();
   assert.deepEqual(await spoken(), []);
 
+  assert.equal(await chrome("document.getElementById('readback').title"), 'Read replies aloud');
   await press('readback');
   await wait('the toggle to be on', async () => (await pressed('readback')) === 'true');
   assert.equal(settings().readBack, true);
   assert.equal((await b.state()).voice.speaks, true);
+  assert.equal(await chrome("document.getElementById('readback').title"), 'Reading replies aloud is on. Press to turn off.');
 });
 
 test('a reply is read a sentence at a time as it arrives: prose only, with the chosen voice and rate', async () => {
@@ -132,6 +136,10 @@ test('a reply is read a sentence at a time as it arrives: prose only, with the c
   assert.deepEqual(await spoken(), ['Here is the answer.']);
   assert.deepEqual(await chrome('fake.spokenWith'), { voice: 'A Voice', rate: 1.3 });
   assert.equal(await chrome("document.getElementById('readback').classList.contains('speaking')"), true);
+  // Speaking does not look like merely on: it is filled, and its tooltip says what a press does now.
+  const look = () => chrome("(() => { const c = getComputedStyle(document.getElementById('readback')); return c.backgroundColor + ' ' + c.color; })()");
+  const speaking = await look();
+  assert.match(await chrome("document.getElementById('readback').title"), /Press to stop this reply/);
 
   await chat({ type: 'text', text: ' on.\n\nSee [the docs](https://example.com/a/b) or https://www.example.org/x/y?z=1 for more.\n\n```js\ncon' });
   await chat({ type: 'text', text: 'st secret = 1;\n```\n\n1. First `thing`\n2. Second' });
@@ -144,6 +152,19 @@ test('a reply is read a sentence at a time as it arrives: prose only, with the c
   await chrome('void fake.ends.splice(0).forEach((end) => end())');
   assert.equal(await chrome("document.getElementById('readback').classList.contains('speaking')"), false);
   assert.equal(await pressed('readback'), 'true');
+  assert.notEqual(await look(), speaking, 'on, at rest, looks different from speaking');
+});
+
+test('an abbreviation or a colon inside a line does not end a sentence', async () => {
+  await set({ spoken: [], cancelled: 0 });
+  await reply('First step: run npm test, e.g. with a filter, i.e. one file. Ask Dr. Who vs. the others, etc. and see No. 5 below. No. That is all.\nA list follows:\n- one\n');
+  await done();
+  assert.deepEqual(await spoken(), [
+    'First step: run npm test, e.g. with a filter, i.e. one file.',
+    'Ask Dr. Who vs. the others, etc. and see No. 5 below.',
+    'No.', 'That is all.', 'A list follows:', 'one',
+  ]);
+  await chrome('void fake.ends.splice(0).forEach((end) => end())');
 });
 
 test('pressing the speaker while it talks silences that reply and leaves reading aloud on', async () => {
@@ -294,15 +315,34 @@ test('the speech model is fetched on first use, with progress on the button and 
   await chrome('void (voice.seams.recogniser = fake.real.recogniser)');
   assert.equal((await b.state()).voice.model, 'missing');
   const micStarts = await chrome('fake.micStarts');
+  // The first press only asks: nothing is fetched until the answer.
+  const asks = hostHits;
+  await press('mic');
+  await wait('the question', async () => (await mic()).cls === 'asking');
+  assert.equal((await mic()).note, 'Download the speech model, 77 MB? It runs on this computer. Press Download to get it.');
+  assert.equal((await mic()).text, 'Download');
+  await pause(300);
+  assert.equal(hostHits, asks, 'nothing was asked of the model host');
+  assert.equal((await b.state()).voice.model, 'missing');
+  // Esc: never mind.
+  await key('keydown', { key: 'Escape' });
+  assert.equal((await mic()).cls, 'idle');
+  assert.equal((await mic()).note, '');
+  assert.equal(hostHits, asks);
+
   serving = 'fail';
   await press('mic');
+  await wait('the question again', async () => (await mic()).cls === 'asking');
+  await press('mic'); // yes
   await wait('the failure', async () => (await mic()).trouble);
   assert.match((await mic()).note, /could not be fetched: the model host answered 503\..*try again.*Win\+H/);
   assert.equal((await mic()).cls, 'idle');
 
   // A connection that goes quiet is given up, and leaves nothing behind.
   serving = 'hold';
-  await press('mic');
+  await press('mic'); // after a failure it asks again
+  await wait('the question', async () => (await mic()).cls === 'asking');
+  await press('mic'); // yes
   await wait('the download to show', async () => (await mic()).cls === 'getting');
   await wait('the stalled download to be given up', async () => (await mic()).trouble);
   assert.match((await mic()).note, /could not be fetched: the download stalled\..*press the microphone to try again/);
@@ -313,14 +353,25 @@ test('the speech model is fetched on first use, with progress on the button and 
   for (const res of held.splice(0)) res.destroy();
 
   await press('mic');
+  await wait('the question once more', async () => ['asking', 'getting'].includes((await mic()).cls));
+  if ((await mic()).cls === 'asking') await press('mic'); // yes
   await wait('the download to show', async () => (await mic()).cls === 'getting');
   assert.match((await mic()).text, /^\d+%$/);
   assert.match((await mic()).note, /Getting the speech model/);
   assert.equal((await b.state()).voice.model, 'downloading');
-  // Pressing again while it downloads does nothing.
+  // A press while it downloads cancels it, and what had arrived is removed.
+  await wait('a partial file', async () => fs.existsSync(dir) && fs.readdirSync(dir).some((f) => f.endsWith('.part')));
   await press('mic');
-  assert.equal((await mic()).cls, 'getting');
+  await wait('the download to stop', async () => (await mic()).cls === 'idle');
+  assert.match((await mic()).note, /The download was cancelled/);
+  assert.equal((await mic()).trouble, false);
+  await wait('the partial file to go', async () => !fs.readdirSync(dir).some((f) => f.endsWith('.part')));
+  assert.equal((await b.state()).voice.model, 'missing');
+  held.length = 0;
 
+  await press('mic');
+  await press('mic');
+  await wait('the download to show again', async () => (await mic()).cls === 'getting' && held.length > 0);
   serving = 'ok';
   held.shift().end('rest');
   await wait('the download to finish', async () => (await mic()).cls === 'idle');
@@ -331,6 +382,70 @@ test('the speech model is fetched on first use, with progress on the button and 
   assert.equal(state.onDisk, true);
   assert.equal(fs.readFileSync(path.join(state.dir, 'onnx', 'encoder_model_quantized.onnx'), 'utf8'), 'partrest');
   assert.equal(fs.readdirSync(state.dir).some((f) => f.endsWith('.part')), false);
+  // Settings can remove it; the next press asks again.
+  assert.equal((await b.ui('settings:state')).state.claude.voice.model, 'ready');
+  await b.ui('settings:act', { what: 'voice:model-remove' });
+  assert.equal((await b.ui('voice:state')).onDisk, false);
+  assert.equal((await b.ui('settings:state')).state.claude.voice.model, 'missing');
+  await press('mic');
+  await wait('the question once more', async () => (await mic()).cls === 'asking');
+  await key('keydown', { key: 'Escape' });
+});
+
+test('Settings has the voice: reading aloud, the voice and its speed with a sample, dictation and its languages', async () => {
+  const voiceState = async () => (await b.ui('settings:state')).state.claude.voice;
+  const act = (what, arg) => b.ui('settings:act', { what, arg });
+  await set({ spoken: [], cancelled: 0 });
+  // The system's voices come from the main window's chrome, when Settings asks.
+  await chrome("void (speechSynthesis.getVoices = () => [{ name: 'A Voice', lang: 'en-GB' }, { name: 'Otra Voz', lang: 'es-AR' }])");
+  await b.ui('settings:open', 'claude');
+  await wait('the voices', async () => (await voiceState()).voices?.length === 2);
+  assert.deepEqual((await voiceState()).voices, [{ name: 'A Voice', lang: 'en-GB' }, { name: 'Otra Voz', lang: 'es-AR' }]);
+  const page = (code) => b.ui('settings:js', code);
+  await wait('the page to list them', async () => (await page("[...document.getElementById('set-voice-voice').options].map((o) => o.textContent)")).length === 3);
+  assert.deepEqual(await page("[...document.getElementById('set-voice-voice').options].map((o) => o.textContent)"), ["The system's choice", 'A Voice (en-GB)', 'Otra Voz (es-AR)']);
+  assert.equal(await page("document.getElementById('set-voice-voice').value"), 'A Voice');
+
+  await act('voice:voice', 'Otra Voz');
+  await act('voice:voice', 'No Such Voice');
+  await act('voice:rate', 1.5);
+  await act('voice:rate', 99);
+  assert.deepEqual([settings().readBackVoice, settings().readBackRate], ['Otra Voz', 1.5]);
+  // "Play sample" speaks through the main window, in that voice at that speed.
+  await wait('the main window to know the voice', async () => (await b.state()).voice.voice === 'Otra Voz');
+  await page("document.getElementById('set-voice-sample').click()");
+  await wait('the sample', async () => (await spoken()).length === 1);
+  assert.match((await spoken())[0], /This is how Loui reads/);
+  assert.deepEqual(await chrome('fake.spokenWith'), { voice: 'Otra Voz', rate: 1.5 });
+
+  await act('voice:read-back', false);
+  assert.equal(settings().readBack, false);
+  assert.equal(await pressed('readback'), 'false');
+  await act('voice:read-back', true);
+
+  // Languages: English and Spanish to begin with; one always stays.
+  const on = async () => (await voiceState()).languages.filter((l) => l.on).map((l) => l.code);
+  assert.deepEqual(await on(), ['en', 'es']);
+  assert.deepEqual((await voiceState()).languages.slice(0, 3).map((l) => l.name), ['English', 'Spanish', 'Afrikaans']);
+  await act('voice:language', { code: 'fr', on: true });
+  await act('voice:language', { code: 'en', on: false });
+  await act('voice:language', { code: 'xx', on: true });
+  assert.deepEqual(settings().dictationLanguages, ['es', 'fr']);
+  await act('voice:language', { code: 'fr', on: false });
+  await act('voice:language', { code: 'es', on: false });
+  assert.deepEqual(await on(), ['es'], 'the last one cannot be unticked');
+  await page("[...document.querySelectorAll('[data-setting=voice-languages] .st-tick')].find((l) => l.textContent === 'English').querySelector('input').click()");
+  await wait('English to be ticked', async () => (await on()).join() === 'en,es');
+
+  // Dictation off: the microphone goes, with its settings.
+  await act('voice:dictation', false);
+  await wait('the microphone to go', async () => (await mic()).hidden);
+  assert.equal(await page("document.querySelector('[data-setting=voice-languages]').hidden"), true);
+  await act('voice:dictation', true);
+  await wait('the microphone to be back', async () => !(await mic()).hidden);
+  assert.match(await page("document.getElementById('value-voice-shortcut').textContent"), /Ctrl\+Shift\+Space/);
+  assert.match(await page("document.getElementById('value-voice-model').textContent"), /^Not downloaded\./);
+  await b.ui('settings:close');
 });
 
 test('the hidden speech page has no way out over WebRTC, and still loads', async () => {

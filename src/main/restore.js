@@ -149,6 +149,8 @@ function createRestore({ tabs, file, openWindow, settings = {} }) {
       tabs.reorder(tab.id, was.at);
       return tab;
     },
+    // Whether there is a closed tab to reopen (the menu offers it only then).
+    canReopen: () => closed.length > 0,
 
     stop,
   };
