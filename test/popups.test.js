@@ -49,6 +49,38 @@ test("a session's pop-up stays in its group, with its opener", async () => {
   s.end();
 });
 
+test('the pop-up opens beside its opener, and closing itself brings the opener back', async () => {
+  const before = (await tabs()).find((x) => x.active);
+  await b.ui('go', b.base + '/opener.html');
+  const opener = await until(async () => { const t = (await tabs()).find((x) => x.id === before.id); return t.title === 'Opener' && !t.loading && t; }, 'the page');
+  await b.ui('panel', { tool: 'tabs', args: { action: 'new' } }); // other tabs after it
+  await b.ui('panel', { tool: 'tabs', args: { action: 'new' } });
+  await b.ui('tab:select', opener.id);
+  await until(async () => (await tabs()).find((t) => t.active)?.id === opener.id, 'the opener on screen');
+  await js(opener.id, "document.getElementById('open').click(); 1", true);
+  const pop = await until(async () => (await tabs()).find((t) => t.url.includes('/popup.html') && !t.loading), 'the pop-up');
+  const mine = (await tabs()).filter((t) => t.group === 'you').map((t) => t.id);
+  assert.equal(mine[mine.indexOf(opener.id) + 1], pop.id, 'right after its opener');
+  assert.ok(mine.length > mine.indexOf(pop.id) + 1, 'with other tabs after it');
+  await js(pop.id, "document.getElementById('finish').click(); 1").catch(() => {});
+  await until(async () => !(await tabs()).some((t) => t.id === pop.id), 'the pop-up to close');
+  await until(async () => (await tabs()).find((t) => t.active)?.id === opener.id, 'the opener on screen, not the tab beside the pop-up');
+});
+
+test('a pop-up handed to someone else is cut off from the page that opened it', async () => {
+  const s = b.as('cut', 'Claude Code');
+  const page = await s.text('navigate', { url: b.base + '/opener.html' });
+  await s.text('click', { ref: /button "Sign in" \[(e\d+)\]/.exec(page)[1] });
+  const pop = await until(async () => (await tabs()).find((t) => t.url.includes('/popup.html') && t.group === 'cut' && !t.loading), 'the pop-up');
+  const opener = (await tabs()).find((t) => t.group === 'cut' && t.id !== pop.id);
+  await b.ui('tab:move', { id: pop.id, group: 'you' }); // the user takes the pop-up
+  const moved = await until(async () => (await tabs()).find((t) => t.id === pop.id && t.group === 'you' && !t.loading && t.url.includes('/popup.html')), 'it among the user\'s tabs, on the same page');
+  assert.equal(await js(moved.id, 'document.getElementById("opener").textContent'), 'false', 'it no longer has an opener');
+  assert.equal(await js(opener.id, 'window.pop.closed'), true, 'and the session\'s page no longer holds it');
+  await b.ui('tab:close', moved.id);
+  s.end();
+});
+
 test('a page is not offered the federated sign-in Loui has no screen for', async () => {
   const t = (await tabs()).find((x) => x.active);
   assert.equal(await js(t.id, 'typeof IdentityCredential'), 'undefined');

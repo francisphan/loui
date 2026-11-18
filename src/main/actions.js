@@ -75,6 +75,7 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
   // A page that has hung would otherwise hold the call (and the session) for
   // good. Pointing is left unbounded: it waits for the user, and has its own limit.
   const page = (tab, fn, arg = {}) => {
+    if (!tab.wc || tab.wc.isDestroyed()) return Promise.reject(new Error('That tab has no page.')); // asleep, or its page closed itself
     const call = tab.wc.executeJavaScriptInIsolatedWorld(WORLD, [
       { code: `${LIB}\n;__loui.${fn}(${JSON.stringify(arg)})` },
     ]);
@@ -326,15 +327,22 @@ function createActions({ tabs, sessions, prompts, changed, refuse = () => null, 
 
   async function watched(c, tab, fn, posts = true) {
     if (!guard.applies(c.session)) return { out: await fn(), note: '' };
-    clearTimeout(tab.unwatching);
-    await page(tab, 'watchScript', guard.hints()).catch(() => {});
+    // A script can reach into a pop-up its page opened, or back into the page
+    // that opened it (window.opener), so those in the same hands are watched too.
+    const kin = tabs.kin(tab).filter((t) => t.group === tab.group && t.wc && !t.wc.isDestroyed());
+    for (const t of [tab, ...kin]) {
+      clearTimeout(t.unwatching);
+      await page(t, 'watchScript', guard.hints()).catch(() => {});
+      t.watched = true;
+    }
     guard.scripting(c.session, posts);
-    tab.watched = true;
     let out, failed = null;
     try { out = await fn(); } catch (e) { failed = e; }
     await sleep(100); // what the script set off without waiting for it: a timer, a form on its way
-    const note = tab.wc ? await held(c, tab, true) : '';
-    if (c.session.group === YOU) tab.unwatching = setTimeout(() => unwatch(tab), PANEL_WATCH_MS);
+    const notes = [];
+    for (const t of [tab, ...kin]) if (t.wc && !t.wc.isDestroyed() && t.group === tab.group) notes.push(await held(c, t, true));
+    const note = notes.filter(Boolean).join('\n');
+    if (c.session.group === YOU) for (const t of [tab, ...kin]) t.unwatching = setTimeout(() => unwatch(t), PANEL_WATCH_MS);
     if (failed) throw failed;
     return { out, note };
   }
