@@ -27,9 +27,28 @@ function createIdentity({ tabs, full, plain, hosts = HONEST }) {
     if (wc.getUserAgent() !== want) wc.setUserAgent(want);
   }
 
+  // A page opened by another page (a sign-in pop-up) is loaded by Chromium,
+  // not from here: it is given its agent before that load begins. That is
+  // enough for the request, not for the page: Chromium hands a page the
+  // agent set here only in a window the browser itself has loaded something
+  // into, and a pop-up's pages are loaded for the page that opened it. Such a
+  // tab is marked, and its first load onto one of these hosts is taken over
+  // below (it is still its opener's window: window.opener holds).
+  const unloaded = new WeakSet();
+  tabs.on('adopted', (tab, url) => {
+    unloaded.add(tab.wc);
+    apply(tab, url);
+  });
   tabs.on('created', (tab) => {
     const wc = tab.wc;
-    wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) apply(tab, e.url); });
+    wc.on('did-start-navigation', (e) => {
+      if (!e.isMainFrame || e.isSameDocument) return;
+      apply(tab, e.url);
+      if (!unloaded.has(wc) || !honest(e.url) || tab.device?.mobile) return;
+      unloaded.delete(wc);
+      const url = e.url;
+      setImmediate(() => { if (!wc.isDestroyed()) wc.loadURL(url).catch(() => {}); }); // in place of the one that just began
+    });
     // A redirect that crosses between the two kinds of host (a sign-in link
     // usually reaches Google through one, and "Sign in with Google" leaves
     // through one). The agent cannot be changed under a navigation in flight:
