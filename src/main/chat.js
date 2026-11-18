@@ -423,6 +423,8 @@ function createChat({ run, tabs, picker, describePick, cwd, emit, open, changed 
       if (login !== mine) return;
       mine.step = 'finishing';
       mine.ended = true;
+      // Its last words were taken for a fault with the code (above). It is over: why it failed is said below, once, in Loui's words.
+      mine.problem = '';
       const lines = plain(mine.err).split('\n').map((l) => l.trim()).filter(Boolean);
       const why = mine.cancelled ? '' : mine.gaveUp ? 'The sign-in was not finished in time.'
         : code === 0 ? '' : firstLine((lines.find((l) => /^couldn't log in/i.test(l)) || lines.pop() || 'The sign-in did not finish.').replace(/^couldn't log in:\s*/i, ''));

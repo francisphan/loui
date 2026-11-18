@@ -194,7 +194,8 @@ test('a sign-in that fails says why, and the card stays', async () => {
   await press('account-sign-in');
   await until(async () => (await card()).code, 'the code field');
   await paste(CODE);
-  const c = await until(async () => { const now = await card(); return now.note && !(await account()).signIn && now; }, 'the sign-in to fail');
+  // The card as drawn once the sign-in is over ("Sign in" is back), not as it was a moment before.
+  const c = await until(async () => { const now = await card(); return now.note && now.buttons.includes('Sign in') && !(await account()).signIn && now; }, 'the sign-in to fail');
   assert.equal(c.note, 'That did not work: This account has no Claude subscription.');
   assert.equal(c.title, 'Sign in to Claude to use the panel');
   assert.deepEqual(c.buttons, ['Sign in', 'I’ve signed in']);

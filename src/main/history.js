@@ -35,6 +35,7 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
   // ── saving ──────────────────────────────────────────────────────────────
   let timer = null;
   let writing = Promise.resolve();
+  let started = 0, finished = 0, flushed = 0; // saves begun, the last one done, and the last one flush() overtook
   const contents = () => {
     // An icon stays only as long as a page of its site is in the history.
     if (icons.size) {
@@ -49,20 +50,24 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
     timer = setTimeout(() => {
       timer = null;
       const data = contents();
+      const n = ++started;
       // One write at a time, in order, so an older save never lands last.
       writing = writing.then(() => fs.promises.writeFile(file + '.tmp', data, { mode: 0o600 }))
-        .then(() => fs.promises.rename(file + '.tmp', file))
-        .catch((e) => console.error('[history] could not save:', e.message));
+        .then(() => (n > flushed ? fs.promises.rename(file + '.tmp', file) : null)) // flush() wrote something newer
+        .catch((e) => console.error('[history] could not save:', e.message))
+        .finally(() => { finished = n; });
     }, delay);
   }
-  // On quit, a pending save is written at once.
+  // On quit, a save that is pending, or still on its way to the file (Loui
+  // would be gone before it got there), is written at once.
   function flush() {
-    if (!timer) return;
+    if (!timer && finished === started) return;
     clearTimeout(timer);
     timer = null;
+    flushed = started;
     try {
-      fs.writeFileSync(file + '.tmp', contents(), { mode: 0o600 });
-      fs.renameSync(file + '.tmp', file);
+      fs.writeFileSync(file + '.quit', contents(), { mode: 0o600 });
+      fs.renameSync(file + '.quit', file);
     } catch {}
   }
 

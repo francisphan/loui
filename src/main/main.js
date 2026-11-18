@@ -856,7 +856,12 @@ async function testHook({ ui, arg }) {
   if (ui === 'tab:place') {
     const tab = tabs.get(arg);
     const [width, height] = tab.window.win.getContentSize();
-    return { view: tab.view.getBounds(), window: { width, height }, full: tab.window.full === tab.id, wide: !!tab.window.wide };
+    return {
+      view: tab.view.getBounds(), window: { width, height }, full: tab.window.full === tab.id, wide: !!tab.window.wide,
+      // For a press that did not land (tabs.js, the note at its top): how the view sat in the window's stack.
+      peeking: !!tab.peeking, visible: tab.view.getVisible(), loading: !!tab.loading,
+      depth: `${tab.window.win.contentView.children.indexOf(tab.view) + 1} of ${tab.window.win.contentView.children.length}`,
+    };
   }
   // A script in one of a tab's frames, found by part of its address (for looking into an embedded frame).
   if (ui === 'frame:js') {
