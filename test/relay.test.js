@@ -690,6 +690,8 @@ test('a session can ask for a device that is closed, and the relay starts the on
     try {
       const q = await connect('claude-code', quick.key, true, quick);
       await assert.rejects(q.text('devices', { name: 'Attic', start: true }), /ran its command for Attic, but Loui there did not come online within 1 seconds\. Ask the user to open Loui on Attic/);
+      // And not run again straight away, by anyone.
+      await assert.rejects(q.text('devices', { name: 'Attic', start: true }), /less than 2 minutes ago and Loui there has not come online; it will not run it again so soon/);
       await q.transport.terminateSession();
     } finally {
       await quick.close();

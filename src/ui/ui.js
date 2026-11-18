@@ -990,7 +990,11 @@ loui.on('state', (next) => {
   drawLink();
   drawUpdate();
   if (!state.groups.some((g) => g.busy)) liveStep?.classList.remove('live');
-  if (document.activeElement !== address) address.value = tab?.url || '';
+  // The field counts as in use only while the window's own chrome has the
+  // keyboard, or he has typed in it: it stays the chrome's active element
+  // after a click in the page, and would otherwise never follow the page again.
+  const using = document.activeElement === address && (document.hasFocus() || addressTyped);
+  if (!using) address.value = tab?.url || '';
   // Another tab came on screen while the field has the keyboard: it shows that
   // tab's address, selected, so that Enter cannot load the old one in the new
   // tab. What the owner has typed there stays.

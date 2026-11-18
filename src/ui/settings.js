@@ -402,7 +402,7 @@ function accountWords(a) {
     return `Signed in with your Claude subscription${a.detail ? ` (${a.detail})` : ''}.`;
   }
   if (a.state === 'signed-out') return `Not signed in.${a.detail ? ` ${a.detail}` : ''}${failed}`;
-  if (a.state === 'not-installed') return 'Claude Code is not installed on this computer (or, on Windows, in WSL).';
+  if (a.state === 'not-installed') return `Claude Code is not installed on this computer${navigator.platform.startsWith('Win') ? ' (or in WSL)' : ''}.`;
   return `Loui could not tell. The panel says so if a message cannot be sent.${failed}`;
 }
 

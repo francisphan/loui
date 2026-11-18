@@ -87,7 +87,7 @@ const account = (() => {
     const missing = !step && a.state === 'not-installed';
     title.textContent = missing ? 'Claude Code is not installed' : 'Sign in to Claude to use the panel';
     line.textContent = missing
-      ? 'The panel runs on Claude Code and your Claude subscription. Install Claude Code on this computer (or, on Windows, in WSL) and sign in. Other Claude sessions can still use this browser.'
+      ? `The panel runs on Claude Code and your Claude subscription. Install Claude Code on this computer${navigator.platform.startsWith('Win') ? ' (or in WSL)' : ''} and sign in. Other Claude sessions can still use this browser.`
       : step === 'starting' ? 'Starting Claude Code’s sign-in…'
         : step === 'browser' ? 'Finish signing in in your browser…'
           : step === 'page' ? `Sign in on the page that opened.${a.signIn.code ? ' If it shows a code, paste it here.' : ''}`
