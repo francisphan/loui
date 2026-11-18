@@ -98,12 +98,30 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
 
   // Every tab's page is a WebContents; this sees each one as it is made, and
   // asks which tab (and so which group) it belongs to each time it navigates.
+  const visitsBy = new WeakMap(); // a page -> Map of url -> how many of its visits were this page's
+  const count = (wc, url) => {
+    if (!worthKeeping(url)) return;
+    const by = visitsBy.get(wc) || new Map();
+    by.set(url, (by.get(url) || 0) + 1);
+    visitsBy.set(wc, by);
+  };
   app.on('web-contents-created', (_e, wc) => {
-    wc.on('did-navigate', (_ev, url) => { if (usersTab(wc)) visit(url, ''); });
+    wc.on('did-navigate', (_ev, url) => { if (usersTab(wc)) { count(wc, url); visit(url, ''); } });
     wc.on('did-navigate-in-page', (_ev, url, isMainFrame) => {
-      if (isMainFrame && usersTab(wc)) visit(url, wc.getTitle());
+      if (isMainFrame && usersTab(wc)) { count(wc, url); visit(url, wc.getTitle()); }
     });
     wc.on('page-title-updated', (_ev, title) => { if (usersTab(wc)) retitle(wc.getURL(), title); });
+  });
+  // A pop-up that closed itself (a sign-in window, once it is done) was not a
+  // page the user went to: what only it visited is forgotten.
+  tabs.on('popup-closed-itself', (wc) => {
+    for (const [url, n] of visitsBy.get(wc) || []) {
+      const e = entries.get(url);
+      if (!e) continue;
+      if (e.visits > n) e.visits -= n;
+      else entries.delete(url);
+      save();
+    }
   });
 
   // A site's icon, once a tab of the user's own (never a private one, nor a
@@ -202,7 +220,17 @@ function createHistory({ file, tabs, changed = () => {}, delay = 500 }) {
     save();
   }
 
-  return { visit, suggest, list, top, remove, clear, flush };
+  // Forgets the pages last visited at or after a time, and says how many.
+  // (One entry is kept per page, so a page also visited before then goes too.)
+  function clearSince(time) {
+    const before = entries.size;
+    for (const e of [...entries.values()]) if (e.last >= time) entries.delete(e.url);
+    iconFrom.clear(); // a site visited again has its icon taken again
+    if (entries.size !== before) save();
+    return before - entries.size;
+  }
+
+  return { visit, suggest, list, top, remove, clear, clearSince, flush };
 }
 
 module.exports = { createHistory };

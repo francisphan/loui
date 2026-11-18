@@ -460,6 +460,62 @@ function relayKey(def) {
   };
 }
 
+// Clear browsing data: which kinds, from how far back, and a button that asks
+// first. What was ticked is the page's own; nothing of it is a setting.
+function clearData(def) {
+  const f = frame(def, { wide: true });
+  f.control.remove();
+  const box = el('div', 'st-clear');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-labelledby', `label-${def.id}`);
+  const kinds = [
+    ['history', 'Browsing history'],
+    ['cookies', 'Cookies and site data (signs you out of sites; all time only)'],
+    ['cache', 'Cached files (all time only)'],
+  ].map(([kind, text]) => {
+    const label = el('label', 'st-tick');
+    const input = el('input');
+    input.type = 'checkbox';
+    input.id = `set-clear-${kind}`;
+    input.checked = kind !== 'cookies'; // signing out of every site is asked for, not assumed
+    label.append(input, el('span', '', text));
+    box.append(label);
+    return [kind, input];
+  });
+  const line = el('div', 'st-clear-line');
+  const range = el('select');
+  range.id = 'set-clear-range';
+  range.setAttribute('aria-label', 'Time range');
+  range.append(...[['hour', 'Last hour'], ['day', 'Last day'], ['all', 'All time']]
+    .map(([value, label]) => Object.assign(el('option', '', label), { value })));
+  const button = el('button', 'st-button', 'Clear');
+  button.type = 'button';
+  button.id = 'set-clear-data';
+  button.setAttribute('aria-describedby', `help-${def.id}`);
+  const note = el('span', 'st-note');
+  note.setAttribute('role', 'status');
+  line.append(range, button, note);
+  f.node.append(box, line);
+  const none = () => !kinds.some(([, input]) => input.checked);
+  box.onchange = () => { button.disabled = none(); };
+  askFirst(button, 'Clear it?', () => true, async () => {
+    const asked = { range: range.value };
+    for (const [kind, input] of kinds) asked[kind] = input.checked;
+    note.textContent = '';
+    const did = (await send('data:clear', asked))?.privacy.cleared;
+    if (!did) return;
+    // What was done, and what was not.
+    const when = { hour: ' from the last hour', day: ' from the last day', all: '' }[asked.range];
+    const done = [], failed = [];
+    if ('history' in did) done.push(`${did.history === 1 ? '1 page' : `${did.history} pages`} of history${when}`);
+    if ('cookies' in did) (did.cookies ? done : failed).push('cookies and site data');
+    if ('cache' in did) (did.cache ? done : failed).push('cached files');
+    note.textContent = [done.length ? `Cleared ${done.join(', ')}.` : '', failed.length ? `Could not clear ${failed.join(' or ')}.` : ''].filter(Boolean).join(' ');
+    note.classList.toggle('st-wrong', failed.length > 0);
+  });
+  return { ...def, node: f.node, update: () => {} };
+}
+
 // ── what there is to set ────────────────────────────────────────────────────
 const days = (n) => (n === 1 ? '1 day' : `${n} days`);
 const minutes = (n) => (n === 60 ? '1 hour' : n === 120 ? '2 hours' : n === 1 ? '1 minute' : `${n} minutes`);
@@ -671,7 +727,7 @@ const SECTIONS = [
             get: (s) => s.tabs.vertical, set: (on) => ['tabs:vertical', on],
           }),
           toggle({
-            id: 'bookmarks-bar', label: 'Show the bookmarks bar', seen: true,
+            id: 'bookmarks-bar', label: 'Show bookmarks bar', seen: true,
             help: 'Keeps your bookmarks in a row under the address bar.',
             get: (s) => s.tabs.bookmarksBar, set: (on) => ['bookmarks:bar', on],
           }),
@@ -775,6 +831,16 @@ const SECTIONS = [
               text: site, button: 'Remove', aria: `Open ${site} in Loui`, act: ['elsewhere:remove', site],
             })),
             add: { placeholder: 'example.com', aria: 'Site to send to your other browser', act: (v) => ['elsewhere:add', v] },
+          }),
+        ],
+      },
+      {
+        title: 'Browsing data', rows: [
+          clearData({
+            id: 'clear-data', label: 'Clear browsing data',
+            help: 'Clears what your own windows kept; a private window clears itself when it closes. Open tabs stay open. ' +
+              'Saved passwords, bookmarks, settings, what Claude sessions did and your Claude sign-in are not touched. ' +
+              'Cookies, site data and cached files carry no dates Loui can go by, so they are always cleared for all time.',
           }),
         ],
       },

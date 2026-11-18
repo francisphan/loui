@@ -20,6 +20,9 @@ async function until(check, what, ms = 8000) {
 }
 const tabs = async () => (await b.state()).tabs;
 const js = (id, code, acted = false) => b.ui('tab:js', { id, code, acted });
+// The recent pages in the menu button's History.
+const recent = async () => ((await b.ui('menu:button')).find((i) => Array.isArray(i) && i[0] === 'History')?.[1] || [])
+  .filter((i) => !['-', 'Show all history', 'Reopen closed tab'].includes(i));
 
 test("a pop-up the user's page opens is a tab that can answer its opener, and closes itself", async () => {
   await b.ui('go', b.base + '/opener.html');
@@ -30,11 +33,14 @@ test("a pop-up the user's page opens is a tab that can answer its opener, and cl
   assert.equal(pop.active, true, 'shown, as the page on screen opened it');
   assert.equal(await js(pop.id, 'document.getElementById("opener").textContent'), 'true', 'it has its opener');
   assert.equal(await js(opener.id, '!!window.pop && !window.pop.closed'), true, 'and the opener has it');
+  assert.ok((await recent()).includes('Pop-up'), 'while it is open it is a page like any other');
   await js(pop.id, "document.getElementById('finish').click(); 1").catch(() => {}); // the pop-up closes under the script that pressed its button
   await until(async () => !(await tabs()).some((t) => t.id === pop.id), 'the pop-up\'s tab to close with it');
   assert.equal(await js(opener.id, 'document.getElementById("out").textContent'), 'heard: signed in');
   assert.equal(await js(opener.id, 'window.pop.closed'), true);
   assert.equal((await tabs()).find((t) => t.active).id, opener.id, 'the opener is on screen again');
+  // It was not a page the user went to: History's recent pages leave it out, and keep the opener.
+  assert.deepEqual(await recent(), ['Opener']);
 });
 
 test("a session's pop-up stays in its group, with its opener", async () => {
