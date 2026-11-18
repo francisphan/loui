@@ -42,6 +42,7 @@ const { createGuardrails } = require('./guardrails');
 const { createCerts } = require('./certs');
 const { createPasswords, createCipher } = require('./passwords');
 const { createIdentity, HONEST } = require('./identity');
+const { createQuiet } = require('./quiet');
 const { createTaskManager } = require('./taskmanager');
 const { createActivity } = require('./activity');
 const { createPip } = require('./pip');
@@ -430,6 +431,7 @@ function start() {
     hosts: process.env.LOUI_TEST && process.env.LOUI_HONEST_HOSTS ? process.env.LOUI_HONEST_HOSTS.split(',') : HONEST,
   });
   identity.attach(userSes);
+  createQuiet({ tabs });
   // Tabs' icons, for the window chrome's <img> (tabs.icon): bytes held in memory, never from the web.
   session.defaultSession.protocol.handle('loui-icon', (request) => tabs.iconResponse(request.url));
   tabs.openWindow = openWindow;

@@ -320,6 +320,7 @@ class Tabs extends EventEmitter {
   // Gives a tab a new view and loads its page (or its history) into it, in
   // sight while it loads (see the note at the top).
   open(tab, show, { url, history, adopt = null }) {
+    tab.quiet = !!history; // brought back, not opened: its media waits for the user (quiet.js)
     this.build(tab, adopt);
     tab.window.win.contentView.addChildView(tab.view);
     if (show) this.select(tab.id);
