@@ -426,6 +426,16 @@ async function start(options = {}) {
   // ── HTTP ──────────────────────────────────────────────────────────────────
   const app = express();
   app.set('trust proxy', 'loopback'); // Tailscale's proxy runs on this machine
+  // One line per request that came in from outside (through the proxy), for
+  // seeing where a connector's sign-in stopped: when, what was asked, the
+  // answer, and the client's own name for itself. Never the query (it carries
+  // sign-in codes), a header or a body.
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-for']) {
+      res.on('finish', () => console.log(`${req.method} ${req.path} ${res.statusCode} ${String(req.headers['user-agent'] || '').slice(0, 60)}`));
+    }
+    next();
+  });
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(options.port ?? 7332, host, resolve));
   const publicUrl = new URL(options.publicUrl || `http://127.0.0.1:${server.address().port}`);

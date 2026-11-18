@@ -291,11 +291,13 @@ function privateSession() {
   reader.attach(ses);
   startPage.attach(ses, { private: true });
   identity.attach(ses);
+  attachSpelling(ses);
   privateSes = ses;
   return ses;
 }
 function endPrivate(ses) {
   if (privateSes === ses) privateSes = null;
+  privateZoomSites.clear();
   certs.forget(ses);
   downloads.forgetPrivate();
   shields.forgetPrivate();
@@ -431,6 +433,8 @@ function start() {
     hosts: process.env.LOUI_TEST && process.env.LOUI_HONEST_HOSTS ? process.env.LOUI_HONEST_HOSTS.split(',') : HONEST,
   });
   identity.attach(userSes);
+  attachSpelling(userSes);
+  tabs.on('created', (tab) => tab.wc.on('did-navigate', (_e, to) => applyZoom(tab, to))); // also when a sleeping tab wakes
   createQuiet({ tabs });
   // Tabs' icons, for the window chrome's <img> (tabs.icon): bytes held in memory, never from the web.
   session.defaultSession.protocol.handle('loui-icon', (request) => tabs.iconResponse(request.url));
@@ -508,6 +512,7 @@ function start() {
     tabs,
     picker: actions.picker,
     describePick: actions.describePick,
+    model: () => settings.panelModel,
     cwd: paths.home,
     emit: (event) => broadcast('chat', event, false),
     // The page Claude Code's sign-in is done on: a tab of the user's own, in the
@@ -575,6 +580,7 @@ function start() {
   });
   settingsWindow = createSettingsWindow({
     settings, save: saveSettings, tabs, home: paths.home, lockToApp, setTheme, setTabStrip, tabStrip,
+    pageZoom, setPageZoom, spelling, setSpelling,
     refreshMenu: () => Menu.setApplicationMenu(appMenu()),
     search, brave, downloads, sleep, bookmarks, shields, permissions, passwords, link, consent,
     guardrails, activity, reader, updater, defaultBrowser, startPage, chat, voice, history, ses: userSes,
@@ -836,6 +842,7 @@ async function testHook({ ui, arg }) {
     return items.map((i) => (i.submenu ? [i.label, i.submenu.map(name)] : name(i)));
   }
   if (ui === 'menu:louis-shown') { const was = louisShown; if (arg === 'forget') { louisShown = null; send('louis:closed'); } return was; }
+  if (ui === 'spelling') return tabs.window().ses.getSpellCheckerLanguages();
   if (ui === 'window:bounds') return windowById(arg)?.win.getBounds();
   // A real key press in the window chrome, with its modifiers, which the menu's shortcuts answer to
   // (char: with the character it types, which is what presses a button on Enter).
@@ -1020,7 +1027,7 @@ function buttonMenu() {
       submenu: [
         { label: 'Zoom in', ...keys('CmdOrCtrl+='), click: () => zoom(0.1) },
         { label: 'Zoom out', ...keys('CmdOrCtrl+-'), click: () => zoom(-0.1) },
-        { label: 'Reset zoom', ...keys('CmdOrCtrl+0'), enabled: zoomed !== 100, click: () => zoom(0) },
+        { label: 'Reset zoom', ...keys('CmdOrCtrl+0'), enabled: zoomed !== pageZoom().percent, click: () => zoom(0) },
       ],
     },
     { label: 'Find in page…', ...keys('CmdOrCtrl+F'), click: () => handlers['find:open']() },
@@ -1299,9 +1306,65 @@ function updateMenu() {
   ];
 }
 
+// The zoom pages open at (Settings › General › Page zoom). A site keeps a zoom
+// of its own, chosen in the Zoom menu: Chromium remembers it for the site in
+// the tab's session, and zoomSites names which sites those are, so that every
+// other site follows the default. Until a default is chosen nothing is
+// applied, so the zooms from before there was this setting stay as they are.
+const ZOOMS = [75, 80, 90, 100, 110, 125, 150, 175, 200];
+const privateZoomSites = new Set(); // the sites zoomed in private windows, forgotten with their session
+const pageZoom = () => ({ percent: ZOOMS.includes(settings.zoom) ? settings.zoom : 100, choices: ZOOMS });
+// What Chromium keeps a zoom by: the host, whatever the port.
+const zoomSite = (url) => { try { return new URL(url).hostname || url; } catch { return url; } };
+function applyZoom(tab, url = tab.url) {
+  if (settings.zoom === undefined || !tab.wc || tab.device) return; // an emulated device owns its zoom
+  const own = tab.private ? privateZoomSites.has(zoomSite(url)) : (settings.zoomSites || []).includes(zoomSite(url));
+  if (!own) tab.wc.setZoomFactor(pageZoom().percent / 100);
+}
+function setPageZoom(percent) {
+  if (!ZOOMS.includes(percent)) return;
+  settings.zoom = percent;
+  saveSettings();
+  for (const tab of tabs.list) applyZoom(tab);
+}
+
+// "Reset zoom" (no step) goes back to the default, and the site has no zoom of its own again.
 function zoom(step) {
-  const wc = active()?.device ? null : active()?.wc; // an emulated device owns its zoom
-  if (wc) wc.setZoomFactor(step ? Math.min(3, Math.max(0.3, wc.getZoomFactor() + step)) : 1);
+  const tab = active();
+  const wc = tab?.device ? null : tab?.wc; // an emulated device owns its zoom
+  if (!wc) return;
+  const usual = pageZoom().percent / 100;
+  wc.setZoomFactor(step ? Math.min(3, Math.max(0.3, wc.getZoomFactor() + step)) : usual);
+  const own = Math.round(wc.getZoomFactor() * 100) !== Math.round(usual * 100);
+  const site = zoomSite(tab.url);
+  if (tab.private) {
+    if (own) privateZoomSites.add(site); else privateZoomSites.delete(site);
+    return;
+  }
+  const sites = new Set(settings.zoomSites);
+  if (own) sites.add(site); else sites.delete(site);
+  settings.zoomSites = [...sites];
+  saveSettings();
+}
+
+// The languages spelling is checked in (Settings › General › Languages), for
+// the user's session and each private one. Until some are chosen, Chromium
+// goes by the system's language. Where the system checks spelling itself
+// (macOS), there is no list and nothing to set.
+function attachSpelling(ses) {
+  if (!Array.isArray(settings.spellLanguages)) return;
+  const known = ses.availableSpellCheckerLanguages;
+  if (known.length) ses.setSpellCheckerLanguages(settings.spellLanguages.filter((code) => known.includes(code)));
+}
+const spelling = () => ({ available: userSes.availableSpellCheckerLanguages, on: userSes.getSpellCheckerLanguages() });
+function setSpelling(code, on) {
+  if (!userSes.availableSpellCheckerLanguages.includes(code)) return;
+  const codes = new Set(userSes.getSpellCheckerLanguages());
+  if (on) codes.add(code); else codes.delete(code);
+  settings.spellLanguages = [...codes];
+  saveSettings();
+  attachSpelling(userSes);
+  if (privateSes) attachSpelling(privateSes);
 }
 
 // A second Loui started (a link opened in another app, say) hands its links to

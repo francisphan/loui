@@ -107,7 +107,7 @@ test('each section lists its settings', async () => {
     ['General', 'Start page', 'Tabs', 'Search', 'Privacy and security', 'Passwords', 'Claude', 'Reading', 'About']);
   const of = (title) => sections.find((s) => s.title === title).settings;
   assert.deepEqual(of('General'), [
-    'Appearance', 'When Loui starts', 'Open Loui when I sign in', 'Default browser',
+    'Appearance', 'Page zoom', 'Check spelling in', 'Spell checker', 'When Loui starts', 'Open Loui when I sign in', 'Default browser',
     'Downloads folder', 'Ask where to save each file',
   ]);
   // The start page has a section of its own, after General.
@@ -120,7 +120,7 @@ test('each section lists its settings', async () => {
   assert.deepEqual(of('Privacy and security'), ['Sites with Shields off', 'Filter lists', 'Pop-ups', 'Site permissions', 'Sites that open in your other browser', 'Clear browsing data', 'Private windows']);
   assert.deepEqual(of('Passwords'), ['Offer to save passwords', 'Encryption', 'Sites whose passwords are never saved', 'Saved passwords', 'Import passwords']);
   assert.deepEqual(of('Claude'), [
-    'Claude account',
+    'Claude account', 'Model',
     'Let other Claude sessions use this browser', 'Relay address', 'Relay key', 'Connection', 'This browser\'s name on the relay', 'Let in without asking',
     'Ask before Claude pays, buys, sends, deletes or signs in', 'Sites Claude asks before opening', 'Allowed without asking', 'Sessions trusted until they end',
     'Keep what Claude sessions did for', 'Most disk space for the log', 'Clear the log', 'Local control socket',
@@ -160,6 +160,65 @@ test('General: appearance, what opens at start, and where downloads go', async (
   const browser = await row('default-browser');
   assert.match(browser.value, /Only an installed copy of Loui/);
   assert.equal(await js("document.getElementById('set-default-browser').hidden"), true);
+});
+
+test('General: pages open at the chosen zoom, and a site zoomed from the menu keeps its own', async () => {
+  const zoomed = async () => (await b.ui('menu:button')).map((i) => (Array.isArray(i) ? i[0] : i)).find((l) => l.startsWith('Zoom: '));
+  const shows = (label) => until(async () => (await zoomed()) === label, `the menu to say ${label}`);
+  await b.ui('go', b.base + '/second.html?zoom');
+  await until(async () => (await b.state()).tabs.find((t) => t.active && !t.loading && t.url.endsWith('?zoom')), 'a page');
+  await shows('Zoom: 100%');
+  assert.deepEqual(await js("[...document.getElementById('set-zoom').options].map((o) => o.textContent)"),
+    ['75%', '80%', '90%', '100%', '110%', '125%', '150%', '175%', '200%']);
+  // The open page follows at once, and so does the next one.
+  await use('zoom', 125);
+  await until(() => saved().zoom === 125, 'the choice to be written');
+  assert.equal((await row('zoom')).note, 'Saved');
+  await shows('Zoom: 125%');
+  await b.ui('go', b.base + '/done.html?zoom');
+  await until(async () => (await b.state()).tabs.find((t) => t.active && !t.loading && t.url.endsWith('done.html?zoom')), 'another page');
+  await shows('Zoom: 125%');
+  // A zoom of the site's own stays when the default changes, until it is reset.
+  await b.ui('menu:button', { in: 'Zoom', click: 'Zoom in' });
+  await shows('Zoom: 135%');
+  assert.deepEqual(saved().zoomSites, [new URL(b.base).hostname]);
+  await use('zoom', 150);
+  await until(() => saved().zoom === 150, 'the new default to be written');
+  await b.ui('reload');
+  await until(async () => (await b.state()).tabs.find((t) => t.active && !t.loading), 'the page again');
+  await shows('Zoom: 135%');
+  await b.ui('menu:button', { in: 'Zoom', click: 'Reset zoom' });
+  await shows('Zoom: 150%');
+  assert.deepEqual(saved().zoomSites, []);
+  await use('zoom', 100);
+  await shows('Zoom: 100%');
+});
+
+test('General: the languages spelling is checked in', async () => {
+  const spelling = async () => (await win()).state.general.spelling;
+  const { available, on } = await spelling();
+  // Windows and Linux have Chromium's list; the other row is for a system that checks spelling itself.
+  assert.ok(available.includes('es') && available.includes('fr'), `${available}`);
+  assert.equal((await row('spelling')).hidden, false);
+  assert.equal((await row('spelling-system')).hidden, true);
+  const tick = (code) => js(`void document.querySelectorAll('[data-setting="spelling"] input')[${available.indexOf(code)}].click()`);
+  const ticked = () => js(`[...document.querySelectorAll('[data-setting="spelling"] input')].filter((i) => i.checked).length`);
+  assert.equal(await ticked(), on.length);
+  assert.ok(!on.includes('fr'));
+  await tick('fr');
+  await until(async () => (await spelling()).on.includes('fr'), 'French to be checked');
+  assert.deepEqual(saved().spellLanguages, [...on, 'fr']);
+  assert.equal(await ticked(), on.length + 1);
+  // A private window's session, made later, is given the same.
+  const priv = await b.ui('window:new', { private: true });
+  await until(async () => (await b.ui('windows')).length === 2, 'the private window');
+  assert.deepEqual(await b.ui('in-window', { window: priv, ui: 'spelling' }), [...on, 'fr']);
+  await tick('fr');
+  await until(async () => !(await spelling()).on.includes('fr'), 'and not');
+  assert.deepEqual(await b.ui('in-window', { window: priv, ui: 'spelling' }), on, 'a private window that is open follows');
+  assert.deepEqual(saved().spellLanguages, on);
+  await b.ui('window:close', priv);
+  await until(async () => (await b.ui('windows')).length === 1, 'the private window to close');
 });
 
 test('Start page: a section of its own, with the temperature unit, a place that is a hint until typed, and the feeds on offer', async () => {
@@ -359,6 +418,14 @@ test('Passwords: offering to save, and the Passwords panel', async () => {
 
 test('Claude: the relay (its key is never shown), guardrails, the session log, the local socket', async () => {
   await js("window.showSectionForTest('claude')");
+  // The panel's model: Claude Code's own names, or Loui's usual one (test/account.test.js sends a message with it).
+  assert.deepEqual(await js("[...document.getElementById('set-claude-model').options].map((o) => [o.value, o.textContent])"),
+    [['', 'Default'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]);
+  await use('claude-model', 'sonnet');
+  await until(() => saved().panelModel === 'sonnet', 'the model to be written');
+  assert.equal((await row('claude-model')).note, 'Saved');
+  await use('claude-model', '');
+  await until(() => !('panelModel' in saved()), 'and the usual one again');
   await use('relay-url', 'http://127.0.0.1:9');
   await until(async () => (await b.state()).link.url === 'http://127.0.0.1:9', 'the relay address to be set');
   assert.equal((await row('relay-key')).value, 'Not set.');
