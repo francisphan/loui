@@ -20,7 +20,7 @@ async function until(what, fn, tries = 80) {
     if (last) return last;
     await wait(100);
   }
-  assert.fail(`${what}; last ${JSON.stringify(last)}`);
+  assert.fail(`${typeof what === 'function' ? what() : what}; last ${JSON.stringify(last)}`);
 }
 
 // ── stand-ins for Open-Meteo and a news feed ────────────────────────────────
@@ -276,7 +276,11 @@ test('its box hands the keyboard to the address bar: a click, or a letter typed 
   };
   const typed = () => chrome("(() => { const a = document.getElementById('address'); return a.value.slice(0, a.selectionStart) + '|' + a.value.slice(a.selectionStart); })()");
   await type('b');
-  await until('the letter is in the address bar, which completes it', async () => (await focused()) === 'address' && (await typed()) === 'b|.example');
+  let seen; // what the address bar held, for the message
+  await until(() => `the letter is in the address bar, which completes it (keyboard on ${seen[0]}, bar ${seen[1]})`, async () => {
+    seen = [await focused(), await typed()];
+    return seen[0] === 'address' && seen[1] === 'b|.example';
+  });
   // The next letters follow it there, though they too were typed "on the page".
   await type('.');
   await type('e');

@@ -240,9 +240,18 @@ test('the tab layout and the pinned tabs are remembered after a restart', async 
 const boxes = (selector) => chrome(`[...document.querySelectorAll(${JSON.stringify(selector)})]
   .map((n) => [n.id || n.className, n.getBoundingClientRect()])
   .filter(([, r]) => r.width > 0).map(([name, r]) => [name, Math.round(r.left), Math.round(r.right)])`);
+// Chromium tells the page where the window buttons are a moment after the
+// window's new width: until then a narrowed window's rows run on under them
+// (ui.css's --wco is 0). So the size has settled once the buttons take the
+// room they took before.
+const buttonsRoom = () => chrome(`(() => {
+  const free = navigator.windowControlsOverlay.getTitlebarAreaRect();
+  return [innerWidth, Math.round(innerWidth - free.right)];
+})()`);
 const size = async (width, height) => {
+  const [, room] = await buttonsRoom();
   await chrome(`window.resizeTo(${width}, ${height})`);
-  await until(() => chrome('window.innerWidth'), (w) => Math.abs(w - width) < 4);
+  await until(buttonsRoom, ([w, now]) => Math.abs(w - width) < 4 && Math.abs(now - room) <= 1);
 };
 // Nothing in the row lies over its neighbour or runs out of the row.
 function inOrder(list, row) {
@@ -441,7 +450,8 @@ test('a strip with more tabs than it shows says so: faded edges, buttons that pa
     return { left: t.scrollLeft, over: t.scrollWidth - t.clientWidth, cls: t.className, back: shown('tabs-back'), on: shown('tabs-on'),
       strays: [...document.querySelectorAll('#strays .stray')].map((n) => [n.dataset.group, n.querySelector('.stray-name').textContent, n.querySelector('.group-mark')?.className ?? null]) }; })()`);
   // On his own first tab: the sessions are off to the right, and each keeps a small tag after the strip.
-  const start = await until(strip, (s) => s.over > 200 && s.left === 0 && s.strays.length === 3 && !s.strays.some(([, , m]) => m === 'group-mark working'));
+  // (Once the pause just asked for is drawn: the strip is read from the window, a moment behind.)
+  const start = await until(strip, (s) => s.over > 200 && s.left === 0 && s.strays.length === 3 && s.strays[0][2] === 'group-mark paused' && !s.strays.some(([, , m]) => m === 'group-mark working'));
   assert.deepEqual([start.back, start.on, start.cls], [false, true, 'more-after']);
   assert.deepEqual(start.strays, [['s1', 'Code · release notes for the autumn update', 'group-mark paused'], ['s2', 'Desktop · quarterly research', null], ['s3', 'Code · agent-b migration', null]]);
   const [row] = await boxes('#tabrow');

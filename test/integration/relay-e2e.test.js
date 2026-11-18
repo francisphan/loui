@@ -142,19 +142,44 @@ test('Claude Code connects with the key, and the user lets it in', async () => {
 test('it works in its own tab, in the background: snapshot, type, click, screenshot, read_article', async () => {
   const mine = (await b.state()).tabs.find((t) => t.group === 'you' && t.active);
   const page = await code.text('snapshot');
+  // For a click that does not land (about one run in five on GitHub's Linux runner, cause not found):
+  // what the page itself saw of the mouse, and how its view sat in the window when each press was sent.
+  const tab = (await b.state()).tabs.find((t) => t.group !== 'you' && t.current);
+  const inPage = (script) => b.ui('tab:js', { id: tab.id, code: script }).catch((e) => `(${e.message})`);
+  await inPage(`{ window.__seen = []; for (const type of ['mousemove', 'mousedown', 'mouseup', 'click', 'submit'])
+    addEventListener(type, (e) => window.__seen.push([type, e.target.tagName + (e.target.id ? '#' + e.target.id : ''), e.clientX, e.clientY, Math.round(performance.now())].join(' ')), true); }`);
+  const placed = async () => JSON.stringify(await b.ui('tab:place', tab.id).catch((e) => e.message));
+  const before = [await placed()];
   await code.text('type', { ref: ref(page, 'textbox "Your name"'), text: 'Ada', clear: true });
+  before.push(await placed());
   const clicked = await code.text('click', { ref: ref(page, 'button "Greet"') });
   if (!/Hello, Ada/.test(clicked)) {
     // Not tried again: a click that did not land, or a page read too soon, is the thing to hear about.
     // What the page says over the next three seconds tells the two apart.
-    const tab = (await b.state()).tabs.find((t) => t.group !== 'you' && t.current);
+    const after = await placed();
     const started = Date.now();
     let arrived = null;
     while (arrived === null && Date.now() - started < 3000) {
       if (/Hello, Ada/.test(await b.ui('tab:js', { id: tab.id, code: "document.getElementById('out').textContent" }))) arrived = Date.now() - started;
       else await sleep(100);
     }
-    assert.fail(`the page as the click returned it has no greeting; the page itself ${arrived === null ? 'still has none 3 s later (the click did not land)' : `had it ${arrived} ms later (read too soon)`}:\n${clicked}`);
+    const seen = await inPage('window.__seen');
+    const state = await inPage(`(() => {
+      const r = document.querySelector('#f button').getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return { button: [r.x, r.y, r.width, r.height].map(Math.round), onTop: top && top.tagName, visibility: document.visibilityState, focus: document.hasFocus(),
+        painted: performance.getEntriesByType('paint').length, now: Math.round(performance.now()), inner: [innerWidth, innerHeight], scroll: Math.round(scrollY) };
+    })()`);
+    // Whether the tab takes a press at all by now: the same kind of press, sent again at the button.
+    let again = 'not tried';
+    if (arrived === null && state.button) {
+      await b.ui('tab:press', { id: tab.id, x: state.button[0] + Math.round(state.button[2] / 2), y: state.button[1] + Math.round(state.button[3] / 2) });
+      await sleep(500);
+      again = /Hello, Ada/.test(await inPage("document.getElementById('out').textContent")) ? 'landed' : 'did not land either';
+    }
+    assert.fail(`the page as the click returned it has no greeting; the page itself ${arrived === null ? 'still has none 3 s later (the click did not land)' : `had it ${arrived} ms later (read too soon)`}.\n`
+      + `The page saw: ${JSON.stringify(seen)}\nIts view before typing: ${before[0]}\nbefore the click: ${before[1]}\nafter it: ${after}\n`
+      + `The page now: ${JSON.stringify(state)}\nA second press, sent 3 s later: ${again}\n${clicked}`);
   }
 
   const shot = await code.call('screenshot');

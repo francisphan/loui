@@ -105,10 +105,15 @@ $('address-form').onsubmit = (e) => {
   loui.send('go', address.value);
   address.blur();
 };
-address.onfocus = () => address.select();
 let addressTyped = false; // the owner has typed in the field since it took the keyboard
 let addressTab = null; // the tab whose address it shows
-address.addEventListener('focus', () => { addressTyped = false; });
+let addressHanded = false; // a letter was handed over before the keyboard came (see 'focus-address')
+address.onfocus = () => { if (!addressHanded) address.select(); };
+address.addEventListener('focus', () => {
+  if (!addressHanded) addressTyped = false;
+  addressHanded = false;
+});
+address.addEventListener('blur', () => { addressHanded = false; });
 address.addEventListener('input', () => { addressTyped = true; });
 // He pressed in the page. The field would stay the chrome's active element,
 // and so never follow the page again; it lets go, unless something he typed
@@ -123,8 +128,16 @@ address.onkeydown = (e) => {
 // text: what was typed on the start page, which has no address bar of its own
 // (startpage.js): it goes in as if typed here, so the suggestions follow.
 loui.on('focus-address', (text) => {
-  if (document.activeElement !== address) address.focus(); // selects what is there: typing replaces it
+  // The keyboard is on its way to the window and may get here after this
+  // message. The field's focus event comes with it, not now: it would select
+  // the letter put in below, and the next one typed would replace it.
+  const early = !document.hasFocus();
+  if (document.activeElement !== address) {
+    address.focus(); // selects what is there: typing replaces it
+    if (early) address.select();
+  }
   if (typeof text !== 'string' || !text) return;
+  addressHanded = early;
   address.setRangeText(text, address.selectionStart, address.selectionEnd, 'end');
   address.dispatchEvent(new Event('input', { bubbles: true }));
 });
