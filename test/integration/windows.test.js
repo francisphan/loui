@@ -30,6 +30,7 @@ const path = require('path');
 const zlib = require('zlib');
 const { execFileSync, spawn } = require('child_process');
 const { launch, attach, serveFixture } = require('../drive');
+const { sleep, until, helpers, driveChecks, tabsToComeBackTo, startPageCheck } = require('./checks');
 const pkg = require('../../package.json');
 
 const env = process.env;
@@ -58,15 +59,6 @@ const home = hosted ? path.join(env.APPDATA, 'loui') : fs.mkdtempSync(path.join(
 const versionOf = (file) => path.basename(file).match(/^Loui-Setup-(.+)\.exe$/)?.[1];
 const shortcut = path.join(env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Loui.lnk');
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(what, check, ms = 15000) {
-  let last;
-  for (const end = Date.now() + ms; Date.now() < end; await sleep(200)) {
-    last = await check();
-    if (last) return last;
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
 const ps = (script) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim();
 const quote = (s) => `'${String(s).replace(/'/g, "''")}'`;
 // A picture of the whole screen, for a failure nobody was there to see.
@@ -148,13 +140,7 @@ async function quit() {
   await until('its processes to be gone', () => !hosted || running() === 0, 20000);
   await sleep(500);
 }
-const onScreen = async (app = b) => (await app.state()).tabs.find((t) => t.active);
-const mine = async (app = b) => (await app.state()).tabs.filter((t) => t.group === 'you');
-async function visit(url) {
-  await b.ui('go', url);
-  return until(`${url} to load`, async () => { const t = await onScreen(); return t.url === url && !t.loading && t; });
-}
-const js = async (code) => b.ui('tab:js', { id: (await onScreen()).id, code });
+const { mine, visit, js } = helpers(() => b);
 
 test.before(async () => {
   site = await serveFixture();
@@ -223,95 +209,7 @@ step('the installed app starts and serves its named pipe', async () => {
   assert.equal(s.link.status, 'off', 'no relay');
 });
 
-step('a session fills a form in a background tab', async () => {
-  const user = await onScreen();
-  const s = b.as('s', 'Integration test');
-  const page = await s.text('navigate', { url: base });
-  const ref = (re) => page.match(re)[1];
-  await s.text('type', { ref: ref(/textbox "Your name" \[(e\d+)\]/), text: 'Ada', clear: true });
-  assert.match(await s.text('click', { ref: ref(/button "Greet" \[(e\d+)\]/) }), /Hello, Ada/);
-  assert.equal((await onScreen()).id, user.id, 'the user\'s tab stayed on screen');
-  const [note, image] = await s.call('screenshot');
-  assert.equal(image?.type, 'image', note?.text);
-  assert.ok(Buffer.from(image.data, 'base64').length > 2000, 'a picture of a tab that is not on screen');
-});
-
-step('the activity log records its steps, with a picture', async () => {
-  const log = await until('the log to have a step with a picture', async () => {
-    const s = (await b.ui('activity:list')).items.find((x) => x.label === 'Integration test');
-    const l = s && await b.ui('activity:get', s.id);
-    return l?.steps.some((x) => x.thumb) && l;
-  }, 20000);
-  assert.ok(log.steps.length >= 3, log.steps.map((x) => x.label).join(', '));
-});
-
-step('picture in picture shows frames of the session\'s tab', async () => {
-  await b.ui('pip:open', 's');
-  await until('frames in the small window', async () => { const v = await b.ui('pip:state'); return v.open && v.sent > 0; });
-  await b.ui('pip:close');
-});
-
-step('the command palette opens in front of the page', async () => {
-  await b.ui('menu:key', 'CmdOrCtrl+K');
-  const p = await until('the palette', async () => { const v = await b.ui('palette'); return v.open && v; });
-  assert.ok(p.inFront);
-  await b.ui('palette:key', { key: 'Escape' });
-  await until('it to close', async () => !(await b.ui('palette')).open);
-});
-
-step('a second window and a private one; reader view in the private one', async () => {
-  const two = await b.ui('window:new');
-  const priv = await b.ui('window:new', { private: true });
-  const ws = await b.ui('windows');
-  assert.equal(ws.length, 3);
-  assert.equal(ws.filter((w) => w.private).length, 1);
-  const inPriv = (ui, arg) => b.ui('in-window', { window: priv, ui, arg });
-  await inPriv('go', base + '/article.html');
-  const t = await until('the article to load', async () => {
-    const a = (await inPriv('state')).tabs.find((x) => x.active);
-    return a && !a.loading && a.url.endsWith('article.html') && a;
-  });
-  await inPriv('reader:toggle');
-  await until('reader view', async () => (await b.ui('tab:js', { id: t.id, code: 'location.protocol' }).catch(() => '')) === 'loui-reader:');
-  assert.match(await b.ui('tab:js', { id: t.id, code: 'document.body.innerText' }), /Lighthouse Keepers of Ushant/);
-  await b.ui('window:close', priv);
-  await b.ui('window:close', two);
-  await until('one window again', async () => (await b.ui('windows')).length === 1);
-});
-
-step('a page\'s full screen covers the tabs and toolbar, and gives them back', async () => {
-  const ft = await visit(base + '/fullscreen.html');
-  const covers = (p) => p.view.x === 0 && p.view.y === 0 && p.view.width === p.window.width && p.view.height === p.window.height;
-  await b.ui('tab:press', { id: ft.id, x: 200, y: 200 });
-  await until('the page to have the whole window', async () => { const p = await b.ui('tab:place', ft.id); return p.full && covers(p); });
-  await b.ui('tab:press', { id: ft.id, x: 200, y: 200 });
-  await until('the tabs and toolbar to come back', async () => { const p = await b.ui('tab:place', ft.id); return !p.full && !covers(p); });
-});
-
-step('a tab\'s icon arrives and is drawn', async () => {
-  await visit(base + '/icon.html');
-  const tab = await until('the icon', async () => { const t = await onScreen(); return t.favicon && t; });
-  assert.match(tab.favicon, /^loui-icon:\/\/tab\//);
-  await until('the icon to be drawn in the tab strip', () => b.ui('chrome:eval',
-    "[...document.querySelectorAll('.tab img')].some((i) => i.src.startsWith('loui-icon:') && i.naturalWidth > 0)"));
-});
-
-step('a new tab has an empty address bar', async () => {
-  await b.ui('chrome:eval', "document.getElementById('address').focus()");
-  const before = (await onScreen()).id;
-  await b.ui('tab:new', '');
-  const fresh = await until('the new tab', async () => { const t = await onScreen(); return t.id !== before && t; });
-  await sleep(600);
-  assert.equal(await b.ui('chrome:eval', "document.getElementById('address').value"), '');
-  await b.ui('tab:close', fresh.id);
-});
-
-step('the Settings window opens', async () => {
-  await b.ui('menu:key', 'CmdOrCtrl+,');
-  await until('the Settings window', async () => (await b.ui('settings:state').catch(() => null))?.windows === 1);
-  await b.ui('settings:close');
-  await until('it to close', async () => (await b.ui('settings:state')).windows === 0);
-});
+driveChecks({ step, app: () => b, base: () => base });
 
 // ── real encryption, and a restart ───────────────────────────────────────────
 const PASSWORD = 'integration-Secret!42';
@@ -353,13 +251,7 @@ step('a saved password and the relay key are encrypted on disk by Windows (DPAPI
 });
 
 step('Loui quits when its last window closes, leaving the user\'s tabs to come back to', async () => {
-  await b.ui('tab:new', base + '/second.html');
-  await b.ui('tab:new', base + '/plain.html');
-  await until('the new tabs to load', async () => (await mine()).filter((t) => /(second|plain)\.html$/.test(t.url) && !t.loading).length === 2);
-  for (const t of await mine()) if (!t.url.startsWith(base)) await b.ui('tab:close', t.id);
-  before = (await mine()).map((t) => t.url);
-  assert.ok(before.length >= 2 && before.every((u) => u.startsWith(base)), before.join(' '));
-  await sleep(1500); // what is open is written a moment after it changes
+  before = await tabsToComeBackTo({ app: () => b, base: () => base });
   await quit();
   // From now on a new tab opens the start page, as it does for the user (the tests' default is a blank one).
   const file = path.join(home, 'settings.json');
@@ -381,17 +273,7 @@ step('after a restart: the tabs are back, and the password and the relay key dec
 });
 
 step('a new tab shows the start page', async () => {
-  const beforeId = (await onScreen()).id;
-  await b.ui('tab:new', '');
-  const tab = await until('the start page', async () => {
-    const t = await onScreen();
-    return t.id !== beforeId && !t.loading && (await b.ui('tab:js', { id: t.id, code: 'location.protocol' }).catch(() => '')) === 'loui-start:' && t;
-  });
-  assert.equal(tab.url, '', 'with an empty address bar');
-  assert.equal(tab.title, 'New tab');
-  assert.match(await b.ui('tab:js', { id: tab.id, code: 'document.body.innerText' }), /Loui/);
-  await b.ui('tab:close', tab.id);
-  await sleep(1500);
+  await startPageCheck({ app: () => b });
   await quit();
 });
 

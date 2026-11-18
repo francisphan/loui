@@ -1,0 +1,16 @@
+# Settings for the Loui relay (loui-relay.service). One NAME=value a line, no
+# quotes needed; after a change: sudo systemctl restart loui-relay
+# All of them are described under "Relay settings" in the README.
+
+# The relay's public address, for Claude's connector to sign in through
+# (for example the Tailscale Funnel address that forwards to 127.0.0.1:7332).
+#LOUI_PUBLIC_URL=https://myserver.example.ts.net:8443
+
+# The port it listens on, on 127.0.0.1 only.
+#LOUI_RELAY_PORT=7332
+
+# The browser new sessions use when several are online.
+#LOUI_PRIMARY=myserver
+
+# Minutes without a word after which a session has ended.
+#LOUI_IDLE_MINUTES=15

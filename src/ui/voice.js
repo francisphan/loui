@@ -255,7 +255,9 @@ const voice = (() => {
   let held = false; // Ctrl+Shift+Space is down
   let starting = false; // between a press and the microphone opening
   const LONGEST = 16000 * 60 * 5;
-  const FALLBACK = "Windows' own dictation (Win+H) works in this box too.";
+  // What to do instead, where the system has something to offer.
+  const windows = navigator.platform.startsWith('Win');
+  const FALLBACK = windows ? "Windows' own dictation (Win+H) works in this box too." : 'You can type your message instead.';
 
   function tell(text, trouble = false) {
     note.textContent = text;
@@ -295,7 +297,7 @@ const voice = (() => {
 
   function micTrouble(e) {
     if (e?.name === 'NotFoundError') return `Loui found no microphone. ${FALLBACK}`;
-    if (e?.name === 'NotAllowedError') return `Loui is not allowed to use the microphone. In Windows, check Settings › Privacy › Microphone. ${FALLBACK}`;
+    if (e?.name === 'NotAllowedError') return `Loui is not allowed to use the microphone. ${windows ? 'In Windows, check Settings › Privacy › Microphone.' : 'Check the system\'s sound and privacy settings.'} ${FALLBACK}`;
     return `The microphone could not be started${e?.message ? ` (${e.message})` : ''}. ${FALLBACK}`;
   }
 

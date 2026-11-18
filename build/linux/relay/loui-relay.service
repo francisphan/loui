@@ -1,0 +1,50 @@
+# The Loui relay as a service of the system (the loui-relay package). It runs
+# as a user of its own that owns nothing but /var/lib/loui-relay, where the
+# relay key, connector sign-ins, devices.json and launch.json are kept.
+# Settings go in /etc/default/loui-relay. See "Debian" in the README.
+[Unit]
+Description=Loui relay (Claude sessions to Loui browsers)
+Documentation=https://github.com/francisphan/loui#debian
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=loui-relay
+Group=loui-relay
+StateDirectory=loui-relay
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/loui-relay
+Environment=LOUI_RELAY_HOME=/var/lib/loui-relay
+EnvironmentFile=-/etc/default/loui-relay
+ExecStart=/usr/bin/node -r /usr/lib/loui-relay/node18.js /usr/lib/loui-relay/relay/server.js
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+# It needs the network and its own folder, and nothing else of the machine.
+# (No MemoryDenyWriteExecute: node compiles JavaScript as it runs.)
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

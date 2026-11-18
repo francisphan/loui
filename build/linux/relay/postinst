@@ -1,0 +1,26 @@
+#!/bin/sh
+# After the loui-relay package's files are in place: its user, and its
+# service enabled and started (restarted, on an upgrade). The systemd lines
+# are the ones debhelper writes for a package with one unit.
+set -e
+
+if [ "$1" = configure ]; then
+  if ! getent passwd loui-relay >/dev/null; then
+    adduser --system --group --quiet --home /var/lib/loui-relay --no-create-home loui-relay
+  fi
+
+  deb-systemd-helper unmask loui-relay.service >/dev/null || true
+  if deb-systemd-helper --quiet was-enabled loui-relay.service; then
+    deb-systemd-helper enable loui-relay.service >/dev/null || true
+  else
+    deb-systemd-helper update-state loui-relay.service >/dev/null || true
+  fi
+  if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+    if [ -n "$2" ]; then
+      deb-systemd-invoke restart loui-relay.service >/dev/null || true
+    else
+      deb-systemd-invoke start loui-relay.service >/dev/null || true
+    fi
+  fi
+fi

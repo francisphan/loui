@@ -10,14 +10,16 @@ const execFileAsync = require('util').promisify(execFile);
 const os = require('os');
 const path = require('path');
 const TOOLS = require('../shared/tools');
+const { findClaude } = require('./claude-path');
 const { YOU } = require('./tabs');
 
 const MODEL = process.env.LOUI_MODEL || 'claude-opus-5-5';
 
 // How to start Claude Code. The Agent SDK brings its own program for the
-// platform it was installed on; the Windows installer leaves it out (380 MB),
-// so there Loui uses an installed claude.exe, or else Claude Code inside WSL,
-// where developers on Windows usually have it.
+// platform it was installed on; the Windows installer and the Debian package
+// leave it out (380 MB), so there Loui uses an installed Claude Code: on
+// Windows claude.exe, or else Claude Code inside WSL, where developers on
+// Windows usually have it; elsewhere wherever it is installed (claude-path.js).
 // Returns {} (use the SDK's own), the options that start another one, or null.
 let launcher; // cached once found; a miss is looked up again next time
 async function claudeLauncher() {
@@ -31,12 +33,21 @@ async function claudeLauncher() {
     require.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`);
     return (launcher = {});
   } catch {}
-  const exe = process.platform === 'win32' ? 'claude.exe' : 'claude';
+  if (process.platform !== 'win32') {
+    const claude = await findClaude();
+    if (!claude) return null;
+    // One installed through npm is a script that starts `node`: a node kept
+    // beside it (nvm) is found only if its folder is on PATH.
+    const dir = path.dirname(claude);
+    const dirs = (process.env.PATH || '').split(path.delimiter);
+    if (!dirs.includes(dir)) process.env.PATH = [...dirs.filter(Boolean), dir].join(path.delimiter);
+    return (launcher = { pathToClaudeCodeExecutable: claude });
+  }
   // Empty and relative PATH entries would mean the directory Loui runs in.
   const dirs = [...(process.env.PATH || '').split(path.delimiter).filter((d) => d && path.isAbsolute(d)), path.join(os.homedir(), '.local', 'bin')];
-  const found = dirs.map((d) => path.join(d, exe)).find((p) => fs.existsSync(p));
+  const found = dirs.map((d) => path.join(d, 'claude.exe')).find((p) => fs.existsSync(p));
   if (found) return (launcher = { pathToClaudeCodeExecutable: found });
-  const inWsl = process.platform === 'win32' && (await wslClaude());
+  const inWsl = await wslClaude();
   if (!inWsl) return null;
   return (launcher = {
     pathToClaudeCodeExecutable: inWsl.claude,

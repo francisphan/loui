@@ -23,6 +23,7 @@ const { createActions } = require('./actions');
 const { createChat } = require('./chat');
 const { createLink } = require('./link');
 const { createUpdater } = require('./updater');
+const loginItem = require('./login-item');
 const { createRestore } = require('./restore');
 const { createFind } = require('./find');
 const { createDownloads } = require('./downloads');
@@ -554,7 +555,7 @@ function start() {
       win.focus();
     },
   });
-  defaultBrowser = createDefaultBrowser({ getWin: () => (tabs.normalWindow() || tabs.window())?.win, tabs });
+  defaultBrowser = createDefaultBrowser({ getWin: () => (tabs.normalWindow() || tabs.window())?.win, tabs, changed: () => settingsWindow?.system() });
   pip = createPip({
     tabs, settings, save: saveSettings, lockToApp,
     pause: (group, on) => handlers.pause({ group, on }),
@@ -690,7 +691,8 @@ const handlers = {
   'device:menu': () => deviceMenu(),
   'device:reset': () => { const tab = active(); if (tab?.wc && tab.device) tabs.setDevice(tab, null); }, // back to the full window
   'relay:set': (settings) => link.configure(settings),
-  'update:install': () => updater.install(),
+  // Where Loui cannot install it (Linux with nothing to ask for a password): Settings has the command.
+  'update:install': () => (updater.state()?.manual ? settingsWindow.open('about') : updater.install()),
   'chat:send': (message) => { chat.send(message); },
   'chat:stop': () => chat.stop(),
   'chat:reset': () => chat.reset(),
@@ -1140,9 +1142,9 @@ function appMenu() {
         { type: 'separator' },
         { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => settingsWindow.open() },
         ...defaultBrowser.menuItems(),
-        ...(process.platform === 'linux' ? [] : [{
-          label: 'Open Loui when I sign in', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
-          click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+        ...(!loginItem.can() ? [] : [{
+          label: 'Open Loui when I sign in', type: 'checkbox', checked: loginItem.get(),
+          click: (item) => loginItem.set(item.checked),
         }]),
         { type: 'separator' },
         also('Alt+F', () => send('show-menu')), // the menu button in the toolbar
@@ -1262,16 +1264,18 @@ function updateMenu() {
   const u = updater?.state();
   if (!u) return [];
   const label = {
-    ready: `Restart to update to ${u.version}`,
+    ready: u.manual ? `Version ${u.version} is downloaded: how to install it…` : `Restart to update to ${u.version}`,
+    installing: `Installing ${u.version}…`,
+    installed: `Restart to finish updating to ${u.version}`,
     downloading: `Downloading ${u.version}… ${u.percent}%`,
     checking: 'Checking for updates…',
     latest: `Check for updates (you have the latest, ${u.current})`,
     failed: "Check for updates (the last check didn't work)",
   }[u.status] || 'Check for updates';
-  const busy = u.status === 'checking' || u.status === 'downloading';
+  const busy = u.status === 'checking' || u.status === 'downloading' || u.status === 'installing';
   return [
     // Restarting closes sessions' tab groups: the toolbar's button asks first while one is working.
-    { label, enabled: !busy, click: () => (u.status === 'ready' ? send('update:ask') : updater.check()) },
+    { label, enabled: !busy, click: () => (u.status === 'ready' || u.status === 'installed' ? send('update:ask') : updater.check()) },
     { type: 'separator' },
   ];
 }

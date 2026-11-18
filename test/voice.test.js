@@ -298,7 +298,8 @@ test('silence, a missing microphone and a recogniser that fails each say so, and
   await press('mic');
   await wait('a note', async () => /no microphone/.test((await mic()).note));
   assert.equal((await mic()).trouble, true);
-  assert.match((await mic()).note, /Win\+H/);
+  // What to do instead: Windows has its own dictation to point to; elsewhere, typing.
+  assert.match((await mic()).note, process.platform === 'win32' ? /Win\+H/ : /You can type your message instead\./);
   assert.equal((await mic()).cls, 'idle');
 
   await set({ micFails: null, fail: 'it broke' });
@@ -335,7 +336,8 @@ test('the speech model is fetched on first use, with progress on the button and 
   await wait('the question again', async () => (await mic()).cls === 'asking');
   await press('mic'); // yes
   await wait('the failure', async () => (await mic()).trouble);
-  assert.match((await mic()).note, /could not be fetched: the model host answered 503\..*try again.*Win\+H/);
+  assert.match((await mic()).note, process.platform === 'win32' ? /could not be fetched: the model host answered 503\..*try again.*Win\+H/
+    : /could not be fetched: the model host answered 503\..*try again.*type your message instead/);
   assert.equal((await mic()).cls, 'idle');
 
   // A connection that goes quiet is given up, and leaves nothing behind.

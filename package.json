@@ -10,8 +10,11 @@
     "test": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=90000 --test-force-exit test/*.test.js",
     "test:integration": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=240000 --test-force-exit test/integration/relay-e2e.test.js",
     "test:integration:windows": "node --test --test-concurrency=1 --test-timeout=900000 --test-force-exit test/integration/windows.test.js",
+    "test:integration:debian": "node --test --test-concurrency=1 --test-timeout=900000 --test-force-exit test/integration/debian.test.js",
     "test:live": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node --test --test-concurrency=1 --test-timeout=300000 --test-force-exit test/integration/live.test.js",
-    "dist:win": "USE_SYSTEM_WINE=true PATH=\"$PWD/scripts/nowine:$PATH\" electron-builder --win --x64 --publish never"
+    "dist:win": "USE_SYSTEM_WINE=true PATH=\"$PWD/scripts/nowine:$PATH\" electron-builder --win --x64 --publish never",
+    "dist:linux": "electron-builder --linux deb --x64 --publish never",
+    "dist:relay": "node scripts/relay-deb.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.326",
@@ -34,6 +37,8 @@
     "electron-builder": "26.18.0"
   },
   "author": "Francis Phan",
+  "homepage": "https://github.com/francisphan/loui",
+  "desktopName": "loui.desktop",
   "build": {
     "appId": "io.github.francisphan.loui",
     "productName": "Loui",
@@ -69,6 +74,82 @@
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
       "artifactName": "Loui-Setup-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "loui",
+      "executableArgs": [
+        "--"
+      ],
+      "icon": "build/icons",
+      "category": "Network;WebBrowser",
+      "syncDesktopName": true,
+      "maintainer": "Francis Phan <francisphan@users.noreply.github.com>",
+      "synopsis": "A web browser Claude drives alongside you",
+      "description": "Browse the web with Claude alongside: Claude sessions work in tab groups of their own, in the same window you browse in.",
+      "mimeTypes": [
+        "x-scheme-handler/http",
+        "x-scheme-handler/https",
+        "text/html",
+        "application/xhtml+xml"
+      ],
+      "desktop": {
+        "entry": {
+          "Name": "Loui",
+          "GenericName": "Web Browser",
+          "StartupWMClass": "loui",
+          "StartupNotify": "true"
+        }
+      }
+    },
+    "deb": {
+      "artifactName": "loui_${version}_${arch}.${ext}",
+      "packageCategory": "web",
+      "priority": "optional",
+      "afterInstall": "build/linux/after-install.sh",
+      "depends": [
+        "libasound2",
+        "libatk-bridge2.0-0",
+        "libatk1.0-0",
+        "libatspi2.0-0",
+        "libc6",
+        "libcairo2",
+        "libcups2",
+        "libdbus-1-3",
+        "libexpat1",
+        "libgbm1",
+        "libglib2.0-0",
+        "libgtk-3-0",
+        "libnspr4",
+        "libnss3",
+        "libpango-1.0-0",
+        "libudev1",
+        "libx11-6",
+        "libxcb1",
+        "libxcomposite1",
+        "libxdamage1",
+        "libxext6",
+        "libxfixes3",
+        "libxkbcommon0",
+        "libxrandr2",
+        "libnotify4",
+        "libsecret-1-0",
+        "fonts-liberation",
+        "xdg-utils"
+      ],
+      "recommends": [],
+      "fpm": [
+        "--deb-suggests=xvfb",
+        "--deb-suggests=pkexec",
+        "build/linux/loui-headless@.service=/usr/lib/systemd/system/loui-headless@.service"
+      ]
     },
     "publish": [
       {

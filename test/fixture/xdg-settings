@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stands in for xdg-settings (test/linux.test.js): the default browser is
+# whatever the file named by LOUI_XDG_STATE says.
+case "$1 $2" in
+  "get default-web-browser") cat "$LOUI_XDG_STATE" 2>/dev/null || echo other.desktop ;;
+  "set default-web-browser") echo "$3" > "$LOUI_XDG_STATE" ;;
+  *) exit 2 ;;
+esac

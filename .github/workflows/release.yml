@@ -4,7 +4,9 @@
 #   2. git tag v0.2.0 && git push origin main v0.2.0
 #
 # The tests run first; if they pass, the Windows installer is built and attached
-# to a GitHub release for the tag, with the latest.yml the updater reads.
+# to a GitHub release for the tag, with the latest.yml the updater reads. Then
+# the Debian packages (the browser's, with the latest-linux.yml its updater
+# reads, and the relay's) are built and added to the same release.
 name: Release
 
 on:
@@ -55,5 +57,38 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --title "Loui $version" --generate-notes \
             "dist/Loui-Setup-$version.exe" "dist/Loui-Setup-$version.exe.blockmap" dist/latest.yml
           gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | sort
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # After the Windows release, and apart from it: if this fails, the release
+  # and Windows' updates stand, and the packages can be built and added by hand
+  # (npm run dist:linux && npm run dist:relay, then gh release upload).
+  debian:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the Debian packages
+        run: |
+          npm run dist:linux
+          npm run dist:relay
+
+      - name: Add them to the release
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            "dist/loui_${version}_amd64.deb" "dist/loui-relay_${version}_all.deb" dist/latest-linux.yml
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | sort
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

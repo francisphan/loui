@@ -1,15 +1,16 @@
 # Checks Loui as it is shipped and used, which the per-commit tests (test.yml)
 # cannot: the Windows installer, the installed app, an update and the
-# uninstaller on a Windows runner; a whole session through a relay running on
-# its own; and, nightly, the few things that depend on other people's servers.
-# See "Testing" in the README.
+# uninstaller on a Windows runner; the Debian packages (the browser's and the
+# relay's), installed, driven, updated and removed on Debian 12 and 13; a
+# whole session through a relay running on its own; and, nightly, the few
+# things that depend on other people's servers. See "Testing" in the README.
 #
-# Not on pull requests (five minutes or so, and two installers built each
+# Not on pull requests (some minutes, and every installer built twice each
 # time): on main, on a release tag (the same commit the release is built
 # from; the release does not wait for this), and by hand:
 #
-#   gh workflow run integration.yml                 # Windows and relay
-#   gh workflow run integration.yml -f job=windows  # or relay, or live
+#   gh workflow run integration.yml                 # Windows, Debian and relay
+#   gh workflow run integration.yml -f job=windows  # or debian, or relay, or live
 name: Integration
 
 on:
@@ -24,7 +25,7 @@ on:
         description: Which to run
         type: choice
         default: integration
-        options: [integration, windows, relay, live]
+        options: [integration, windows, debian, relay, live]
 
 permissions:
   contents: read
@@ -98,6 +99,114 @@ jobs:
         if: always()
         with:
           name: windows-logs-and-screenshots
+          path: ${{ runner.temp }}/loui-out
+          if-no-files-found: ignore
+
+  # The Debian packages exactly as release.yml builds them (`npm run
+  # dist:linux`, `npm run dist:relay`), and again from the same commit with
+  # the next version number, to update to.
+  debs:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["integration", "debian"]'), inputs.job))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build the packages for this commit
+        run: |
+          npm run dist:linux
+          npm run dist:relay
+          mkdir -p debs/current debs/update
+          mv dist/loui_*.deb dist/loui-relay_*.deb dist/latest-linux.yml debs/current/
+          rm -rf dist
+      - name: Build the same again as the next version
+        run: |
+          npm version patch --no-git-tag-version
+          npm run dist:linux
+          npm run dist:relay
+          mv dist/loui_*.deb dist/loui-relay_*.deb dist/latest-linux.yml debs/update/
+          ls -l debs/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs
+          path: debs
+          retention-days: 3
+          compression-level: 0
+
+  # Installs, drives, updates and removes them on a Debian that is thrown away
+  # afterwards (test/integration/debian.test.js; never run those steps on a
+  # machine anyone uses): a container of that release with systemd as its
+  # first process, so that the relay's and the headless browser's services
+  # are started as a server starts them (test/integration/debian/Dockerfile).
+  debian:
+    needs: debs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [12, 13]
+    name: debian (${{ matrix.release }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs
+          path: debs
+      # The test file needs nothing from node_modules: it talks to the installed app
+      # and to the relay's service. It runs on the runner's node, lent to the container.
+      # Ubuntu, which the runner is, refuses user namespaces to ordinary users
+      # (AppArmor); Debian allows them. One release is run each way, so that
+      # both of Chromium's sandboxes are met as installed: user namespaces on
+      # 13, the setuid helper on 12.
+      - name: Allow user namespaces, as Debian does
+        if: matrix.release == 13
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Start Debian ${{ matrix.release }}
+        run: |
+          docker build --build-arg RELEASE=${{ matrix.release }} -t loui-debian test/integration/debian
+          mkdir -p "$RUNNER_TEMP/loui-out" && chmod 777 "$RUNNER_TEMP/loui-out"
+          docker run -d --name debian --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec --shm-size=1g \
+            -v "$PWD":/work:ro -v "$(dirname "$(dirname "$(which node)")")":/opt/node:ro -v "$RUNNER_TEMP/loui-out":/out \
+            loui-debian
+          for i in $(seq 60); do
+            state="$(docker exec debian systemctl is-system-running 2>/dev/null || true)"
+            [ "$state" = running ] || [ "$state" = degraded ] && break
+            sleep 1
+          done
+          echo "systemd is $state"
+          docker exec debian systemctl --failed --no-pager || true
+      - name: Install, drive, update, remove
+        run: |
+          set -o pipefail
+          docker exec -u tester -w /work \
+            -e CI -e GITHUB_ACTIONS -e RUNNER_ENVIRONMENT \
+            -e LOUI_INTEGRATION_DEB="/work/debs/current/$(cd debs/current && ls loui_*.deb)" \
+            -e LOUI_INTEGRATION_UPDATE=/work/debs/update \
+            -e LOUI_INTEGRATION_RELAY_DEB="/work/debs/current/$(cd debs/current && ls loui-relay_*.deb)" \
+            -e LOUI_INTEGRATION_RELAY_NEXT="/work/debs/update/$(cd debs/update && ls loui-relay_*.deb)" \
+            -e LOUI_INTEGRATION_HEADLESS=headless \
+            -e LOUI_INTEGRATION_OUT=/out \
+            debian /opt/node/bin/node --test --test-concurrency=1 --test-timeout=900000 --test-force-exit test/integration/debian.test.js 2>&1 | tee "$RUNNER_TEMP/loui-out/test.log"
+      - name: What the services logged
+        if: always()
+        run: docker exec debian journalctl --no-pager -b -u loui-relay -u 'loui-headless@*' -u polkit > "$RUNNER_TEMP/loui-out/journal.log" 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debian-${{ matrix.release }}-logs-and-screenshots
           path: ${{ runner.temp }}/loui-out
           if-no-files-found: ignore
 

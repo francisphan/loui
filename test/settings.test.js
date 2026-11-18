@@ -157,7 +157,7 @@ test('General: appearance, what opens at start, and where downloads go', async (
   assert.equal(JSON.parse(fs.readFileSync(path.join(b.home, 'downloads.json'), 'utf8')).folder, other);
   // Not on Windows, or not installed: no button, and why.
   const browser = await row('default-browser');
-  assert.match(browser.value, /installed on Windows/);
+  assert.match(browser.value, /Only an installed copy of Loui/);
   assert.equal(await js("document.getElementById('set-default-browser').hidden"), true);
 });
 
