@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Outer</title>
+<h1>A page with a frame from another site</h1>
+<iframe id="f" width="400" height="200" style="border:1px solid #888"></iframe>
+<script>
+  // The same server under its other name: another site, so another process.
+  document.getElementById('f').src = location.protocol + '//localhost:' + location.port + '/frame-inner.html';
+</script>

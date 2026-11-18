@@ -754,3 +754,30 @@ test('a script that calls a handler by its framework name is asked about first',
   assert.equal(await read('g-camel'), 'nothing yet');
   s.end();
 });
+
+// ── frames from another site ─────────────────────────────────────────────
+// Loui cannot read into one, so a press there is asked about; allowed, it
+// reaches the button inside (which lives in another process).
+test('a click inside a frame from another site is asked about, and then lands in the frame', async () => {
+  const s = b.as('g-frame', 'Claude Code');
+  const page = await s.text('navigate', { url: `${b.base}/frame-outer.html` });
+  const tab = await tabOf('g-frame');
+  const inner = (code) => b.ui('frame:js', { id: tab.id, match: 'frame-inner', code });
+  await wait('the frame', async () => (await inner('!!document.getElementById("b")')) === true);
+  const frame = JSON.parse(await b.ui('tab:js', { id: tab.id, code: 'JSON.stringify(document.getElementById("f").getBoundingClientRect())' }));
+
+  // By its place on the page: blocked first.
+  const blocked = s.text('click', { x: frame.x + 100, y: frame.y + 50 });
+  const g = await prompt();
+  assert.match(g.what, /^click inside a part of the page that comes from localhost, which Loui cannot read$/);
+  await answer(g, 'block');
+  await assert.rejects(blocked, /declined/);
+  assert.equal(await inner('window.clicks || 0'), 0, 'nothing reached the frame');
+
+  // Allowed, by the frame's ref: the button in it is pressed.
+  const clicking = s.text('click', { ref: ref(page, 'iframe') });
+  await answer(await prompt(), 'once');
+  await clicking;
+  await wait('the press in the frame', async () => (await inner('window.clicks || 0')) === 1);
+  s.end();
+});

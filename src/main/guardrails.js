@@ -50,6 +50,7 @@ const KINDS = {
   'sign-in': 'Signing in',
   confirm: 'Confirming',
   site: 'Opening this site',
+  frame: 'Clicking inside embedded parts of a page that Loui cannot read',
   script: 'Running scripts on pages with password or card fields',
 };
 
@@ -119,6 +120,9 @@ const listed = (sites, url) => {
 //     beside: names of the buttons next to a text box outside a form, for Enter in it }
 function classify(info, sites = []) {
   if (!info) return null;
+  // Loui cannot see what a press inside a frame from another site lands on (a
+  // card form's Pay button, a sign-in button), so the press is asked about.
+  if (info.frame) return { kind: 'frame', what: `click inside a part of the page that comes from ${info.frame}, which Loui cannot read` };
   const name = plain(info.name);
   const said = `"${shorten((info.name || '').trim())}"`;
   const short = name.length <= 60 && name.split(' ').length <= 6;
