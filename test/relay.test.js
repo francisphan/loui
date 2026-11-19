@@ -806,3 +806,50 @@ test('what a browser calls itself is kept short and on one line, and only so man
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// relay/bridge.js: the relay for an app that can only start a local server as
+// a program. It signs in with the key from its folder and passes messages on.
+test('the stdio bridge carries an app\'s messages to the relay and back, signed in with the key file', async () => {
+  const { spawn } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-'));
+  const r = await start({ port: 0, home: dir });
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'relay', 'bridge.js')], {
+    env: { ...process.env, LOUI_RELAY_URL: r.url + '/mcp', LOUI_RELAY_HOME: dir }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  try {
+    const answers = [];
+    let text = '';
+    child.stdout.on('data', (d) => {
+      text += d;
+      for (let i; (i = text.indexOf('\n')) >= 0; text = text.slice(i + 1)) if (text.slice(0, i).trim()) answers.push(JSON.parse(text.slice(0, i)));
+    });
+    const answer = async (id) => {
+      for (const end = Date.now() + 8000; Date.now() < end; await new Promise((ok) => setTimeout(ok, 50))) {
+        const a = answers.find((x) => x.id === id);
+        if (a) return a;
+      }
+      assert.fail(`no answer to message ${id}`);
+    };
+    const say = (m) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
+    // All at once, as a hasty app would: they still reach the relay in order.
+    say({ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'desktop', version: '1' } } });
+    say({ method: 'notifications/initialized' });
+    say({ id: 2, method: 'tools/list' });
+    assert.equal((await answer(1)).result.serverInfo.name, 'loui');
+    assert.ok((await answer(2)).result.tools.some((t) => t.name === 'navigate'));
+    assert.ok(!JSON.stringify(answers).includes(r.key), 'the key is not passed back to the app');
+  } finally {
+    child.kill();
+    await r.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the stdio bridge says so and stops when there is no key to sign in with', async () => {
+  const { spawnSync } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loui-relay-test-'));
+  const out = spawnSync(process.execPath, [path.join(__dirname, '..', 'relay', 'bridge.js')], { env: { ...process.env, LOUI_RELAY_HOME: dir }, encoding: 'utf8' });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /no relay key in /);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

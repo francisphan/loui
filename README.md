@@ -69,6 +69,27 @@ To revoke everything at once, replace the key: delete `~/.config/loui-relay/key`
 restart the relay, and give the new key to each Loui install and to Claude Code.
 Every connector then has to be approved again.
 
+### Claude Desktop on the relay's own machine, without the public entrance
+
+Claude's connector service did not reach a Funnel on port 8443 when tried
+(2026-11-18: "Couldn't reach this address", and nothing arrived at the relay).
+Claude Desktop can instead start a local server as a program, and
+`relay/bridge.js` is that program: it passes Desktop's messages to the relay
+on this machine and signs in with the key from the relay's folder, so the key
+is not written into Desktop's settings. In `claude_desktop_config.json`:
+
+```json
+"mcpServers": {
+  "loui": { "command": "node", "args": ["/path/to/loui/relay/bridge.js"] }
+}
+```
+
+With the relay in WSL and Claude Desktop on Windows, the command is
+`C:\\Windows\\System32\\wsl.exe` with the arguments
+`["-d", "Ubuntu", "--", "/usr/bin/node", "/home/<you>/…/loui/relay/bridge.js"]`.
+Restart Claude Desktop after changing the file. `LOUI_RELAY_URL` and
+`LOUI_RELAY_HOME` point the bridge at another relay or key folder.
+
 ### Several devices, and saying where
 
 Each Loui install signs in to the relay under a name: its computer's name
