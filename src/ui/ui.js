@@ -213,7 +213,7 @@ const tipOf = (g) => (g.paused ? `${g.label} is paused` : g.asking ? `${g.label}
 
 function drawTab(t) {
   const tab = el('div', 'tab' + (t.active ? ' active' : '') + (t.loading ? ' loading' : '') + (t.asleep ? ' asleep' : '') + (t.pinned ? ' pinned' : '')
-    + (t.id === state.aimed ? ' aimed' : ''));
+    + (t.id === state.aimed ? ' aimed' : '') + (t.picked ? ' picked' : ''));
   tab.setAttribute('role', 'tab');
   tab.setAttribute('aria-selected', t.active);
   tab.setAttribute('aria-label', t.title); // pinned tabs, and all of them in a collapsed sidebar, show no title
@@ -259,7 +259,8 @@ function drawTab(t) {
     }
     tab.append(el('span', 'title', t.title), close);
   }
-  tab.onclick = () => loui.send('tab:select', t.id);
+  // Ctrl+click and Shift+click pick tabs out together, to close in one go.
+  tab.onclick = (e) => (e.ctrlKey || e.metaKey || e.shiftKey ? loui.send('tab:pick', { id: t.id, range: e.shiftKey }) : loui.send('tab:select', t.id));
   tab.onauxclick = (e) => { if (e.button === 1) loui.send('tab:close', t.id); };
   tab.oncontextmenu = (e) => { e.preventDefault(); loui.send('tab:menu', t.id); };
   tab.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') loui.send('tab:select', t.id); };

@@ -203,6 +203,12 @@ each Loui install and in Claude.
   choose *Pin tab* (or drop it among the pinned ones): pinned tabs are icons
   at the start of your tabs, come back after a restart already loaded, never
   sleep, and `Ctrl+W` leaves them open (close one from its menu).
+- **Several tabs at once.** `Ctrl`+click a tab to pick it out together with
+  the one on screen (again to let it go); `Shift`+click picks every tab from
+  the one on screen to the one clicked. Closing any of them (its ×, a middle
+  click, `Ctrl+W`, or *Close N tabs* in its menu) closes them all. A plain
+  click on a tab lets them go. Your own tabs only, and they cannot yet be
+  dragged or moved together.
 - **Keyboard.** `Ctrl+Tab` and `Ctrl+Shift+Tab` (or `Ctrl+PageDown` and
   `Ctrl+PageUp`) go round your own tabs in the window, or round a session's
   group when one of its tabs is on screen; a sleeping tab they pass over stays

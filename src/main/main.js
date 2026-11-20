@@ -643,7 +643,8 @@ const handlers = {
   // "Switch to tab" in the address bar's suggestions: one of the user's own tabs, in whichever
   // window of the same kind it is (a private window's tabs stay among private windows).
   'tab:reveal': (id) => { const t = tabs.get(id); if (t && t.group === YOU && t.ses === tabs.window()?.ses) tabs.reveal(id); },
-  'tab:close': (id) => tabs.close(id),
+  'tab:close': (id) => tabs.closePicked(id),
+  'tab:pick': ({ id, range } = {}) => tabs.pick(id, !!range), // Ctrl+click or Shift+click in the tab strip
   'tab:reopen': () => restore.reopenClosed(),
   'tab:menu': (id) => tabs.tabMenu(id),
   'tab:card': (where) => hints.card(where), // the pointer rests on a tab in the strip, or has left it
@@ -652,7 +653,7 @@ const handlers = {
   'tab:close-active': () => {
     const tab = active();
     if (!tab || tab.pinned) return;
-    if (tab.group === YOU) return tabs.close(tab.id);
+    if (tab.group === YOU) return tabs.closePicked(tab.id);
     const g = tabs.group(tab.group);
     if (g.busy > 0 && !g.paused) return;
     send('tab:ask-close', tab.id);

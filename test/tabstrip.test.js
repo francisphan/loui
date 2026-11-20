@@ -565,3 +565,47 @@ test('at the smallest window, with the Claude panel open, the toolbar holds and 
   assert.ok(active, 'the tab on screen is in sight');
   for (const s of [s1, s2, s3]) s.end();
 });
+
+// ── tabs picked out together ─────────────────────────────────────────────
+test('Ctrl+click and Shift+click pick tabs out together; closing one of them closes them all', async () => {
+  const click = (id, keys = {}) => chrome(`document.querySelector('#tabs .tab[data-id="${id}"]').dispatchEvent(new MouseEvent('click', { bubbles: true, ...${JSON.stringify(keys)} })); 1`);
+  const picked = () => chrome(`[...document.querySelectorAll('#tabs .tab.picked')].map((t) => +t.dataset.id)`);
+  const open = async (q) => {
+    const before = ids(await mine());
+    await b.ui('panel', { tool: 'tabs', args: { action: 'new', url: `${b.base}/second.html?${q}` } });
+    return (await until(mine, (l) => l.length > before.length)).find((t) => !before.includes(t.id)).id;
+  };
+  const [a, bb, c, d] = [await open('p1'), await open('p2'), await open('p3'), await open('p4')];
+  await click(a);
+  await until(mine, (l) => l.find((t) => t.id === a).active);
+  assert.deepEqual(await picked(), [], 'nothing is picked by a plain click');
+
+  // Ctrl+click adds a tab to the one on screen, and takes it away again.
+  await click(c, { ctrlKey: true });
+  await until(picked, (p) => p.join() === [a, c].join());
+  assert.equal((await mine()).find((t) => t.active).id, a, 'the tab on screen stays');
+  await click(c, { ctrlKey: true });
+  await until(picked, (p) => p.length === 0);
+
+  // Shift+click takes every tab from the one on screen to the one clicked.
+  await click(c, { shiftKey: true });
+  await until(picked, (p) => p.join() === [a, bb, c].join());
+  // The tab's menu offers to close them together.
+  const menu = await b.ui('tab:menu-items', { id: bb });
+  assert.ok(JSON.stringify(menu).includes('Close 3 tabs'), JSON.stringify(menu));
+
+  // A plain click lets them go.
+  await click(d);
+  await until(picked, (p) => p.length === 0);
+  assert.equal((await mine()).length >= 4, true);
+
+  // Picked again, and closed from one tab's ×: all three go, the fourth stays.
+  await click(a);
+  await until(mine, (l) => l.find((t) => t.id === a).active);
+  await click(c, { shiftKey: true });
+  await until(picked, (p) => p.length === 3);
+  await chrome(`document.querySelector('#tabs .tab[data-id="${bb}"] .close').click(); 1`);
+  const left = await until(mine, (l) => ![a, bb, c].some((id) => l.some((t) => t.id === id)));
+  assert.ok(left.some((t) => t.id === d), 'a tab that was not picked stays');
+  assert.deepEqual(await picked(), []);
+});

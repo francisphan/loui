@@ -715,6 +715,7 @@ class Tabs extends EventEmitter {
     const now = Date.now();
     const leaving = this.get(w.activeId);
     if (leaving) leaving.seenAt = now; // the tab the user is leaving was seen until now
+    if (!this.picking) this.unpick(w); // a tab chosen plainly: the tabs picked out together are let go
     tab.seenAt = now;
     w.activeId = id;
     this.wake(tab);
@@ -1256,6 +1257,7 @@ class Tabs extends EventEmitter {
       const others = mine.filter((t) => t !== tab && !t.pinned);
       const right = mine.slice(mine.indexOf(tab) + 1).filter((t) => !t.pinned);
       const closeAll = (list) => () => { for (const t of list) this.close(t.id); };
+      const picked = this.picked(w);
       const there = this.windows.filter((x) => x !== w && x.private === tab.private && x.ses === tab.ses);
       parts.push(
         [
@@ -1277,7 +1279,9 @@ class Tabs extends EventEmitter {
           ...(tab.private ? [] : [{ label: 'Reopen closed tab', click: () => this.emit('reopen-closed', w) }]),
           { label: 'Close other tabs', enabled: others.length > 0, click: closeAll(others) },
           { label: 'Close tabs to the right', enabled: right.length > 0, click: closeAll(right) },
-          { label: 'Close tab', click: () => this.close(id) },
+          tab.picked && picked.length > 1
+            ? { label: `Close ${picked.length} tabs`, click: closeAll(picked) }
+            : { label: 'Close tab', click: () => this.close(id) },
         ],
       );
     } else {
@@ -1296,6 +1300,47 @@ class Tabs extends EventEmitter {
   }
 
   // Right-click on a tab in the tab strip.
+  // Tabs picked out together in a window's strip (Ctrl+click adds or takes
+  // away one, Shift+click takes all from the tab on screen to the one
+  // clicked), to be closed in one go. The user's own tabs only; the tab on
+  // screen is always one of them. A plain choice of a tab lets them go.
+  picked(w) {
+    return this.in(YOU).filter((t) => t.window === w && t.picked);
+  }
+  unpick(w) {
+    for (const t of this.list) if (t.window === w) t.picked = false;
+  }
+  pick(id, range = false) {
+    const tab = this.get(id);
+    const w = tab?.window;
+    const shown = this.get(w?.activeId);
+    if (!tab || tab.group !== YOU || shown?.group !== YOU) return this.select(id);
+    const mine = this.in(YOU).filter((t) => t.window === w);
+    if (range) {
+      const [from, to] = [mine.indexOf(shown), mine.indexOf(tab)].sort((a, b) => a - b);
+      mine.forEach((t, i) => { t.picked = i >= from && i <= to; });
+    } else if (tab === shown) {
+      // The tab on screen taken out of the set: another of the set comes on screen, if there is one.
+      const next = this.picked(w).find((t) => t !== tab);
+      if (!next) return;
+      tab.picked = false;
+      this.picking = true;
+      try { this.select(next.id); } finally { this.picking = false; }
+    } else {
+      shown.picked = true;
+      tab.picked = !tab.picked;
+    }
+    if (this.picked(w).length < 2) this.unpick(w); // one tab alone is not a set
+    this.emit('change');
+  }
+  // Closes a tab, and with it the others picked out together with it.
+  closePicked(id) {
+    const tab = this.get(id);
+    const set = tab?.picked ? this.picked(tab.window) : [];
+    if (set.length < 2) return this.close(id);
+    for (const t of set) this.close(t.id);
+  }
+
   tabMenu(id) {
     const tab = this.get(id);
     if (tab) Menu.buildFromTemplate(this.tabMenuItems(id)).popup({ window: tab.window.win });
@@ -1360,6 +1405,7 @@ class Tabs extends EventEmitter {
       device: t.device ? t.device.label || `${t.device.width}×${t.device.height}` : null,
       asleep: !!t.asleep,
       pinned: !!t.pinned,
+      picked: !!t.picked,
       window: t.window.id,
       private: !!t.private,
       lent: !!t.lent, // the user's tab, in a session's group until the session ends

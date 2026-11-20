@@ -235,6 +235,8 @@ body.vertical #bar { padding-left: var(--louis-in); }
 /* "Close tab?": the × of a session's tab asking, after Ctrl+W. */
 .tab .close.sure { display: grid; width: auto; padding: 0 7px; opacity: 1; background: var(--danger); color: var(--paper); font-size: 12px; font-weight: 650; white-space: nowrap; }
 .tab.active { background: var(--paper); color: var(--ink); }
+/* Picked out together with the tab on screen (Ctrl+click, Shift+click). */
+.tab.picked { background: color-mix(in srgb, var(--paper) 75%, transparent); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--focus); }
 /* Along the top, the tab on screen runs into the toolbar below it: its foot
    curves out into the row on either side. */
 #tabrow .tab.active::before {
