@@ -208,3 +208,19 @@ test('with nothing open, the page sits right under the toolbar', async () => {
   })()`);
   assert.equal(gap, 0);
 });
+
+test('a page, and a frame from another site in it, are told this browser does not play HLS streams by itself', async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const tab = (await b.state()).tabs.find((t) => t.active);
+  await b.ui('tab:js', { id: tab.id, code: `location.href = ${JSON.stringify(b.base + '/hls-outer.html')}; 1` });
+  let outer, inner;
+  for (const end = Date.now() + 8000; Date.now() < end && !(outer && inner); await sleep(100)) {
+    outer = await b.ui('tab:js', { id: tab.id, code: 'document.title === "HLS outer" && window.says' }).catch(() => null);
+    inner = await b.ui('frame:js', { id: tab.id, match: 'hls-inner', code: 'window.says' }).catch(() => null);
+    if (typeof inner !== 'object') inner = null;
+  }
+  assert.deepEqual([outer.hls, outer.hls2], ['', ''], 'so a player streams through its own script, as in Chrome');
+  assert.notEqual(outer.mp4, '', 'everything else is answered as before');
+  assert.equal(inner.hls, '', 'an embedded player too');
+  assert.notEqual(inner.mp4, '');
+});

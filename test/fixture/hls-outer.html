@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>HLS outer</title>
+<script>
+  // Asked first thing, as a player's script would.
+  const v = document.createElement('video');
+  window.says = { hls: v.canPlayType('application/vnd.apple.mpegurl'), hls2: v.canPlayType('application/x-mpegURL'), mp4: v.canPlayType('video/mp4; codecs="avc1.42E01E"') };
+</script>
+<iframe id="f" width="300" height="100"></iframe>
+<script>document.getElementById('f').src = location.protocol + '//localhost:' + location.port + '/hls-inner.html';</script>
