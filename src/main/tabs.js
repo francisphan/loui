@@ -314,7 +314,8 @@ class Tabs extends EventEmitter {
 
   // What every tab's page is made with.
   pagePreferences(ses) {
-    return { session: ses, sandbox: true, contextIsolation: true, preload: path.join(__dirname, 'tab-preload.js') };
+    // In every frame of the page: an embedded player is told the same about HLS as the page (tab-preload.js).
+    return { session: ses, sandbox: true, contextIsolation: true, nodeIntegrationInSubFrames: true, preload: path.join(__dirname, 'tab-preload.js') };
   }
 
   // Gives a tab a new view and loads its page (or its history) into it, in
