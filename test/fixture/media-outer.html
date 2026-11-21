@@ -1,0 +1,7 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Media outer</title>
+<h1>A play button here, the player in a frame from another site</h1>
+<button id="play" style="width:200px;height:60px" onclick="document.getElementById('f').contentWindow.postMessage('play', '*')">Play</button>
+<iframe id="f" width="300" height="100"></iframe>
+<script>document.getElementById('f').src = location.protocol + '//localhost:' + location.port + '/media-inner.html';</script>

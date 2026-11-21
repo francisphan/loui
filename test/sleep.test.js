@@ -172,3 +172,19 @@ test('a page brought back from sleep does not start playing by itself; pressing 
   await b.ui('tab:press', { id: media.id, x: Math.round(at.x + at.width / 2), y: Math.round(at.y + at.height / 2) });
   await until(paused, (p) => p === false);
 });
+
+test('a play button on a page brought back starts its player in a frame from another site', async () => {
+  const shown = await onScreen();
+  const outer = await open(b.base + '/media-outer.html');
+  const inner = (code) => b.ui('frame:js', { id: outer.id, match: 'media-inner', code });
+  await until(() => inner('!!document.getElementById("a")'), (ok) => ok === true);
+  await b.ui('tab:select', shown.id);
+  assert.equal(await b.ui('tab:sleep', outer.id), true);
+  await b.ui('tab:select', outer.id);
+  await loaded(outer.id);
+  await until(() => inner('window.__louiQuiet'), (q) => q === 'on'); // the frame is being held
+  // The user's press on the page's own button: the frame is told to play, and does.
+  const at = JSON.parse(await b.ui('tab:js', { id: outer.id, code: 'JSON.stringify(document.getElementById("play").getBoundingClientRect())' }));
+  await b.ui('tab:press', { id: outer.id, x: Math.round(at.x + at.width / 2), y: Math.round(at.y + at.height / 2) });
+  await until(() => inner('document.getElementById("a").paused'), (p) => p === false);
+});
