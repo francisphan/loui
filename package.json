@@ -1,6 +1,6 @@
 {
   "name": "loui",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "description": "A browser Claude can drive alongside you",
   "main": "src/main/main.js",
   "private": true,
