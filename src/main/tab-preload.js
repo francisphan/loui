@@ -29,3 +29,35 @@ webFrame.executeJavaScript(`(() => {
     return /mpegurl/i.test(String(type)) ? '' : real.apply(this, arguments);
   };
 })()`).catch(() => {});
+
+// And the other: that it has no list of passkeys to offer in a sign-in field
+// ("conditional mediation"). Chromium says it has, but the list is drawn by
+// the browser around it, and Loui draws none. A sign-in page that believes
+// it asks for the list as it loads; that request then waits for a choice
+// nobody can make, and while it waits the page's own "Sign in with a
+// passkey" button is refused ("A request is already pending"). Seen on
+// Amazon. A passkey asked for outright still goes to the system (Windows
+// Hello, a security key), as before. A page that asks for the list anyway
+// gets a request that waits, as it should, without holding up the next one.
+webFrame.executeJavaScript(`(() => {
+  if (typeof PublicKeyCredential === 'undefined' || !navigator.credentials) return;
+  PublicKeyCredential.isConditionalMediationAvailable = async () => false;
+  const caps = PublicKeyCredential.getClientCapabilities;
+  if (caps) {
+    PublicKeyCredential.getClientCapabilities = async () => (
+      { ...(await caps.call(PublicKeyCredential)), conditionalGet: false, conditionalCreate: false, immediateGet: false });
+  }
+  const own = Object.getPrototypeOf(navigator.credentials);
+  const get = own.get, create = own.create;
+  const waits = (signal) => new Promise((_, no) => {
+    const stop = () => no(signal.reason || new DOMException('The request was aborted.', 'AbortError'));
+    if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
+  });
+  own.get = function (options) {
+    return options?.publicKey && options.mediation === 'conditional' ? waits(options.signal) : get.apply(this, arguments);
+  };
+  own.create = function (options) {
+    return options?.publicKey && options.mediation === 'conditional'
+      ? Promise.reject(new DOMException('Not available in this browser.', 'NotAllowedError')) : create.apply(this, arguments);
+  };
+})()`).catch(() => {});

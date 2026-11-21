@@ -224,3 +224,33 @@ test('a page, and a frame from another site in it, are told this browser does no
   assert.equal(inner.hls, '', 'an embedded player too');
   assert.notEqual(inner.mp4, '');
 });
+
+test('a page is told there is no passkey list to offer, and asking for one does not block a passkey asked for outright', async () => {
+  const tab = (await b.state()).tabs.find((t) => t.active);
+  const out = await b.ui('tab:js', { id: tab.id, code: `(async () => {
+    const options = (extra) => ({ publicKey: { challenge: new Uint8Array(32), rpId: location.hostname, timeout: 60000 }, ...extra });
+    const o = { list: await PublicKeyCredential.isConditionalMediationAvailable() };
+    const caps = await PublicKeyCredential.getClientCapabilities();
+    o.caps = [caps.conditionalGet, caps.conditionalCreate, caps.immediateGet];
+    const listed = new AbortController();
+    let list = 'waiting';
+    navigator.credentials.get(options({ mediation: 'conditional', signal: listed.signal })).catch((e) => { list = e.name; });
+    // The page's own passkey button, while the list is still being waited for.
+    const asked = new AbortController();
+    const direct = navigator.credentials.get(options({ signal: asked.signal })).then(() => 'answered', (e) => e.name + ': ' + e.message);
+    o.direct = await Promise.race([direct, new Promise((ok) => setTimeout(() => ok('reached the system'), 1500))]);
+    asked.abort();
+    o.listMeanwhile = list;
+    listed.abort();
+    await new Promise((ok) => setTimeout(ok, 50));
+    o.listAfterAbort = list;
+    o.create = await navigator.credentials.create({ mediation: 'conditional', publicKey: {} }).then(() => 'made', (e) => e.name);
+    return o;
+  })()` });
+  assert.equal(out.list, false);
+  assert.deepEqual(out.caps, [false, false, false]);
+  assert.ok(!/already pending/.test(out.direct), `the request asked for outright is not refused: ${out.direct}`);
+  assert.equal(out.listMeanwhile, 'waiting', 'the list is waited for, as it would be, without holding anything up');
+  assert.equal(out.listAfterAbort, 'AbortError');
+  assert.equal(out.create, 'NotAllowedError', 'and no passkey is made without asking');
+});

@@ -763,6 +763,7 @@ function drawHelm() {
   helm.hidden = !act && !decline;
   helm.classList.toggle('moving', driving && !picking.active && !prompt);
   helm.classList.toggle('asking', !!asked);
+  helm.classList.toggle('letting', !!asked && prompt.kind === 'consent');
   $('helm-state').textContent = what;
   $('helm-text').textContent = text;
   // Also on the helm itself: with the tabs in the sidebar the text can give way altogether.
