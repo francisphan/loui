@@ -388,7 +388,7 @@ test('Louis is a big button at the top left, across the tab row and the toolbar,
   const l = await until(louis, (x) => !x.over.length); // once the row has settled
   whole(l, [64, 84], 52);
   assert.deepEqual([l.tabrow, l.navrow, l.stage], [64, 64, [0, 84]], 'both rows start at his right edge; the page is under them, from the window edge');
-  assert.equal(l.back, 'rgb(16, 27, 34)', "on the tab row's colour");
+  assert.equal(l.back, 'rgb(26, 40, 50)', "on the toolbar's colour: he and the toolbar are one block");
   // A small window keeps him whole: he is the way into the menu.
   await size(720, 600);
   whole(await until(louis, (x) => !x.over.length), [64, 84], 52);
@@ -448,13 +448,13 @@ test('a private window has the same Louis, on its tint, and no Claude panel in h
   let l = await until(() => louis(inw), (x) => !x.over.length);
   whole(l, [64, 84], 52);
   assert.deepEqual([l.tabrow, l.navrow], [64, 64]);
-  assert.equal(l.back, 'rgb(23, 21, 42)', "the private window's colour");
+  assert.equal(l.back, 'rgb(34, 31, 58)', "the private window's colour");
   const menu = await b.ui('in-window', { window: id, ui: 'menu:louis' });
   assert.ok(menu.includes('Vertical tabs') && menu.includes('Settings'));
   await b.ui('tabs:layout', { vertical: true });
   l = await until(() => louis(inw), (x) => x.box[3] === 64 && x.tab >= 64);
   whole(l, [64, 64], 52);
-  assert.equal(l.back, 'rgb(23, 21, 42)');
+  assert.equal(l.back, 'rgb(23, 21, 42)', 'with vertical tabs he keeps the tab column colour');
   await b.ui('tabs:layout', { vertical: false });
   await b.ui('window:close', id);
   await until(() => b.ui('windows'), (list) => list.length === 1);
@@ -532,7 +532,7 @@ test('Appearance › Light in his menu changes how Loui looks, and is remembered
   assert.equal(saved(), 'light', 'kept in settings.json, for the next start');
   assert.deepEqual((await b.ui('menu:louis'))[0], ['Appearance', ['Dark', '✓ Light', 'Follow the system']]);
   assert.equal((await b.ui('titlebar')).color, '#E6EDEF', 'the window buttons follow');
-  assert.equal((await louis()).back, 'rgb(230, 237, 239)', 'and so does Louis');
+  assert.equal((await louis()).back, 'rgb(251, 252, 252)', 'and so does Louis');
   await b.ui('menu:louis', { in: 'Appearance', click: 'Follow the system' });
   assert.equal(saved(), 'system');
   await b.ui('menu:louis', { in: 'Appearance', click: 'Dark' });

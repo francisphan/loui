@@ -168,12 +168,13 @@ body.vertical.sidebar-collapsed { --louis-w: 52px; --louis-h: 52px; --louis: 40p
 #brand:focus-visible img { outline: 2px solid var(--focus); outline-offset: -2px; }
 @media (prefers-reduced-motion: no-preference) { #brand img { transition: background-color .12s ease, scale .12s ease; } }
 /* With the tabs along the top, his column is the toolbar's colour and the
-   toolbar runs under him from the window's edge, so he and the toolbar are
-   one block. Where the tab row meets him, the block curves out into it as an
-   active tab's foot does; the far-left tab, when active, closes the gap and
-   merges into him. */
-body:not(.vertical) #navrow { padding-left: calc(var(--louis-in) + 8px); }
-body:not(.vertical) #brand { height: calc(var(--louis-h) - 2px); border-top-right-radius: 8px; background: var(--paper); } /* stops short of the toolbar's bottom line */
+   toolbar's line runs on under him, so he and the toolbar are one block.
+   Where the tab row meets him, the block curves out into it as an active
+   tab's foot does; the far-left tab, when active, closes the gap and merges
+   into him. */
+body:not(.vertical) #navrow { margin-left: var(--louis-in); }
+body:not(.vertical) #brand { background: var(--paper); box-shadow: inset 0 -1px 0 var(--rule); } /* the toolbar's line runs under him */
+body.driving:not(.vertical) #brand { box-shadow: inset 0 -2px 0 var(--claude); }
 body:not(.vertical) #tabrow::before {
   content: '';
   position: absolute;
