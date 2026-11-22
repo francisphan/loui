@@ -167,7 +167,11 @@ body.vertical.sidebar-collapsed { --louis-w: 52px; --louis-h: 52px; --louis: 40p
 #brand:focus-visible { outline: none; }
 #brand:focus-visible img { outline: 2px solid var(--focus); outline-offset: -2px; }
 @media (prefers-reduced-motion: no-preference) { #brand img { transition: background-color .12s ease, scale .12s ease; } }
-body:not(.vertical) #navrow { margin-left: var(--louis-in); }
+/* The toolbar's corner next to him is rounded, so it flows out of his column
+   instead of meeting it square; the tab strip starts clear of that curve, so
+   the first tab's foot never lands on it. */
+body:not(.vertical) #navrow { margin-left: var(--louis-in); border-top-left-radius: 10px; }
+body:not(.vertical) #tabrow { padding-left: 10px; }
 body.vertical #bar { padding-left: var(--louis-in); }
 #tabrow { container: tabrow / inline-size; }
 @container tabrow (max-width: 640px) {
