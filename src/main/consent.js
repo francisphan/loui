@@ -10,12 +10,19 @@
 // for the rest of its life; one they did not answer (away, two minutes) is
 // asked again on its next call.
 //
+// Where nobody can see the window (Loui on a server, on a virtual display)
+// the owner answers from a terminal instead: every connector that asked is
+// noted in asked.json beside consent.json, and `loui --let-in`, run by the
+// same user, lists them and allows them from then on (main.js). It is the
+// owner's own explicit answer, given another way; nothing is let in unasked.
+//
 // Only sessions that come through the relay are asked. The Claude panel and
 // the local control socket are the user's own (the socket is reachable only
 // by this user); tests on the socket opt in with session.ask.
 const fs = require('fs');
 
 const LIMIT_MS = 2 * 60 * 1000;
+const ASKED_FOR_MS = 24 * 60 * 60 * 1000; // how long a connector that asked can still be let in from a terminal
 const DENIED =
   'The user did not allow this session to use their browser. Do not try again; tell them, and ' +
   'they can let a new session in.';
@@ -28,6 +35,10 @@ function createConsent({ file, prompts, changed, decided = () => {} }) {
   // connector id -> { name, kind, since }
   const saved = (() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')).connectors || {}; } catch { return {}; } })();
   const save = () => fs.writeFileSync(file, JSON.stringify({ connectors: saved }, null, 2), { mode: 0o600 });
+  // Connectors that asked and are not always allowed: id -> { name, kind, who, at }.
+  const askedFile = file.replace(/consent\.json$/, 'asked.json');
+  const asked = {};
+  const note = () => { try { fs.writeFileSync(askedFile, JSON.stringify({ connectors: asked }, null, 2), { mode: 0o600 }); } catch {} };
   const allowed = new Set(); // session ids let in
   const denied = new Set();
   const asking = new Map(); // session id -> the answer on its way, shared by calls made meanwhile
@@ -43,6 +54,10 @@ function createConsent({ file, prompts, changed, decided = () => {} }) {
       return;
     }
     if (!asking.has(id)) {
+      if (connector) {
+        asked[connector.id] = { name: connector.name, kind: connector.kind, who: session.label || 'Claude', at: Date.now() };
+        note();
+      }
       asking.set(id, prompts.ask({
         kind: 'consent', session: { id, label: session.label || 'Claude' }, limit: LIMIT_MS,
         connector: connector && { id: connector.id, name: connector.name, kind: connector.kind },
@@ -51,9 +66,14 @@ function createConsent({ file, prompts, changed, decided = () => {} }) {
         if (choice === 'always' && connector) {
           saved[connector.id] = { name: connector.name, kind: connector.kind, since: Date.now() };
           save();
+          delete asked[connector.id];
+          note();
         }
         if (choice === 'allow' || choice === 'always') allowed.add(id);
-        else if (choice === 'deny') denied.add(id);
+        else if (choice === 'deny') {
+          denied.add(id);
+          if (connector && asked[connector.id]) { delete asked[connector.id]; note(); } // refused in the window: not for a terminal to overturn
+        }
         decided(session, choice);
         changed();
         return choice;
@@ -70,6 +90,23 @@ function createConsent({ file, prompts, changed, decided = () => {} }) {
     forget(id) {
       allowed.delete(id);
       denied.delete(id);
+    },
+    // `loui --let-in`: the connectors named, of those that asked, are always
+    // allowed from now on, and their sessions waiting on the question go ahead.
+    letIn(ids) {
+      const now = [];
+      for (const cid of Array.isArray(ids) ? ids : []) {
+        const c = asked[cid];
+        if (!c || Date.now() - c.at > ASKED_FOR_MS) continue;
+        saved[cid] = { name: c.name, kind: c.kind, since: Date.now() };
+        delete asked[cid];
+        now.push(cid);
+      }
+      if (!now.length) return;
+      save();
+      note();
+      prompts.answerWhere((item) => item.kind === 'consent' && now.includes(item.connector?.id), 'always');
+      changed();
     },
     revoke(connectorId) {
       if (!saved[connectorId]) return;
@@ -90,4 +127,4 @@ function validConnector(c) {
   return { id: c.id, name: String(c.name || 'Connector').slice(0, 48), kind: c.kind === 'key' ? 'key' : 'connector' };
 }
 
-module.exports = { createConsent };
+module.exports = { createConsent, ASKED_FOR_MS };

@@ -18,7 +18,7 @@ const paths = require('../shared/paths');
 const { Tabs, PRESETS, toUrl, YOU, onStart } = require('./tabs');
 const { createSessions } = require('./sessions');
 const { createPrompts } = require('./prompts');
-const { createConsent } = require('./consent');
+const { createConsent, ASKED_FOR_MS } = require('./consent');
 const { createActions } = require('./actions');
 const { createChat } = require('./chat');
 const { createLink } = require('./link');
@@ -1370,11 +1370,38 @@ function setSpelling(code, on) {
 
 // A second Loui started (a link opened in another app, say) hands its links to
 // this one and quits.
-if (!app.requestSingleInstanceLock({ urls: launched })) {
+//
+// `loui --let-in`, from a terminal: the answer to "Let … use Loui?" where
+// nobody can see the window (a server). It lists the connectors that asked
+// and were not answered (asked.json, consent.js), and hands them to the Loui
+// that is running, which allows them from then on. Run by the profile's own
+// user, it is that user's answer. It never opens a window.
+const letIn = process.argv.includes('--let-in');
+let letting = [];
+if (letIn) {
+  let asked = {};
+  try { asked = JSON.parse(fs.readFileSync(path.join(paths.home, 'asked.json'), 'utf8')).connectors || {}; } catch {}
+  letting = Object.keys(asked).filter((id) => Date.now() - asked[id].at <= ASKED_FOR_MS);
+  const say = (line) => process.stdout.write(`${line}\n`);
+  if (!letting.length) say('Nothing is waiting to be let in (a session asks on its first use; an ask is kept for a day).');
+  for (const id of letting) {
+    const c = asked[id];
+    say(`Always allowed from now on: ${c.kind === 'key' ? 'apps signed in with the relay key' : `the ${c.name} connector`} (asked as "${c.who}", ${new Date(c.at).toLocaleString()}).`);
+  }
+  if (letting.length) say('Revoke in Settings › Claude, or by deleting the entry from consent.json in the profile.');
+}
+if (!app.requestSingleInstanceLock({ urls: letIn ? [] : launched, letIn: letting })) {
+  app.quit();
+} else if (letIn) {
+  if (letting.length) process.stdout.write('Loui is not running, so nothing was changed. Start it and run this again.\n');
   app.quit();
 } else {
   app.on('before-quit', () => { quitting = true; history?.flush(); bookmarks?.flush(); activity?.flush(); });
-  app.on('second-instance', (_e, argv, cwd, data) => defaultBrowser?.secondInstance(argv, cwd, data));
+  app.on('second-instance', (_e, argv, cwd, data) => {
+    if (Array.isArray(data?.letIn) && data.letIn.length) return consent?.letIn(data.letIn);
+    if (argv.includes('--let-in')) return; // nothing had asked: not a request for a window
+    defaultBrowser?.secondInstance(argv, cwd, data);
+  });
   app.whenReady().then(() => {
     // Each request runs with the window whose chrome sent it as the one being served.
     // Only a window's chrome may ask (and the suggestion list, to pick a row):
