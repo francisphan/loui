@@ -231,3 +231,33 @@ test('a pointing question set aside for the next one is asked again, not cancell
   a.end();
   c.end();
 });
+
+// Where nobody can see the window (a server), the owner answers from a terminal.
+test('`loui --let-in` from a terminal lets in the connectors that asked, from then on, and says which', async () => {
+  const { spawnSync } = require('child_process');
+  const SERVER = { id: 'connector-server-333', name: 'Claude', kind: 'connector' };
+  const run = () => {
+    const env = { ...process.env, LOUI_HOME: b.home, LOUI_TEST: '1', LOUI_RELAY_URL: '' };
+    delete env.DISPLAY; // as over SSH: it must not need a screen
+    delete env.WAYLAND_DISPLAY;
+    return spawnSync(require('electron'), [path.join(__dirname, '..'), '--no-sandbox', '--let-in'], { env, encoding: 'utf8', timeout: 20000 }).stdout;
+  };
+  const windows = (await b.state()).windows?.length;
+  const s = b.as('srv1', 'Claude on the phone', { ask: true, connector: SERVER });
+  const call = s.text('navigate', { url: b.base });
+  await asked('Claude on the phone');
+  const said = run();
+  assert.match(said, /Always allowed from now on: the Claude connector \(asked as "Claude on the phone", /);
+  assert.match(await call, /Fixture page/, 'the session that was waiting goes ahead');
+  assert.equal((await b.state()).prompt, null);
+  assert.ok((await b.state()).allowedConnectors?.some?.((c) => c.id === SERVER.id)
+    || JSON.parse(fs.readFileSync(path.join(b.home, 'consent.json'), 'utf8')).connectors[SERVER.id], 'kept, as "Always allow" is');
+  assert.equal((await b.state()).windows?.length, windows, 'no window was opened');
+  s.end();
+  // The next session through that connector is not asked.
+  const t = b.as('srv2', 'Claude on the phone', { ask: true, connector: SERVER });
+  assert.match(await t.text('navigate', { url: b.base }), /Fixture page/);
+  t.end();
+  // And with nothing waiting, it says so and changes nothing.
+  assert.match(run(), /Nothing is waiting to be let in/);
+});

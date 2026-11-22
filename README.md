@@ -605,10 +605,22 @@ on the same machine); it then appears to sessions under the machine's name
 own files as it maps them), Xvfb included.
 
 **Letting sessions in.** A new session is asked about in the window, here as
-on a desktop: "Let … use Loui?". Nobody sees this window, so until it is
-answered once with *Always allow* for the connector (the relay key, and each
-of Claude's connectors), sessions are told that you did not answer. To answer
-it, look at the virtual display while a session waits, over SSH:
+on a desktop: "Let … use Loui?". Nobody sees this window, so until the
+connector it came through (the relay key, and each of Claude's connectors) is
+always allowed, sessions are told that you did not answer. Answer from a
+terminal, as the user Loui runs as, after a session has asked:
+
+```bash
+loui --let-in        # or: sudo -u francis loui --let-in
+```
+
+It lists each connector that asked in the last day and was not answered,
+allows them from then on (as *Always allow* in the window does), and lets a
+session that is still waiting go ahead. It is your answer, given another way:
+nothing is let in that has not asked, a connector refused in the window is not
+listed, and Loui has no setting that lets sessions in unasked. To see the
+window itself instead (for this, or for any other question a session raises),
+look at the virtual display over SSH:
 
 ```bash
 sudo apt install x11vnc
@@ -619,8 +631,7 @@ ssh -L 5900:localhost:5900 server
 ```
 
 The choice is kept in `consent.json` in the profile, per connector, and
-*Settings › Claude* lists and revokes it. Loui has no setting that lets
-sessions in unasked. To start it only when a session asks instead, leave it disabled, allow
+*Settings › Claude* lists and revokes it. To start it only when a session asks instead, leave it disabled, allow
 the relay's user to start that one unit, and name it in the relay's
 `launch.json`:
 

@@ -78,6 +78,10 @@ function createPrompts({ changed }) {
       const item = line.find((x) => x.id === id);
       if (item) settle(item, value);
     },
+    // Answers every question in the line that fits (consent.js: the owner let a connector in from a terminal).
+    answerWhere(fits, value) {
+      for (const item of line.filter(fits)) settle(item, value);
+    },
     // A session that ends takes its questions with it.
     drop(sessionId) {
       for (const item of line.filter((x) => x.session.id === sessionId)) withdraw(item);
