@@ -24,6 +24,7 @@ const ACCESS_MS = 60 * 60 * 1000;
 const REFRESH_MS = 30 * 24 * 60 * 60 * 1000; // a connector unused this long must be approved again
 const CODE_MS = 5 * 60 * 1000;
 const APPROVAL_MS = 10 * 60 * 1000;
+const REPEAT_MS = 60 * 1000; // an approved request sent again (a second tap on Allow) goes back to Claude again
 const TRIES = 3; // wrong keys per approval request before it is withdrawn
 const MAX_CLIENTS = 200; // when full, the oldest registration that was never approved makes way
 const MAX_APPROVALS = 100; // pending approvals; the oldest makes way
@@ -74,11 +75,12 @@ function createAuth(home, limits = {}) {
   const replaced = new Map(); // retired refresh token -> the tokens issued in its place
   const codes = new Map(); // code -> { clientId, challenge, redirectUri, expiresAt }
   const approvals = new Map(); // id -> { client, params, expiresAt, tries }
+  const approved = new Map(); // id -> { href, expiresAt }: where an approval just sent the browser
 
   // Expired entries are dropped, and so are registrations that never got approved.
   function sweep() {
     const now = Date.now();
-    for (const m of [access, codes, approvals]) for (const [k, v] of m) if (v.expiresAt < now) m.delete(k);
+    for (const m of [access, codes, approvals, approved]) for (const [k, v] of m) if (v.expiresAt < now) m.delete(k);
     let dirty = false;
     for (const [t, r] of Object.entries(store.refresh)) {
       if (r.generation !== generation || r.expiresAt < now) { delete store.refresh[t]; dirty = true; }
@@ -265,6 +267,15 @@ function createAuth(home, limits = {}) {
     res.set('X-Frame-Options', 'DENY');
     res.set('Cache-Control', 'no-store');
     const request = req.method === 'POST' ? req.body?.request : req.query.request;
+    // The form sent twice (a second tap while the page was on its way to
+    // Claude) would cancel the first answer's redirect and show "expired" in
+    // its place, though the key was right. With the key again, send the
+    // browser the same way; the code in it still works only once.
+    const done = approved.get(request);
+    if (done && done.expiresAt >= Date.now()) {
+      if (req.method === 'POST' && isKey(req.body?.key)) return res.redirect(done.href);
+      return res.status(400).send('This request was already approved. Go back to Claude to finish connecting.');
+    }
     const pending = approvals.get(request);
     if (!pending || pending.expiresAt < Date.now()) {
       return res.status(400).send('This request has expired. Start the connection again from Claude.');
@@ -288,6 +299,7 @@ function createAuth(home, limits = {}) {
     const back = new URL(params.redirectUri);
     back.searchParams.set('code', code);
     if (params.state) back.searchParams.set('state', params.state);
+    approved.set(request, { href: back.href, expiresAt: Date.now() + REPEAT_MS });
     res.redirect(back.href);
   }
 
