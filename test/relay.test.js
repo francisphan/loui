@@ -356,6 +356,9 @@ test('the approval page names where access goes, and cannot be framed', async ()
   assert.match(html, /Access goes to <span class="site">claude\.ai<\/span>/);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
   assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  // The answer redirects to Claude, and browsers hold a form's redirect to
+  // form-action: without the site named there, the page just stays put.
+  assert.match(res.headers.get('content-security-policy'), /form-action 'self' https:\/\/claude\.ai(;|$)/);
 });
 
 test('wrong keys withdraw that one request, without locking out the owner', async () => {

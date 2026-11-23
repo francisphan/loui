@@ -260,10 +260,15 @@ function createAuth(home, limits = {}) {
 </form>`;
   }
 
+  // The page's form posts to the relay, which answers with a redirect to the
+  // connector's site; browsers hold that redirect to form-action too, so the
+  // site is named there or the browser stays on the page.
+  const csp = (to) => `frame-ancestors 'none'; default-src 'none'; style-src 'unsafe-inline'; form-action 'self'${to ? ' ' + to : ''}`;
+
   // GET shows the page; POST checks the key and sends the browser back to the
   // connector with an authorization code. The page cannot be framed.
   function approve(req, res) {
-    res.set('Content-Security-Policy', "frame-ancestors 'none'; default-src 'none'; style-src 'unsafe-inline'; form-action 'self'");
+    res.set('Content-Security-Policy', csp());
     res.set('X-Frame-Options', 'DENY');
     res.set('Cache-Control', 'no-store');
     const request = req.method === 'POST' ? req.body?.request : req.query.request;
@@ -281,6 +286,7 @@ function createAuth(home, limits = {}) {
       return res.status(400).send('This request has expired. Start the connection again from Claude.');
     }
     const { client, params } = pending;
+    res.set('Content-Security-Policy', csp(new URL(params.redirectUri).origin));
     if (req.method !== 'POST') return res.send(page(request, client, params.redirectUri));
 
     if (!isKey(req.body?.key)) {
