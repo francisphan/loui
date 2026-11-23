@@ -429,10 +429,11 @@ async function start(options = {}) {
   // One line per request that came in from outside (through the proxy), for
   // seeing where a connector's sign-in stopped: when, what was asked, the
   // answer, and the client's own name for itself. Never the query (it carries
-  // sign-in codes), a header or a body.
+  // sign-in codes), a header or a body. The path as asked: the sign-in routes
+  // are mounted routers, whose req.path is only "/".
   app.use((req, res, next) => {
     if (req.headers['x-forwarded-for']) {
-      res.on('finish', () => console.log(`${req.method} ${req.path} ${res.statusCode} ${String(req.headers['user-agent'] || '').slice(0, 60)}`));
+      res.on('finish', () => console.log(`${req.method} ${req.originalUrl.split('?')[0]} ${res.statusCode} ${String(req.headers['user-agent'] || '').slice(0, 60)}`));
     }
     next();
   });

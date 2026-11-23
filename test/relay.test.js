@@ -356,6 +356,9 @@ test('the approval page names where access goes, and cannot be framed', async ()
   assert.match(html, /Access goes to <span class="site">claude\.ai<\/span>/);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
   assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  // The answer redirects to Claude, and browsers hold a form's redirect to
+  // form-action: without the site named there, the page just stays put.
+  assert.match(res.headers.get('content-security-policy'), /form-action 'self' https:\/\/claude\.ai(;|$)/);
 });
 
 test('wrong keys withdraw that one request, without locking out the owner', async () => {
@@ -365,6 +368,50 @@ test('wrong keys withdraw that one request, without locking out the owner', asyn
   assert.equal((await attacker.answer(relay.key)).status, 400, 'the withdrawn request is gone');
   const owner = await startSignIn('https://claude.ai/api/mcp/auth_callback');
   assert.equal((await owner.answer(relay.key)).status, 302);
+});
+
+test('a second Allow on an approved request goes back to Claude again, not to "expired"', async () => {
+  const redirect = 'https://claude.ai/api/mcp/auth_callback';
+  const { registered, verifier, approvePage, answer } = await startSignIn(redirect);
+  const first = await answer(relay.key);
+  assert.equal(first.status, 302);
+  const again = await answer(relay.key);
+  assert.equal(again.status, 302);
+  assert.equal(again.headers.get('location'), first.headers.get('location'));
+  // Without the key it is not sent anywhere, and the page says what happened.
+  const guessed = await answer('guess');
+  assert.equal(guessed.status, 400);
+  assert.match(await guessed.text(), /already approved/);
+  assert.equal(guessed.headers.get('location'), null);
+  assert.match(await (await fetch(approvePage)).text(), /already approved/);
+  // Wrong keys are limited here as on the page: after three, the key no longer brings the redirect back.
+  for (let i = 0; i < 2; i++) await answer('guess');
+  assert.match(await (await answer(relay.key)).text(), /expired/);
+  // The code still works once.
+  const exchange = () => fetch(relay.url + '/token', {
+    method: 'POST',
+    body: new URLSearchParams({
+      grant_type: 'authorization_code', code: new URL(first.headers.get('location')).searchParams.get('code'),
+      code_verifier: verifier, client_id: registered.client_id, redirect_uri: redirect,
+    }),
+  });
+  assert.equal((await exchange()).status, 200);
+  assert.equal((await exchange()).status, 400);
+});
+
+test('requests from outside are logged by the path asked for, without the query', async () => {
+  const lines = [];
+  const log = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    await fetch(relay.url + '/authorize?client_id=secret-ish', { headers: { 'x-forwarded-for': '100.64.0.1' }, redirect: 'manual' });
+    await fetch(relay.url + '/token', { method: 'POST', headers: { 'x-forwarded-for': '100.64.0.1' } });
+  } finally {
+    console.log = log;
+  }
+  assert.ok(lines.some((l) => /^GET \/authorize \d{3} /.test(l)), lines.join('\n'));
+  assert.ok(lines.some((l) => /^POST \/token \d{3} /.test(l)), lines.join('\n'));
+  assert.ok(!lines.some((l) => l.includes('secret-ish')));
 });
 
 test("Claude's connector signs in with OAuth, approved with the relay key", async () => {
