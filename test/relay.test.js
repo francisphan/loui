@@ -384,6 +384,9 @@ test('a second Allow on an approved request goes back to Claude again, not to "e
   assert.match(await guessed.text(), /already approved/);
   assert.equal(guessed.headers.get('location'), null);
   assert.match(await (await fetch(approvePage)).text(), /already approved/);
+  // Wrong keys are limited here as on the page: after three, the key no longer brings the redirect back.
+  for (let i = 0; i < 2; i++) await answer('guess');
+  assert.match(await (await answer(relay.key)).text(), /expired/);
   // The code still works once.
   const exchange = () => fetch(relay.url + '/token', {
     method: 'POST',

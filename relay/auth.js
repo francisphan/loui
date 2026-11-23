@@ -279,6 +279,7 @@ function createAuth(home, limits = {}) {
     const done = approved.get(request);
     if (done && done.expiresAt >= Date.now()) {
       if (req.method === 'POST' && isKey(req.body?.key)) return res.redirect(done.href);
+      if (req.method === 'POST' && ++done.tries >= TRIES) approved.delete(request); // the same limit on guesses as below
       return res.status(400).send('This request was already approved. Go back to Claude to finish connecting.');
     }
     const pending = approvals.get(request);
@@ -305,7 +306,7 @@ function createAuth(home, limits = {}) {
     const back = new URL(params.redirectUri);
     back.searchParams.set('code', code);
     if (params.state) back.searchParams.set('state', params.state);
-    approved.set(request, { href: back.href, expiresAt: Date.now() + REPEAT_MS });
+    approved.set(request, { href: back.href, expiresAt: Date.now() + REPEAT_MS, tries: 0 });
     res.redirect(back.href);
   }
 
