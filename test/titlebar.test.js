@@ -52,12 +52,12 @@ test('the tab strip is the top of the window, across the panel too, and the pane
   await buttons(138);
   for (const q of ['one', 'two']) await b.ui('tab:new', `${b.base}/index.html?${q}`);
   const r = await until(() => row('tabrow'), (x) => x.items.some(([name]) => name === 'tabs'));
-  assert.deepEqual(r.top.slice(1, 5), [64, r.width, 0, 40], 'from Louis to the edge, 40px tall');
+  assert.deepEqual(r.top.slice(1, 5), [72, r.width, 0, 40], 'from Louis to the edge, 40px tall');
   assert.equal(await chrome(`getComputedStyle(document.getElementById('panel')).display`), 'grid', 'with the Claude panel open');
   assert.equal(r.panel, 40, 'the panel starts under the top row');
   assert.ok(r.bar < r.width - 200, 'and the toolbar stops at the panel');
   const nav = await row('navrow');
-  assert.deepEqual([nav.top[1], nav.top[3], nav.top[4], nav.stage], [64, 40, 84, 84], 'the toolbar under it, from Louis on, then the page');
+  assert.deepEqual([nav.top[1], nav.top[3], nav.top[4], nav.stage], [0, 40, 84, 84], 'the toolbar under it, from the window edge (under Louis), then the page');
   clear(r, 138);
 });
 
@@ -383,15 +383,15 @@ const whole = (l, [w, h], img, top = 0) => {
   assert.deepEqual(l.over, [], 'nothing lies over him');
 };
 
-test('Louis is a big button at the top left, across the tab row and the toolbar, which start to his right', async () => {
+test('Louis is a big button at the top left, on the seam between the tab row and the toolbar', async () => {
   await size(1400, 800);
   const l = await until(louis, (x) => !x.over.length); // once the row has settled
-  whole(l, [64, 84], 52);
-  assert.deepEqual([l.tabrow, l.navrow, l.stage], [64, 64, [0, 84]], 'both rows start at his right edge; the page is under them, from the window edge');
-  assert.equal(l.back, 'rgb(26, 40, 50)', "on the toolbar's colour: he and the toolbar are one block");
+  whole(l, [72, 84], 60);
+  assert.deepEqual([l.tabrow, l.navrow, l.stage], [72, 0, [0, 84]], 'the tab row starts at his right edge; the toolbar runs under him, and the page under both, from the window edge');
+  assert.equal(l.back, 'rgba(0, 0, 0, 0)', 'a badge on the seam: his box has no colour of its own');
   // A small window keeps him whole: he is the way into the menu.
   await size(720, 600);
-  whole(await until(louis, (x) => !x.over.length), [64, 84], 52);
+  whole(await until(louis, (x) => !x.over.length), [72, 84], 60);
   await size(1400, 800);
   // He shows where the keyboard is, and that the pointer is on him.
   const rules = await chrome(`[...document.styleSheets].flatMap((s) => [...s.cssRules]).filter((r) => /#brand:(hover|active|focus-visible) img/.test(r.selectorText || ''))
@@ -446,9 +446,9 @@ test('a private window has the same Louis, on its tint, and no Claude panel in h
   await inw('window.resizeTo(1400, 800)');
   await until(() => inw('window.innerWidth'), (w) => Math.abs(w - 1400) < 4);
   let l = await until(() => louis(inw), (x) => !x.over.length);
-  whole(l, [64, 84], 52);
-  assert.deepEqual([l.tabrow, l.navrow], [64, 64]);
-  assert.equal(l.back, 'rgb(34, 31, 58)', "the private window's colour");
+  whole(l, [72, 84], 60);
+  assert.deepEqual([l.tabrow, l.navrow], [72, 0]);
+  assert.equal(l.back, 'rgba(0, 0, 0, 0)', "the private window's colours show around him");
   const menu = await b.ui('in-window', { window: id, ui: 'menu:louis' });
   assert.ok(menu.includes('Vertical tabs') && menu.includes('Settings'));
   await b.ui('tabs:layout', { vertical: true });
@@ -532,7 +532,7 @@ test('Appearance › Light in his menu changes how Loui looks, and is remembered
   assert.equal(saved(), 'light', 'kept in settings.json, for the next start');
   assert.deepEqual((await b.ui('menu:louis'))[0], ['Appearance', ['Dark', '✓ Light', 'Follow the system']]);
   assert.equal((await b.ui('titlebar')).color, '#E6EDEF', 'the window buttons follow');
-  assert.equal((await louis()).back, 'rgb(251, 252, 252)', 'and so does Louis');
+  assert.equal(await chrome(`getComputedStyle(document.querySelector('#brand img')).filter`), 'drop-shadow(rgba(20, 36, 44, 0.22) 0px 1px 1px) drop-shadow(rgba(20, 36, 44, 0.22) 0px 4px 6px) drop-shadow(rgba(20, 36, 44, 0.22) 0px 9px 14px)', 'and so does the shadow under Louis');
   await b.ui('menu:louis', { in: 'Appearance', click: 'Follow the system' });
   assert.equal(saved(), 'system');
   await b.ui('menu:louis', { in: 'Appearance', click: 'Dark' });

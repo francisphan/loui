@@ -36,6 +36,7 @@
   --on-claude: #FFFFFF;
   --danger: #A8281F;
   --amber: #A66300;
+  --lift: rgb(20 36 44 / .22); /* the shadow under Louis, where he sits over the toolbar */
   --panel-w: min(372px, 40vw); /* a narrow window keeps room for the toolbar */
   /* The window has no title bar: Loui's top row is the top of the window, and
      the system draws its window buttons over the right end of it (the Window
@@ -58,6 +59,7 @@
     --on-claude: #2A0F22;
     --danger: #F2988F;
     --amber: #E5B25D;
+    --lift: rgb(0 0 0 / .7);
   }
 }
 
@@ -167,30 +169,29 @@ body.vertical.sidebar-collapsed { --louis-w: 52px; --louis-h: 52px; --louis: 40p
 #brand:focus-visible { outline: none; }
 #brand:focus-visible img { outline: 2px solid var(--focus); outline-offset: -2px; }
 @media (prefers-reduced-motion: no-preference) { #brand img { transition: background-color .12s ease, scale .12s ease; } }
-/* With the tabs along the top, his column is the toolbar's colour and the
-   toolbar's line runs on under him, so he and the toolbar are one block.
-   Where the tab row meets him, the block curves out into it as an active
-   tab's foot does; the far-left tab, when active, closes the gap and merges
-   into him. */
-body:not(.vertical) #navrow { margin-left: var(--louis-in); }
-body:not(.vertical) #brand { background: var(--paper); box-shadow: inset 0 -1px 0 var(--rule); } /* the toolbar's line runs under him */
-body.driving:not(.vertical) #brand { box-shadow: inset 0 -2px 0 var(--claude); }
-body:not(.vertical) #tabrow::before {
+/* With the tabs along the top, he is a badge on the seam between the tab
+   row and the toolbar: the tab row starts to his right, the toolbar runs
+   under him from the window's edge, and a soft shadow lifts him off both.
+   His box has no colour of its own; his middle is on the seam. */
+body:not(.vertical) { --louis-w: 72px; --louis: 60px; }
+body:not(.vertical) #brand { z-index: 2; background: none; padding-bottom: max(0px, var(--louis-h) - 2 * var(--top-h)); }
+body:not(.vertical) #brand img { border-radius: 50%; filter: drop-shadow(0 1px 1px var(--lift)) drop-shadow(0 4px 6px var(--lift)) drop-shadow(0 9px 14px var(--lift)); }
+body:not(.vertical) #navrow { padding-left: var(--louis-w); }
+/* A bevel on the badge: light catches his top edge, his lower edge falls
+   into shade, and a sheen runs across the top half of the disc (the
+   picture's own size; its padding is outside it). */
+body:not(.vertical) #brand > img, body:not(.vertical) #brand::after { grid-area: 1 / 1; }
+body:not(.vertical) #brand::after {
   content: '';
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 8px;
-  height: 8px;
-  background: radial-gradient(circle at 100% 0, transparent 7.5px, var(--paper) 8px);
+  width: var(--louis);
+  height: var(--louis);
+  border-radius: 50%;
+  background: radial-gradient(ellipse 80% 60% at 50% 12%, rgb(255 255 255 / .3), rgb(255 255 255 / 0) 70%), linear-gradient(rgb(0 0 0 / 0) 50%, rgb(0 0 0 / .3));
+  box-shadow: inset 0 5px 7px rgb(255 255 255 / .5), inset 0 -7px 10px rgb(0 0 0 / .55), inset 0 0 4px rgb(0 0 0 / .3);
   pointer-events: none;
 }
-#tabrow #tabs:not(.more-before) .pins > .tab.active:first-child,
-#tabrow #tabs:not(.more-before) .pins:empty + .yours > .tab.active:first-child { border-top-left-radius: 0; box-shadow: -8px 0 0 var(--paper); }
-#tabrow #tabs:not(.more-before) .pins > .tab.active:first-child::before,
-#tabrow #tabs:not(.more-before) .pins:empty + .yours > .tab.active:first-child::before {
-  background: radial-gradient(circle at 100% 0, transparent 7.5px, var(--paper) 8px) right / 8px 8px no-repeat;
-}
+body:not(.vertical) #brand:active::after { scale: .95; }
+@media (prefers-reduced-motion: no-preference) { body:not(.vertical) #brand::after { transition: scale .12s ease; } }
 body.vertical #bar { padding-left: var(--louis-in); }
 #tabrow { container: tabrow / inline-size; }
 @container tabrow (max-width: 640px) {
